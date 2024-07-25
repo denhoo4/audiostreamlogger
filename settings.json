@@ -1,16 +1,1 @@
-{
-   "streams":[
-      {
-         "country":"Netherlands",
-         "name":"Glow_FM",
-         "folder":"glowfm",
-         "url":"https://stream.glowfm.nl/glowfm.mp3"
-      },
-      {
-         "country":"Netherlands",
-         "name":"RTV_Connect",
-         "folder":"rtvconnect",
-         "url":"https://stream.rtvconnect.nl/radio/8000/ffm-320-mp3"
-      }
-   ]
-}
+
