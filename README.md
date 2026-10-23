@@ -81,6 +81,10 @@ The `/settings` route is a login-gated admin screen (same-origin session cookie,
 - add, edit, and remove streams (country is picked from an ISO 3166-1 list);
 - set the page title and upload a favicon (branding);
 - see the worker's liveness (alive/stale, last-seen age, current job);
+- review a recordings analysis built from the `recordings` table: a per-stream summary (total
+  captured hours, stored bytes, recording count, average duration, earliest–latest range) and a
+  gap/coverage panel that compares expected versus present hour-slots over a date range and lists
+  the missing hours (backed by `GET /api/analysis/summary` and `GET /api/analysis/gaps`);
 - export a JSON backup (streams + safe config) or the raw database, and import a backup back
   (streams are upserted by folder; only an allowlist of config keys is applied).
 

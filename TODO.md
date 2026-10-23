@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (`job-queue` branch COMPLETE + APPROVED, fast-forward merged into main AND pushed to origin/main: the generic `worker` service replaces the old `cleaner` + `peakfilegenerator` containers, `settings.json` is removed entirely, a DB-driven scheduler in the api enqueues per-type hourly/daily/weekly jobs with a global single-job busy=SKIP lock, and an SSE live job view + Run-now admin UI land. All six FEATs (FEAT-001…006) implemented + tested and the full cross-FEAT integration verification + cold-data docker compose convergence smoke PASSED iteration 1 with no code fixes — see `.agents/tasks/job-queue-2026-10-23/verification.md` and item 10. `main` == `job-queue` == 428a385, pushed to origin/main. Earlier on main: settings-db-core step 1 (SQLite DB via node:sqlite after better-sqlite3 failed on Node 26 + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring). .env untracked on main. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13. `admin-config` branch (CHUNK A) — DONE: APPROVED by the review gate, rebased onto the current main tip and fast-forward MERGED into main AND PUSHED to origin/main. Chunk A delivers five admin-screen / DB-config features: editable page title + editable favicon upload, worker status in the admin screen + a player hour-selector limited to hours that actually exist, and DB backup/export + import. Also folded in: the underscore-to-space name-display workaround is removed (stream/station names shown VERBATIM everywhere incl. /settings2 keys). Verified green in node:26-bookworm (host has no node): api 69 / worker 15 node:test, frontend `npm run build` + 14 vitest. See the `admin-config` branch section below. ALSO: `recorder-resilience` branch (CHUNK B) — ran in PARALLEL with admin-config, strictly confined to `src/recorder/` so the two do not collide; now IMPLEMENTED + TESTED + COMMITTED, semantic review APPROVED, and fast-forward MERGED into main AND PUSHED to origin/main (main == recorder-resilience == b293435; branch also pushed to origin with upstream tracking): per-stream ffmpeg supervision with capped backoff, recorder-scope graceful shutdown (SIGTERM/SIGINT), greppable per-stream error/gap logging, and a scope-added periodic poll that auto-starts a newly-added stream for the rest of the current hour (recorder-only Option A), see item 11 and the `recorder-resilience` branch section below. ALSO IN PROGRESS: `recordings-analysis` branch (CHUNK C) — FEAT-001 (api foundation) DONE: a `recordings` table + indexes, the pure filename parser + analysis helpers + upsert data-access, the requireAuth `GET /api/analysis/summary` + `/api/analysis/gaps` router, and a one-time startup backfill reconcile, all in `src/api` with three new node:test files green (api 83 node:test in node:26-bookworm); `/api/settings2` unchanged; recorder/worker/frontend/compose untouched (FEAT-002..004). FEAT-002 (recorder writes rows + compose `:ro`→rw flip) DONE. FEAT-003 (worker fills duration/size via ffprobe + cleaner removes the recordings row; `parseRecordingParts` + `src/worker/recordings-db.js`) DONE: `cd src/worker && node --test` green (32 tests) in node:26-bookworm, api/recorder/frontend untouched. FEAT-004 (frontend analysis view) DONE: typed `getAnalysisSummary`/`getAnalysisGaps` clients + response interfaces in `src/frontend/src/api.ts`, a new `RecordingsAnalysis.tsx` admin section (per-stream table + gaps/coverage panel) rendered in `SettingsPage.tsx`, and a vitest component test; `cd src/frontend && npm install && npm run build` + `npm test` green (16 tests) in node:26-bookworm, no backend/public-player code touched. All four CHUNK C FEATs (FEAT-001..004) are now implemented + tested on `recordings-analysis`, and the cross-FEAT integration verification PASSED iteration 1 (api 83 / worker 32 / recorder 35 node:test, frontend build + 16 vitest, `docker compose config` parses with the recorder data mount read-write) with ONE test-only fix — the backfill test now seeds the temp-DB require.cache injection so it loads in the toolchain. See the "Larger feature" item 9.)
+Last updated: 2026-10-23 (`job-queue` branch COMPLETE + APPROVED, fast-forward merged into main AND pushed to origin/main: the generic `worker` service replaces the old `cleaner` + `peakfilegenerator` containers, `settings.json` is removed entirely, a DB-driven scheduler in the api enqueues per-type hourly/daily/weekly jobs with a global single-job busy=SKIP lock, and an SSE live job view + Run-now admin UI land. All six FEATs (FEAT-001…006) implemented + tested and the full cross-FEAT integration verification + cold-data docker compose convergence smoke PASSED iteration 1 with no code fixes — see `.agents/tasks/job-queue-2026-10-23/verification.md` and item 10. `main` == `job-queue` == 428a385, pushed to origin/main. Earlier on main: settings-db-core step 1 (SQLite DB via node:sqlite after better-sqlite3 failed on Node 26 + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring). .env untracked on main. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13. `admin-config` branch (CHUNK A) — DONE: APPROVED by the review gate, rebased onto the current main tip and fast-forward MERGED into main AND PUSHED to origin/main. Chunk A delivers five admin-screen / DB-config features: editable page title + editable favicon upload, worker status in the admin screen + a player hour-selector limited to hours that actually exist, and DB backup/export + import. Also folded in: the underscore-to-space name-display workaround is removed (stream/station names shown VERBATIM everywhere incl. /settings2 keys). Verified green in node:26-bookworm (host has no node): api 69 / worker 15 node:test, frontend `npm run build` + 14 vitest. See the `admin-config` branch section below. ALSO: `recorder-resilience` branch (CHUNK B) — ran in PARALLEL with admin-config, strictly confined to `src/recorder/` so the two do not collide; now IMPLEMENTED + TESTED + COMMITTED, semantic review APPROVED, and fast-forward MERGED into main AND PUSHED to origin/main (main == recorder-resilience == b293435; branch also pushed to origin with upstream tracking): per-stream ffmpeg supervision with capped backoff, recorder-scope graceful shutdown (SIGTERM/SIGINT), greppable per-stream error/gap logging, and a scope-added periodic poll that auto-starts a newly-added stream for the rest of the current hour (recorder-only Option A), see item 11 and the `recorder-resilience` branch section below. ALSO IN PROGRESS: `recordings-analysis` branch (CHUNK C) — FEAT-001 (api foundation) DONE: a `recordings` table + indexes, the pure filename parser + analysis helpers + upsert data-access, the requireAuth `GET /api/analysis/summary` + `/api/analysis/gaps` router, and a one-time startup backfill reconcile, all in `src/api` with three new node:test files green (api 83 node:test in node:26-bookworm); `/api/settings2` unchanged; recorder/worker/frontend/compose untouched (FEAT-002..004). FEAT-002 (recorder writes rows + compose `:ro`→rw flip) DONE. FEAT-003 (worker fills duration/size via ffprobe + cleaner removes the recordings row; `parseRecordingParts` + `src/worker/recordings-db.js`) DONE: `cd src/worker && node --test` green (32 tests) in node:26-bookworm, api/recorder/frontend untouched. FEAT-004 (frontend analysis view) DONE: typed `getAnalysisSummary`/`getAnalysisGaps` clients + response interfaces in `src/frontend/src/api.ts`, a new `RecordingsAnalysis.tsx` admin section (per-stream table + gaps/coverage panel) rendered in `SettingsPage.tsx`, and a vitest component test; `cd src/frontend && npm install && npm run build` + `npm test` green (16 tests) in node:26-bookworm, no backend/public-player code touched. All four CHUNK C FEATs (FEAT-001..004) are now implemented + tested on `recordings-analysis`, and the cross-FEAT integration verification PASSED iteration 1 (api 83 / worker 32 / recorder 35 node:test, frontend build + 16 vitest, `docker compose config` parses with the recorder data mount read-write) with ONE test-only fix — the backfill test now seeds the temp-DB require.cache injection so it loads in the toolchain. See the "Larger feature" item 9.) CHUNK C NOW FINALIZED: semantic review APPROVED (two LOW, non-blocking findings), a final green re-check in node:26-bookworm reproduced api 83 / worker 32 / recorder 35 node:test + frontend build/16 vitest + `docker compose config`, and `recordings-analysis` was fast-forward MERGED into `main` (main == recordings-analysis == 835d515). NOT pushed (release handled separately). The recorder `./data` mount is now read-write, and the admin screen gained a recordings-analysis section (per-stream table + gap/coverage panel) backed by the `recordings` table + `GET /api/analysis/summary`/`/gaps`.
 
 ---
 
@@ -363,9 +363,9 @@ Quick win (frontend; can fold into the settings workflow or stand alone, NO DB n
       (/settings2 is public). The day picker was left unconstrained for now (noted as optional in
       the step).
 
-Larger feature (AFTER the DB exists; separate later workflow) — IN PROGRESS on branch
-`recordings-analysis` (CHUNK C), decomposed into FEAT-001..004 under
-`.agents/tasks/audiostreamlogger-recordings-analysis-2026-10-23/`:
+Larger feature (AFTER the DB exists; separate later workflow) — DONE, review-APPROVED, and
+fast-forward merged into `main` (NOT pushed) on branch `recordings-analysis` (CHUNK C), decomposed
+into FEAT-001..004 under `.agents/tasks/audiostreamlogger-recordings-analysis-2026-10-23/`:
 - [x] FEAT-001 (api foundation) DONE on `recordings-analysis`: `recordings` table + indexes in
       `src/api/db/schema.js` (one row per (stream_folder,date,hour) hour-slot, keyed on
       stream_folder TEXT — NOT a FK; status recording/complete/partial/missing; UNIQUE
@@ -438,6 +438,12 @@ Larger feature (AFTER the DB exists; separate later workflow) — IN PROGRESS on
       `require.cache` injection, so `db/index.js` tried to open the real `/usr/src/app/data/app.db` and
       threw in the toolchain; added the same before/after temp-DB injection the sibling recordings
       tests use (test-only; `reconcilePlan` behavior unchanged). api now 83/83.
+- [x] FINALIZE DONE: semantic review APPROVED (two LOW, non-blocking findings — no
+      analysis route-integration test and a cosmetic `file_path` inconsistency across the three
+      writers; see `review.json`). Final green re-check in node:26-bookworm (host has no node):
+      api 83/83, worker 32/32, recorder 35/35 node:test, frontend `npm run build` clean + 16/16
+      vitest, and `docker compose config` parses with the recorder `./data` mount read-write.
+      Fast-forward merged into `main` (main == recordings-analysis == 835d515). NOT pushed.
 - Touches all layers (recorder/worker/api/frontend); natural next step now the SQLite DB exists.
   Deliberately NOT in the first settings-DB workflow (already large).
 
@@ -739,6 +745,40 @@ existing startup catch-up, but triggered by a stream being ADDED rather than by 
   conflict). NOT folded into Chunk B (its plan was already finalized as supervision/shutdown/logging
   only). Decide Option A vs B with the user at build time.
 
+### 17. Stream list ordering, default stream, and country-grouped view (user wish)
+A cluster of related ordering/organization features for the stream list (the data-model parts can
+land before the later full frontend overhaul; the richer UI pieces pair with it):
+- [ ] Manual ORDER of the logger/stream list: let the user arrange the streams in a chosen order
+      (not just insertion/id order). Needs a `sort_order`/`position` column on the `streams` table
+      (+ migration), ordering applied in GET /api/settings / /api/streams, and a reorder UI in the
+      admin screen (drag-handle or up/down arrows) that persists the new order.
+- [ ] DEFAULT stream selectable from the dashboard: an app_config key (e.g. `default_stream_folder`)
+      + a control in the admin screen to pick it; the player preselects/loads that stream on open.
+      Validate the chosen folder still exists.
+- [ ] COUNTRY-GROUPED view: show the stream list grouped by country with the stations indented
+      under each country. The user must be able to order the COUNTRIES themselves AND order the
+      stations WITHIN each country. Data model: a country ordering + a per-country station ordering
+      (e.g. country_position + the stream sort_order scoped within country). UI: a grouped/tree
+      layout with reordering at both levels.
+- Note: the grouped-tree UI overlaps with the later full frontend overhaul (user wants that
+      separately, not now); the DB/ordering model + API can be built independently of the visual
+      overhaul. Sequence the data model first, the rich tree UI with/after the overhaul.
+
+### 18. Reconcile/full-sync worker job between disk and the recordings DB (user wish)
+The recordings table (Chunk C) is populated incrementally by the recorder/worker/cleaner, plus a
+one-time startup backfill. But disk and DB can drift over time (a crash mid-write, a file removed
+out-of-band, a missed event). Add a periodic FULL SYNC that reconciles both directions:
+- [ ] New worker JOB TYPE "reconcile" (alongside cleaner + peakfilegenerator) — fits the existing
+      job-queue/worker + scheduler model, so it can be scheduled (e.g. daily) and run manually too.
+- [ ] Two-way reconcile: files on disk with no DB row -> insert; DB rows whose file no longer
+      exists -> remove/mark missing; fix mismatched size/duration/status. Reuse the startup-backfill
+      logic (generalize it into the shared reconcile so there's one implementation).
+- [ ] Respect the global single-job lock (busy=skip) like the other jobs; log a summary
+      (added/removed/fixed counts) visible in the SSE job viewer.
+- [ ] Expose it in the admin scheduler UI as a schedulable type with a "Run now" button.
+Order: AFTER Chunk C lands (needs the recordings table + job model). Natural follow-on; could fold
+into Chunk C follow-ups or be its own small workflow.
+
 ### 14. Validate stream URLs are reachable/valid when setting them (user wish)
 Two levels — decide at build time how deep to go:
 - [ ] Format validation (already done in settings-db-core / stream CRUD: must be a valid http(s)
@@ -878,7 +918,14 @@ Then (MEDIUM):
       every service exits. (Superseded by the DB migration — settings.json is going away entirely.)
 
 Lower (LOW):
+- [ ] Page title: the editable app title (Chunk A) is applied on the MAIN/player page via runtime
+      document.title, but the /settings admin screen's document.title does NOT update to the
+      configured title (still shows the default/static value). Fix: apply the app_config title to
+      document.title on the settings route too (shared effect/hook so both routes set it from the
+      same source). (Reported by user 2026-10-23; not urgent.)
 - [ ] `recorder.js`: ffmpeg errors are swallowed silently (only console.error), no retry/gap log.
+      NOTE: largely addressed by Chunk B (per-stream supervision + greppable gap/error logging);
+      re-check whether this LOW item is now fully covered and close it if so.
 - [x] `index.js` mounted the same util router on both `/util` and `/logger` (duplicate route).
       RESOLVED in the api-split: `/logger` alias dropped in `api/index.js`.
 - [ ] `express.json()` without a `limit` on the util router (unbounded body).
