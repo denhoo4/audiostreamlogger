@@ -1,47 +1,47 @@
+/**
+ * /api routes: public stream projections + authenticated stream CRUD.
+ *
+ * Streams are sourced from the SQLite DB (FEAT-001/FEAT-002), replacing the old
+ * settings.json reads. Two read shapes:
+ *   - GET /settings  (PUBLIC)  -> {country,name,folder,url} only (player selector).
+ *   - GET /streams   (requireAuth) -> full rows with id + timestamps (admin).
+ * Writes (POST/PUT/DELETE /streams) are all behind requireAuth.
+ */
 const express = require('express');
 const router = express.Router();
-const fs = require('fs');
-const path = require('path');
-const { buildBrowseTree } = require('../lib/settings-transform');
+const { requireAuth } = require('../auth/middleware');
+const { validateStream } = require('../lib/validate-stream');
+const { buildSettings2 } = require('../services/browse');
+const {
+    listStreams,
+    getStream,
+    createStream,
+    updateStream,
+    deleteStream,
+    DuplicateFolderError,
+} = require('../services/streams');
 
+// GET /api/settings (PUBLIC) — player selector; shaped like the old
+// settings.json.streams array (no id/timestamps).
 router.get('/settings', (req, res) => {
-    const filePath = path.join(__dirname, '../settings.json');
-
-    fs.readFile(filePath, 'utf-8', (err, fileContent) => {
-        if (err) {
-            console.error('Error reading settings.json:', err);
-            return res.status(500).json({ error: `Internal Server Error: ${err.message}` });
-        }
-
-        try {
-            const settingsData = JSON.parse(fileContent);
-            res.json(settingsData.streams);
-        } catch (jsonError) {
-            console.error('Error parsing JSON:', jsonError);
-            res.status(500).json({ error: `Internal Server Error: ${jsonError.message}` });
-        }
-    });
+    try {
+        const streams = listStreams().map(({ country, name, folder, url }) => ({
+            country,
+            name,
+            folder,
+            url,
+        }));
+        res.json(streams);
+    } catch (err) {
+        console.error('Error reading streams:', err);
+        res.status(500).json({ error: `Internal Server Error: ${err.message}` });
+    }
 });
 
+// GET /api/settings2 (PUBLIC) — nested browse tree from DB streams + folder scan.
 router.get('/settings2', async (req, res) => {
-    const filePath = path.join(__dirname, '../settings.json');
-
     try {
-        const fileContent = await fs.promises.readFile(filePath, 'utf-8');
-        const settingsData = JSON.parse(fileContent).streams;
-
-        const promises = settingsData.map(async (station) => {
-            const folder = station["folder"];
-            const audioFolderPath = path.join(__dirname, '../audio');
-            const folderPath = path.join(audioFolderPath, folder);
-
-            const logs = await folderContent(folderPath);
-            station['logs'] = logs;
-            station['test'] = folderPath;
-        });
-
-        await Promise.all(promises);
-        const transformedData = buildBrowseTree(settingsData);
+        const transformedData = await buildSettings2();
         res.json(transformedData);
     } catch (error) {
         console.error('Error:', error);
@@ -49,68 +49,91 @@ router.get('/settings2', async (req, res) => {
     }
 });
 
-async function folderContent(folderPath) {
+// GET /api/streams (requireAuth) — admin list with id + timestamps.
+router.get('/streams', requireAuth, (req, res) => {
     try {
-      let files;
-      try {
-        files = await fs.promises.readdir(folderPath);
-      } catch (err) {
-        // A stream folder only exists once the recorder has written its first
-        // file. Until then (e.g. a freshly deployed stack) treat the station as
-        // having no logs rather than failing the whole /settings2 response.
-        if (err.code === 'ENOENT') {
-          return {};
-        }
-        throw err;
-      }
-  
-      const dateMap = new Map();
-  
-      files.forEach((file) => {
-        const match = file.match(/(\d{4})-(\d{2})-(\d{2})-(\d{2})\.mp3$/);
-        if (match) {
-          const [year, month, day, hour] = match.slice(1);
-  
-          if (!dateMap.has(year)) {
-            dateMap.set(year, new Map());
-          }
-  
-          const yearMap = dateMap.get(year);
-  
-          if (!yearMap.has(month)) {
-            yearMap.set(month, new Map());
-          }
-  
-          const monthMap = yearMap.get(month);
-  
-          if (!monthMap.has(day)) {
-            monthMap.set(day, new Set());
-          }
-  
-          const daySet = monthMap.get(day);
-          daySet.add(hour);
-        }
-      });
-  
-      const result = {};
-  
-      for (const [year, yearMap] of dateMap) {
-        result[year] = {};
-  
-        for (const [month, monthMap] of yearMap) {
-          result[year][month] = {};
-  
-          for (const [day, daySet] of monthMap) {
-            result[year][month][day] = Array.from(daySet);
-          }
-        }
-      }
-  
-      return result;
+        res.json(listStreams());
     } catch (err) {
-      console.error(`Error reading folder: ${err}`);
-      throw err;
+        console.error('Error listing streams:', err);
+        res.status(500).json({ error: `Internal Server Error: ${err.message}` });
     }
-  }
+});
 
-  module.exports = router;
+// POST /api/streams (requireAuth) — create a stream.
+router.post('/streams', requireAuth, (req, res) => {
+    const body = req.body || {};
+    const invalid = validateStream(body);
+    if (invalid) {
+        return res.status(400).json(invalid);
+    }
+
+    try {
+        const created = createStream({
+            country: body.country,
+            name: body.name,
+            folder: body.folder,
+            url: body.url,
+        });
+        return res.status(201).json(created);
+    } catch (err) {
+        if (err instanceof DuplicateFolderError) {
+            return res.status(409).json({ error: 'folder already in use' });
+        }
+        console.error('Error creating stream:', err);
+        return res.status(500).json({ error: `Internal Server Error: ${err.message}` });
+    }
+});
+
+// PUT /api/streams/:id (requireAuth) — update a stream.
+router.put('/streams/:id', requireAuth, (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: 'invalid id', field: 'id' });
+    }
+
+    const body = req.body || {};
+    const invalid = validateStream(body);
+    if (invalid) {
+        return res.status(400).json(invalid);
+    }
+
+    try {
+        const updated = updateStream(id, {
+            country: body.country,
+            name: body.name,
+            folder: body.folder,
+            url: body.url,
+        });
+        if (!updated) {
+            return res.status(404).json({ error: 'stream not found' });
+        }
+        return res.json(updated);
+    } catch (err) {
+        if (err instanceof DuplicateFolderError) {
+            return res.status(409).json({ error: 'folder already in use' });
+        }
+        console.error('Error updating stream:', err);
+        return res.status(500).json({ error: `Internal Server Error: ${err.message}` });
+    }
+});
+
+// DELETE /api/streams/:id (requireAuth) — remove a stream.
+router.delete('/streams/:id', requireAuth, (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: 'invalid id', field: 'id' });
+    }
+
+    try {
+        const removed = deleteStream(id);
+        if (!removed) {
+            return res.status(404).json({ error: 'stream not found' });
+        }
+        return res.json({ ok: true });
+    } catch (err) {
+        console.error('Error deleting stream:', err);
+        return res.status(500).json({ error: `Internal Server Error: ${err.message}` });
+    }
+});
+
+module.exports = router;
