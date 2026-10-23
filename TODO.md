@@ -175,6 +175,17 @@ EXECUTION (broken into sequential, mergeable steps to keep recorder.js/compose c
     DECIDED for step 2's auth wiring: implement a node:sqlite-backed server-side express-session
     store (Option A), so logout AND change-password can invalidate sessions server-side (keeps the
     revocable-session decision; no extra infra). Stateless cookies were rejected.
+  - NOTE (frontend admin view landed): the `/settings` React view is in — a `window.location`
+    path check in `main.tsx` (no router added) renders `SettingsPage` for `/settings` and the
+    unchanged player elsewhere. Logged out shows a login form; logged in shows the stream CRUD
+    table (country as an ISO 3166-1 `<select>`: option value = alpha-2 code, label = full name;
+    read view maps code -> full name) plus a change-password form and logout. Typed
+    `credentials:'same-origin'` client fns added to `api.ts` (`getAuthMe`/`postLogin`/`postLogout`/
+    `changePassword`/`getStreams`/`createStream`/`updateStream`/`deleteStream`) with a `StreamRecord`
+    type (id + timestamps) distinct from the public `Stream`. The frontend bundles its own copy of
+    `iso-3166-1.json` (identical content to the api copy; keep in sync). Also fixed a stale
+    pre-existing assertion in `App.test.tsx` (`dateTimeSelector` -> the actual `dateSelector`/
+    `hourSelector`) so the Vitest suite is green; player behavior unchanged.
 - [ ] step 2: cron + retention into the DB + settings-screen UI; workers reload without restart.
   This is where settings.json is fully removed.
 - [ ] step 3: realtime log viewer in admin (SSE) + conventional logging in the services.

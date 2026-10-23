@@ -10,3 +10,75 @@
   border-bottom: 1px solid #333333;
   border-left: 1px solid #cccccc;
 }
+
+/* --- Settings/admin view (/settings) ------------------------------------ */
+.settings-page {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 16px;
+  font: 14px Arial, sans-serif;
+}
+
+.settings-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-section {
+  margin-top: 24px;
+}
+
+.settings-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+}
+
+.settings-table th,
+.settings-table td {
+  border: 1px solid #cccccc;
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.settings-table th {
+  background-color: #eeeeee;
+}
+
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 420px;
+  margin-top: 16px;
+}
+
+.settings-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-form-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-error {
+  color: #b00020;
+  margin: 4px 0;
+}
+
+.settings-success {
+  color: #0a7a0a;
+  margin: 4px 0;
+}
