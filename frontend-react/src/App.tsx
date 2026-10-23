@@ -23,27 +23,39 @@ function round1(x: number): number {
   return Math.round(x * 10) / 10;
 }
 
-/** Extract Y / M(2) / D(2) / H(2) from the datetime input value. */
-function parseDateParts(value: string): {
+/**
+ * Build Y / M(2) / D(2) / H(2) parts from a date-input value ("YYYY-MM-DD")
+ * and an hour string ("00".."23", 24-hour clock). Returns null if either is
+ * missing or malformed.
+ */
+function parseDateParts(
+  date: string,
+  hour: string,
+): {
   year: string;
   month: string;
   day: string;
   hour: string;
 } | null {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
-  const year = String(d.getFullYear());
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  const hour = String(d.getHours()).padStart(2, "0");
-  return { year, month, day, hour };
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!m) return null;
+  if (!/^\d{2}$/.test(hour)) return null;
+  const h = Number(hour);
+  if (h < 0 || h > 23) return null;
+  return { year: m[1], month: m[2], day: m[3], hour };
 }
+
+/** Hours "00".."23" for the 24-hour selector. */
+const HOURS: string[] = Array.from({ length: 24 }, (_, i) =>
+  String(i).padStart(2, "0"),
+);
 
 export default function App() {
   const ws = useWavesurfer();
   const [streams, setStreams] = useState<Stream[]>([]);
   const [selectedFolder, setSelectedFolder] = useState("");
-  const [dateTime, setDateTime] = useState("");
+  const [date, setDate] = useState("");
+  const [hour, setHour] = useState("");
   const [downloadWaiting, setDownloadWaiting] = useState(false);
 
   // #downloadbutton anchor attributes (set on load).
@@ -55,8 +67,10 @@ export default function App() {
   );
 
   const selectionEnabled = ws.hasRegion;
-  const dateTimeRef = useRef(dateTime);
-  dateTimeRef.current = dateTime;
+  // Keep the latest date/hour available to the download handler without
+  // re-creating it on every keystroke.
+  const dateHourRef = useRef({ date, hour });
+  dateHourRef.current = { date, hour };
 
   // Populate the stream selector from GET /api/settings (value = folder,
   // text = name with underscores replaced by spaces), matching the old app.
@@ -95,17 +109,17 @@ export default function App() {
   // Load (#load): build URLs, set download anchor, try peaks JSON then fall back
   // to decoding the mp3. NaN guard with the Dutch alert. Runs the reset routine.
   const handleLoad = useCallback(async () => {
-    const parts = parseDateParts(dateTime);
+    const parts = parseDateParts(date, hour);
     if (!selectedFolder || !parts) {
-      alert("Wel ff een uur selecteren hè!");
+      alert("Wel ff een dag en uur selecteren hè!");
       return;
     }
-    const { year, month, day, hour } = parts;
-    const mp3Url = audioMp3Url(selectedFolder, year, month, day, hour);
-    const jsonUrl = audioJsonUrl(selectedFolder, year, month, day, hour);
+    const { year, month, day, hour: h } = parts;
+    const mp3Url = audioMp3Url(selectedFolder, year, month, day, h);
+    const jsonUrl = audioJsonUrl(selectedFolder, year, month, day, h);
 
     setDownloadHref(mp3Url);
-    setDownloadName(`${selectedFolder}-${year}-${month}-${day}-${hour}.mp3`);
+    setDownloadName(`${selectedFolder}-${year}-${month}-${day}-${h}.mp3`);
 
     ws.reset();
 
@@ -117,13 +131,14 @@ export default function App() {
     } catch {
       ws.load(mp3Url);
     }
-  }, [dateTime, selectedFolder, ws]);
+  }, [date, hour, selectedFolder, ws]);
 
   // Download Selection (#downloadRegionButton): show wait message, POST the
   // selection, trigger a browser download of the returned mp3, hide the message.
   const handleDownloadSelection = useCallback(async () => {
     const region = ws.getRegion();
-    const parts = parseDateParts(dateTimeRef.current);
+    const { date: d, hour: h } = dateHourRef.current;
+    const parts = parseDateParts(d, h);
     if (!region || !selectedFolder || !parts) return;
 
     setDownloadWaiting(true);
@@ -236,11 +251,23 @@ export default function App() {
           ))}
         </select>
         <input
-          type="datetime-local"
-          id="dateTimeSelector"
-          value={dateTime}
-          onChange={(e) => setDateTime(e.target.value)}
+          type="date"
+          id="dateSelector"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
         />
+        <select
+          id="hourSelector"
+          value={hour}
+          onChange={(e) => setHour(e.target.value)}
+        >
+          <option value="">Uur</option>
+          {HOURS.map((h) => (
+            <option key={h} value={h}>
+              {h}:00
+            </option>
+          ))}
+        </select>
         <button id="load" onClick={handleLoad}>
           Inladen!
         </button>

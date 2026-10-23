@@ -100,7 +100,21 @@ export function useWavesurfer(): UseWavesurfer {
     ws.on("pause", onPause);
     ws.on("finish", onFinish);
 
+    // Mouse interactions scoped to the waveform element only (not the page):
+    //   double-click  -> play
+    //   right-click    -> pause (and suppress the browser context menu)
+    const container = containerRef.current;
+    const onDblClick = () => ws.play();
+    const onContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      ws.pause();
+    };
+    container.addEventListener("dblclick", onDblClick);
+    container.addEventListener("contextmenu", onContextMenu);
+
     return () => {
+      container.removeEventListener("dblclick", onDblClick);
+      container.removeEventListener("contextmenu", onContextMenu);
       ws.destroy();
       wsRef.current = null;
       regionsRef.current = null;
