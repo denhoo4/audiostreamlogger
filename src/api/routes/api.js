@@ -17,6 +17,7 @@ const {
     setConfig,
     ConfigValidationError,
 } = require('../services/app-config');
+const { getJob } = require('../services/jobs');
 const {
     listStreams,
     getStream,
@@ -79,6 +80,31 @@ router.put('/app-config/title', requireAuth, (req, res) => {
             return res.status(400).json({ error: err.error, field: 'title' });
         }
         console.error('Error updating app_title:', err);
+        return res.status(500).json({ error: `Internal Server Error: ${err.message}` });
+    }
+});
+
+// GET /api/worker/status (requireAuth) — worker liveness for the admin screen.
+// Reads the informational app_config rows the worker UPSERTs on its 5s timer and
+// resolves the current job (if any) from the jobs table. Never 500s on a missing
+// key: absent values are returned as null.
+router.get('/worker/status', requireAuth, (req, res) => {
+    try {
+        const last_heartbeat = getConfig('worker_last_heartbeat') ?? null;
+        const status = getConfig('worker_status') ?? null;
+        const currentJobId = getConfig('worker_current_job_id');
+
+        let current_job = null;
+        if (currentJobId !== undefined && currentJobId !== '') {
+            const id = Number(currentJobId);
+            if (Number.isInteger(id) && id > 0) {
+                current_job = getJob(id) ?? null;
+            }
+        }
+
+        return res.json({ last_heartbeat, status, current_job });
+    } catch (err) {
+        console.error('Error reading worker status:', err);
         return res.status(500).json({ error: `Internal Server Error: ${err.message}` });
     }
 });

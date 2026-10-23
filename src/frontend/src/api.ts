@@ -362,6 +362,29 @@ export async function deleteStream(id: number): Promise<void> {
 // --- Job-queue admin client (/api/jobs + /api/schedules + /api/config) ----
 // All behind requireAuth; same-origin credentials carry the session cookie.
 
+/**
+ * GET /api/worker/status -> worker liveness for the admin screen (requireAuth).
+ * `current_job` is the full jobs row the worker is executing, or null when idle
+ * / the job id is unknown. Missing status keys come back as null (never 500).
+ */
+export async function getWorkerStatus(): Promise<{
+  last_heartbeat: string | null;
+  status: string | null;
+  current_job: JobRecord | null;
+}> {
+  const res = await fetch(`${window.location.origin}/api/worker/status`, {
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as {
+    last_heartbeat: string | null;
+    status: string | null;
+    current_job: JobRecord | null;
+  };
+}
+
 /** GET /api/jobs?limit= -> recent jobs, newest first (requireAuth). */
 export async function listJobs(limit = 50): Promise<JobRecord[]> {
   const res = await fetch(

@@ -39,6 +39,34 @@ function writeHeartbeat() {
     }
 }
 
+// Module-level id of the job currently being executed (null when idle). Set in
+// runClaimedJob before the handler runs and cleared in its finally, so the 5s
+// status timer can report 'running'/'idle' + the live job id without coupling
+// to the tick body.
+let currentJobId = null;
+
+/**
+ * Best-effort status report into app_config (design: FEAT-002). UPSERTs
+ * worker_last_heartbeat / worker_status / worker_current_job_id over the
+ * worker's own RW handle, each inside withBusyRetry, all wrapped in try/catch so
+ * a contended or failed status write only logs and NEVER crashes the worker. The
+ * /tmp/heartbeat file write (compose healthcheck) stays separate and intact.
+ */
+function writeWorkerStatus(db, { status, currentJobId }) {
+    try {
+        const upsert = db.prepare(
+            'INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+        );
+        withBusyRetry(() => upsert.run('worker_last_heartbeat', new Date().toISOString()));
+        withBusyRetry(() => upsert.run('worker_status', status));
+        withBusyRetry(() =>
+            upsert.run('worker_current_job_id', currentJobId == null ? '' : String(currentJobId))
+        );
+    } catch (err) {
+        console.error('worker: failed to write status:', err.message);
+    }
+}
+
 /**
  * Keep the last OUTPUT_CAP_BYTES bytes of `output`, prefixed with a truncation
  * marker. Operates on a UTF-8 Buffer so the budget is byte-exact; the tail is
@@ -115,12 +143,17 @@ function runClaimedJob(db, job) {
         console.error(`worker: job ${job.id} (${job.type}) failed: unknown type`);
         return;
     }
+    // Track the live job id so the 5s status timer reports 'running' + this id;
+    // always cleared in the finally even if the handler throws.
+    currentJobId = job.id;
     try {
         const output = handler(db);
         writeTerminal(db, job.id, 'done', capOutput(output));
     } catch (err) {
         writeTerminal(db, job.id, 'failed', capOutput(String(err && err.stack ? err.stack : err)));
         console.error(`worker: job ${job.id} (${job.type}) failed: ${err.message}`);
+    } finally {
+        currentJobId = null;
     }
 }
 
@@ -147,8 +180,16 @@ function start() {
     reclaimStaleRunning(db);
     console.log('worker OK');
 
-    // Independent heartbeat timer — never coupled to the tick body.
-    setInterval(writeHeartbeat, HEARTBEAT_MS);
+    // Independent heartbeat timer — never coupled to the tick body. It writes
+    // the /tmp/heartbeat file (compose healthcheck) AND a best-effort app_config
+    // status row (status derived from whether a job is currently running).
+    setInterval(() => {
+        writeHeartbeat();
+        writeWorkerStatus(db, {
+            status: currentJobId === null ? 'idle' : 'running',
+            currentJobId,
+        });
+    }, HEARTBEAT_MS);
 
     // Non-overlapping poll loop.
     function loop() {
@@ -174,5 +215,6 @@ module.exports = {
     reclaimStaleRunning,
     runClaimedJob,
     tickOnce,
+    writeWorkerStatus,
     OUTPUT_CAP_BYTES,
 };

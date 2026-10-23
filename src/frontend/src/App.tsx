@@ -5,8 +5,11 @@ import {
   exportSelection,
   getPublicConfig,
   getSettings,
+  getSettings2,
+  type Settings2,
   type Stream,
 } from "./api";
+import { displayNameForFolder, existingHoursFor } from "./player-hours";
 import { formatTime, useWavesurfer } from "./useWavesurfer";
 
 // Skip buttons: label + data-value (seconds), 1:1 with the legacy UI.
@@ -46,14 +49,10 @@ function parseDateParts(
   return { year: m[1], month: m[2], day: m[3], hour };
 }
 
-/** Hours "00".."23" for the 24-hour selector. */
-const HOURS: string[] = Array.from({ length: 24 }, (_, i) =>
-  String(i).padStart(2, "0"),
-);
-
 export default function App() {
   const ws = useWavesurfer();
   const [streams, setStreams] = useState<Stream[]>([]);
+  const [tree, setTree] = useState<Settings2>({});
   const [selectedFolder, setSelectedFolder] = useState("");
   const [date, setDate] = useState("");
   const [hour, setHour] = useState("");
@@ -68,6 +67,18 @@ export default function App() {
   );
 
   const selectionEnabled = ws.hasRegion;
+
+  // Hours that actually have a recording for the selected stream + date, derived
+  // from the public /api/settings2 tree. Empty until a valid stream + date are
+  // chosen (or when that day has no recordings), so the selector then shows only
+  // the "Uur" placeholder.
+  const availableHours = (() => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+    if (!selectedFolder || !m) return [];
+    const displayName = displayNameForFolder(streams, selectedFolder);
+    if (displayName === null) return [];
+    return existingHoursFor(tree, displayName, m[1], m[2], m[3]);
+  })();
   // Keep the latest date/hour available to the download handler without
   // re-creating it on every keystroke.
   const dateHourRef = useRef({ date, hour });
@@ -86,6 +97,23 @@ export default function App() {
       })
       .catch((err) => {
         console.error("Kon streams niet laden:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Load the public browse tree so the hour selector can offer only the hours
+  // that actually have a recording for the selected stream + day. Public
+  // endpoint, so this works for anonymous users too.
+  useEffect(() => {
+    let cancelled = false;
+    getSettings2()
+      .then((data) => {
+        if (!cancelled) setTree(data);
+      })
+      .catch((err) => {
+        console.error("Kon opnames niet laden:", err);
       });
     return () => {
       cancelled = true;
@@ -280,7 +308,7 @@ export default function App() {
           onChange={(e) => setHour(e.target.value)}
         >
           <option value="">Uur</option>
-          {HOURS.map((h) => (
+          {availableHours.map((h) => (
             <option key={h} value={h}>
               {h}:00
             </option>

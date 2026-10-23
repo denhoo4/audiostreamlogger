@@ -103,6 +103,21 @@ function validateConfig(key, value) {
         return;
     }
 
+    // worker_last_heartbeat / worker_status / worker_current_job_id are
+    // informational status rows written DIRECTLY by the worker over its own
+    // handle (not through setConfig). The passthrough branches here accept any
+    // string so a future api-side setConfig on these keys does not throw.
+    if (
+        key === 'worker_last_heartbeat' ||
+        key === 'worker_status' ||
+        key === 'worker_current_job_id'
+    ) {
+        if (typeof value !== 'string') {
+            throw new ConfigValidationError(key, `${key} must be a string`);
+        }
+        return;
+    }
+
     throw new ConfigValidationError(key, `unknown config key: ${key}`);
 }
 
