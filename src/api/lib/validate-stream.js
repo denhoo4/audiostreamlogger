@@ -5,7 +5,7 @@
  * on the first failure, so callers can map it straight to a 400 response.
  *
  * The set of valid ISO 3166-1 alpha-2 codes is built ONCE at module load from
- * the bundled data/iso-3166-1.json; the api validates the submitted `country`
+ * the bundled lib/iso-3166-1.json; the api validates the submitted `country`
  * against this set (membership + uppercase), which is the authoritative
  * value-domain rule (the DB only keeps a cheap length-2 backstop — design §2.3).
  *
@@ -17,7 +17,10 @@
  * looser read rule stays backward-compatible with any existing uppercase folder
  * (design §2.4 Casing note).
  */
-const isoCountries = require('../data/iso-3166-1.json');
+// Bundled static code asset — lives under lib/ (NOT under data/, which is the
+// runtime SQLite volume mount point /usr/src/app/data; a bundled asset there
+// would be shadowed by the ./data bind mount and vanish at runtime).
+const isoCountries = require('./iso-3166-1.json');
 
 const VALID_COUNTRY_CODES = new Set(isoCountries.map((c) => c.code));
 
