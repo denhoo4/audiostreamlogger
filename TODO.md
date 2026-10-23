@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. settings.json still holds cron/retention. .env untracked on main.)
+Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. settings.json still holds cron/retention. .env untracked on main. Also: mouse-wheel scroll-to-zoom implemented on branch `wavesurfer-zoom` — wheel listener on the waveform container replicating the old bundle (sign-only deltaY, 5 px/sec step, lower clamp 0) + cursor-anchoring + pure exported `nextZoom` helper with vitest tests.)
 
 ---
 
@@ -42,7 +42,11 @@ APPROVED (see .agents/tasks/review.md / review.json); no blocking findings.
 - Non-blocking review findings (pick up later): selection download now fails silently
   (only console.error instead of a visible error like legacy); optional extras from the old
   bundle (right-click=pause, double-click=play, mouse-wheel=zoom) not yet implemented — NOTE:
-  right-click/double-click have since been added (see item 6 note). Smoke test only covers
+  right-click/double-click have since been added (see item 6 note), and mouse-wheel
+  scroll-to-zoom is now implemented on branch `wavesurfer-zoom` (wheel listener on the
+  waveform container, sign-only deltaY with a fixed 5 px/sec step and lower clamp 0 to match
+  the old bundle, plus cursor-anchoring via v7's zoom(pxPerSec) + scrollLeft; pure exported
+  `nextZoom` helper with vitest unit tests). Smoke test only covers
   render, not the selection math/export flow.
 - Finalized: `frontend-react` is now on `main`. Dev run: `cd src/frontend && npm install && npm run dev`.
 

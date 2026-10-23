@@ -14,6 +14,27 @@ export const WAVE_COLOR = "violet";
 export const PROGRESS_COLOR = "purple";
 export const NORMALIZE = true;
 
+// Recovered scroll-to-zoom mapping from the old minified bundle
+// (frontend/web/main.js): the wheel handler read only the SIGN of deltaY and
+// stepped minPxPerSec by a fixed 5 px/sec per event, clamped at a lower bound of
+// 0 (fit-to-container), with NO upper clamp:
+//   e.deltaY < 0 ? (zoom += 5) : (zoom = Math.max(0, zoom - 5))
+export const ZOOM_STEP = 5;
+export const ZOOM_MIN = 0;
+
+/**
+ * Pure zoom-step helper replicating the old app's wheel mapping. Given the
+ * current minPxPerSec and a wheel `deltaY`, return the next minPxPerSec:
+ * wheel up (`deltaY < 0`) zooms in (+step); otherwise zoom out (-step) clamped
+ * at ZOOM_MIN. Only the sign of `deltaY` matters (magnitude is ignored), exactly
+ * like the old bundle.
+ */
+export function nextZoom(current: number, deltaY: number): number {
+  return deltaY < 0
+    ? current + ZOOM_STEP
+    : Math.max(ZOOM_MIN, current - ZOOM_STEP);
+}
+
 /** M:SS formatter matching the old app (rounded seconds). */
 export function formatTime(seconds: number): string {
   const s = Math.round(seconds);
@@ -109,12 +130,49 @@ export function useWavesurfer(): UseWavesurfer {
       e.preventDefault();
       ws.pause();
     };
+    // Mouse-wheel scroll-to-zoom, replicating the old bundle's feel (sign-only
+    // deltaY, fixed 5 px/sec step, lower clamp at 0) plus the user's explicit
+    // ask to anchor the zoom at the point under the cursor. v7's zoom() throws
+    // if no audio is loaded, so guard on getDuration() first.
+    const onWheel = (e: WheelEvent) => {
+      const duration = ws.getDuration();
+      if (!duration) return; // nothing decoded: let the page scroll
+      e.preventDefault();
+
+      const scrollEl = ws.getWrapper().parentElement;
+      if (!scrollEl) {
+        ws.zoom(nextZoom(ws.options.minPxPerSec ?? 0, e.deltaY));
+        return;
+      }
+
+      // Effective px/sec before zoom (minPxPerSec===0 means fit-to-container,
+      // so derive it from the rendered width).
+      const oldPx =
+        ws.options.minPxPerSec || ws.getWrapper().scrollWidth / duration;
+      const newPx = nextZoom(ws.options.minPxPerSec ?? 0, e.deltaY);
+
+      const width = scrollEl.clientWidth;
+      const x = e.clientX - scrollEl.getBoundingClientRect().left;
+      const pointerTime = (ws.getScroll() + x) / oldPx;
+      const newLeftSec = (width / newPx) * (x / width);
+
+      if (newPx * duration < width) {
+        // New zoom is narrower than the container: nothing to anchor.
+        ws.zoom(width / duration);
+        scrollEl.scrollLeft = 0;
+      } else {
+        ws.zoom(newPx);
+        scrollEl.scrollLeft = (pointerTime - newLeftSec) * newPx;
+      }
+    };
     container.addEventListener("dblclick", onDblClick);
     container.addEventListener("contextmenu", onContextMenu);
+    container.addEventListener("wheel", onWheel, { passive: false });
 
     return () => {
       container.removeEventListener("dblclick", onDblClick);
       container.removeEventListener("contextmenu", onContextMenu);
+      container.removeEventListener("wheel", onWheel);
       ws.destroy();
       wsRef.current = null;
       regionsRef.current = null;
