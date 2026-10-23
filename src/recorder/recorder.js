@@ -4,6 +4,8 @@ const path = require('path');
 const cron = require('node-cron');
 const { secondsUntilNextHour, currentHourStamp } = require('./time-helpers');
 const { readStreams, readRecorderMinute } = require('./streams-db');
+const { backoffDelayMs, shouldRestartWithinHour, segmentOutputName } = require('./backoff-helpers');
+const { streamsNeedingCatchup } = require('./catchup-helpers');
 
 // Heartbeat file touched at boot and on every tick; the compose healthcheck
 // checks its freshness to detect a worker that has silently stopped ticking.
@@ -16,6 +18,29 @@ function writeHeartbeat() {
     }
 }
 
+// --- Per-stream supervision tuning (deliverable 1) --------------------------
+// Capped exponential backoff between restart attempts of a SINGLE stream whose
+// ffmpeg died/errored mid-hour. Growth and cap keep a persistently failing
+// stream retrying without ever spinning hot. RESTART_FLOOR_SECONDS is the small
+// floor below which we stop scheduling mid-hour restarts: when that little time
+// is left the next hourly cron tick is about to start a fresh set of
+// recordings, so handing back to the normal per-hour logic is correct.
+const BACKOFF_BASE_MS = 2000;      // first restart waits ~2s
+const BACKOFF_CAP_MS = 60000;      // never wait more than ~60s between retries
+const RESTART_FLOOR_SECONDS = 30;  // stop restarting in the last 30s of the hour
+
+// Registry of the ffmpeg commands we are currently supervising, keyed by a
+// unique supervision id. Used by the graceful-shutdown handler (deliverable 2)
+// to SIGTERM every in-progress recording so each mp3 is finalized, not
+// truncated. Also lets us distinguish an intentional stop (shutdown / duration
+// reached) from an unexpected failure that warrants a restart (D4).
+const active = new Map();
+let nextSupervisionId = 1;
+
+// Set true by the shutdown handler so no supervisor schedules a new restart
+// while we are tearing down.
+let shuttingDown = false;
+
 // The recorder schedule minute now comes from the shared DB (app_config), not
 // settings.json. readRecorderMinute() returns a validated 0..59 integer and
 // falls back to 0 (never process.exit) when the DB is not ready. It is a
@@ -23,15 +48,20 @@ function writeHeartbeat() {
 // task when the minute changes without a full container restart.
 let currentMinute = readRecorderMinute();
 
-// Function to execute ffmpeg command using fluent-ffmpeg
-function recordStream(name, folder, url, durationSeconds = 3600) {
+// Build and start an ffmpeg recording command for one stream and RETURN the
+// command object so the supervisor can observe its error/end events and kill it
+// on shutdown. The ffmpeg flags, the output-path formula and the existing log
+// lines are preserved exactly; `attempt` only changes the output filename for a
+// mid-hour restart (attempt 0 keeps `<folder>-<stamp>.mp3`, attempt >= 1 writes
+// a distinct `<folder>-<stamp>.partN.mp3` segment — see segmentOutputName/D2).
+function recordStream(name, folder, url, durationSeconds = 3600, attempt = 0) {
     const audioFolderPath = path.join(__dirname, `./audio/${folder}`);
     fs.mkdirSync(audioFolderPath, { recursive: true });
 
     const formattedDate = currentHourStamp();
-    const outputPath = `${audioFolderPath}/${folder}-${formattedDate}.mp3`;
+    const outputPath = `${audioFolderPath}/${segmentOutputName(folder, formattedDate, attempt)}`;
 
-    ffmpeg()
+    const command = ffmpeg()
         .input(url)
         .inputOptions('-user_agent', `'${name} Logger'`)
         .duration(durationSeconds)
@@ -46,15 +76,97 @@ function recordStream(name, folder, url, durationSeconds = 3600) {
         })
         .on('end', () => {
             console.log(`Recording finished for ${name} in folder ${folder}`);
-        })
-        .run();
+        });
+
+    command.run();
+    return command;
 }
 
-// Function to read settings and start recording
+// Supervise one stream's recording for the remainder of the current hour.
+// Starts the ffmpeg command for this `attempt`, registers it so shutdown can
+// finalize it, and watches for an UNEXPECTED error/early end. On an unexpected
+// failure it logs a greppable per-stream line and, if time still remains in the
+// hour and we are not shutting down, schedules a single restart after a capped
+// exponential backoff. Each stream is supervised independently: one stream's
+// failure never kills or disturbs another stream's recording (deliverable 1).
+function superviseStream(item, attempt) {
+    if (shuttingDown) {
+        return;
+    }
+
+    const remaining = secondsUntilNextHour();
+    const id = nextSupervisionId++;
+    // `settled` guards against acting twice if ffmpeg emits both error and end.
+    let settled = false;
+    // Marks a command we deliberately stop (shutdown kill) so the ensuing
+    // error/end is treated as expected and does NOT trigger a restart (D4).
+    const entry = { command: null, item, intentionalStop: false };
+
+    const command = recordStream(item.name, item.folder, item.url, remaining, attempt);
+    entry.command = command;
+    active.set(id, entry);
+
+    const cleanup = () => {
+        active.delete(id);
+    };
+
+    const scheduleRestart = (reason) => {
+        if (settled) {
+            return;
+        }
+        settled = true;
+        cleanup();
+
+        if (entry.intentionalStop) {
+            // We killed it on purpose (shutdown) — not a failure, never restart.
+            console.log(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) stopped intentionally (${reason}); not restarting.`);
+            return;
+        }
+        if (shuttingDown) {
+            console.log(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) ended during shutdown (${reason}); not restarting.`);
+            return;
+        }
+
+        const remainingNow = secondsUntilNextHour();
+        if (!shouldRestartWithinHour(remainingNow, RESTART_FLOOR_SECONDS)) {
+            console.error(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) failed (${reason}); giving up for this hour, only ${remainingNow}s left — next hourly run takes over.`);
+            return;
+        }
+
+        const delay = backoffDelayMs(attempt, { baseMs: BACKOFF_BASE_MS, capMs: BACKOFF_CAP_MS });
+        console.error(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) failed (${reason}) on attempt ${attempt}; scheduling restart in ${delay}ms (${remainingNow}s left this hour).`);
+        setTimeout(() => superviseStream(item, attempt + 1), delay).unref();
+    };
+
+    command.on('error', (err) => {
+        // An error while intentionally stopping is expected (SIGTERM during
+        // shutdown surfaces as an ffmpeg error); scheduleRestart handles that.
+        scheduleRestart(`error: ${err.message}`);
+    });
+
+    command.on('end', () => {
+        if (settled) {
+            return;
+        }
+        // A normal end after the full duration is the expected completion of
+        // this hour's recording — deregister without restarting.
+        settled = true;
+        cleanup();
+        if (entry.intentionalStop) {
+            console.log(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) finalized during shutdown.`);
+        }
+    });
+
+    return id;
+}
+
+// Function to read settings and start recording. Each stream is routed through
+// the per-stream supervisor so a single stream's ffmpeg failure restarts only
+// that stream (deliverable 1).
 function startRecording() {
     const streams = readStreams();
     streams.forEach(item => {
-        recordStream(item.name, item.folder, item.url);
+        superviseStream(item, 0);
     });
 }
 
@@ -93,6 +205,12 @@ let task = cron.schedule(`${currentMinute} * * * *`, recordingTick);
 const RESCHEDULE_STEADY_MS = 5 * 60 * 1000;
 const RESCHEDULE_FIRST_RETRIES_MS = [15 * 1000, 60 * 1000];
 
+// Handle of the pending hot-reschedule setTimeout, captured so graceful
+// shutdown can clear it (deliverable 2). The chain already uses .unref() so it
+// does not keep the event loop alive; clearing it on shutdown is for
+// cleanliness and to stop any further reschedule work mid-teardown.
+let rescheduleTimer = null;
+
 function rescheduleCheck() {
     try {
         const newMinute = readRecorderMinute();
@@ -111,14 +229,95 @@ function rescheduleCheck() {
 }
 
 function scheduleReread(delays) {
+    if (shuttingDown) {
+        return;
+    }
     const [next, ...rest] = delays;
     const delay = next !== undefined ? next : RESCHEDULE_STEADY_MS;
-    setTimeout(() => {
+    rescheduleTimer = setTimeout(() => {
         rescheduleCheck();
         scheduleReread(rest);
-    }, delay).unref();
+    }, delay);
+    rescheduleTimer.unref();
 }
 scheduleReread(RESCHEDULE_FIRST_RETRIES_MS);
+
+// --- Graceful shutdown (deliverable 2) --------------------------------------
+// On SIGTERM/SIGINT: flip the shutting-down flag (so no supervisor schedules a
+// new restart), SIGTERM every tracked ffmpeg command so each in-progress mp3 is
+// finalized/closed rather than truncated (SIGTERM, NOT SIGKILL — D5), stop the
+// cron task and clear the hot-reschedule timer, close the read-only DB handle
+// (the recorder opens the DB per-read via streams-db.js and closes it each
+// time, so there is no long-lived handle to close here), and exit 0. A bounded
+// grace window guarantees we still exit 0 even if an ffmpeg process is slow to
+// finalize, so shutdown can never hang forever. Idempotent against a second
+// signal. The recorder writes /tmp/heartbeat at boot and on each cron tick and
+// does NOT run a periodic heartbeat setInterval, so there is no heartbeat timer
+// to clear here (see plan D6).
+const SHUTDOWN_GRACE_MS = 8000;
+
+function shutdown(signal) {
+    if (shuttingDown) {
+        return;
+    }
+    shuttingDown = true;
+    console.log(`recorder: received ${signal}, shutting down gracefully (finalizing ${active.size} active recording(s)).`);
+
+    // Stop scheduling: no more hourly ticks, no more reschedule re-reads.
+    try {
+        task.stop();
+    } catch (err) {
+        console.error('recorder: error stopping cron task during shutdown:', err);
+    }
+    if (rescheduleTimer) {
+        clearTimeout(rescheduleTimer);
+        rescheduleTimer = null;
+    }
+    if (newStreamPollTimer) {
+        clearInterval(newStreamPollTimer);
+        newStreamPollTimer = null;
+    }
+
+    // Finalize each in-progress recording. SIGTERM lets ffmpeg close the mp3
+    // container cleanly; marking intentionalStop prevents the supervisor from
+    // treating the resulting error/end as a failure to restart.
+    for (const [, entry] of active) {
+        entry.intentionalStop = true;
+        try {
+            console.log(`recorder: finalizing recording for ${entry.item.name} (folder ${entry.item.folder}) on ${signal}.`);
+            entry.command.kill('SIGTERM');
+        } catch (err) {
+            console.error(`recorder: error finalizing recording for ${entry.item.folder} during shutdown:`, err);
+        }
+    }
+
+    const finish = () => {
+        console.log('recorder: shutdown complete, exiting 0.');
+        process.exit(0);
+    };
+
+    // If every recording finalized quickly, exit promptly; otherwise exit after
+    // a bounded grace window so shutdown cannot hang.
+    const poll = setInterval(() => {
+        if (active.size === 0) {
+            clearInterval(poll);
+            finish();
+        }
+    }, 200);
+    poll.unref();
+
+    const graceTimer = setTimeout(() => {
+        clearInterval(poll);
+        if (active.size > 0) {
+            console.error(`recorder: ${active.size} recording(s) did not finalize within ${SHUTDOWN_GRACE_MS}ms; exiting 0 anyway.`);
+        }
+        finish();
+    }, SHUTDOWN_GRACE_MS);
+    graceTimer.unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 // Boot succeeded: record an initial heartbeat so the healthcheck has a fresh
 // timestamp before the first cron tick fires.
@@ -135,31 +334,82 @@ writeHeartbeat();
 // bound MUST NOT be short-circuited on the first empty read (that reintroduces
 // the AC-13 race); a legitimately empty DB just exits after the bound.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// True when a recording file for the current hour already exists for `folder`
+// (the "exists = skip" rule). Shared by the startup catch-up and the periodic
+// poll so both honor the same primary-filename convention `<folder>-<stamp>.mp3`.
+function hasCurrentHourRecording(folder, stamp) {
+    const outputPath = path.join(__dirname, `./audio/${folder}/${folder}-${stamp}.mp3`);
+    return fs.existsSync(outputPath);
+}
+
+// Start a remainder-of-the-hour recording for every configured stream that has
+// no current-hour file yet, routing each through the per-stream supervisor so a
+// mid-hour drop is restarted with backoff (deliverable 1). This single code
+// path is used BOTH by the one-shot startup catch-up and by the periodic poll
+// that auto-starts newly-added streams; `reason` only tags the log lines. One
+// stream's failure never aborts the others. The caller passes the (already
+// read) stream list so the bounded startup retry and the poll can each supply
+// their own list without this function re-reading the DB.
+function runCatchup(streams, reason) {
+    const stamp = currentHourStamp();
+    const remaining = secondsUntilNextHour();
+    const needing = streamsNeedingCatchup(streams, (folder) => hasCurrentHourRecording(folder, stamp));
+    needing.forEach((item) => {
+        try {
+            console.log(`recorder: ${reason} starting for ${item.folder}: no recording for hour ${stamp} yet (${remaining}s remaining).`);
+            superviseStream(item, 0);
+        } catch (err) {
+            // One stream's failure must not abort the others or crash the process.
+            console.error(`recorder: ${reason} error for ${item.folder}:`, err);
+        }
+    });
+}
+
 (async () => {
     let catchupStreams = readStreams();
     for (let i = 0; i < 10 && catchupStreams.length === 0; i++) {
         await sleep(1000);
         catchupStreams = readStreams();
     }
-    const stamp = currentHourStamp();
-    const remaining = secondsUntilNextHour();
-    catchupStreams.forEach(item => {
-        try {
-            const outputPath = path.join(__dirname, `./audio/${item.folder}/${item.folder}-${stamp}.mp3`);
-            if (fs.existsSync(outputPath)) {
-                console.log(`recorder: catch-up skip for ${item.folder}: recording for hour ${stamp} already exists.`);
-                return;
-            }
-            console.log(`recorder: catch-up starting for ${item.folder}: no recording for hour ${stamp} yet (${remaining}s remaining).`);
-            recordStream(item.name, item.folder, item.url, remaining);
-        } catch (err) {
-            // One stream's failure must not abort the others or crash the process.
-            console.error(`recorder: catch-up error for ${item.folder}:`, err);
-        }
-    });
+    runCatchup(catchupStreams, 'catch-up');
 })().catch((err) => {
     // The whole catch-up is best-effort; the cron schedule is already live.
     console.error('recorder: startup catch-up failed:', err);
 });
+
+// --- Periodic new-stream catch-up poll (scope addition) ---------------------
+// A stream added on the settings page appears in the DB streams table but is
+// only recorded from the NEXT hourly cron tick onward. This low-frequency poll
+// re-reads the stream list over the existing read-only DB handle and, reusing
+// the exact catch-up path above, starts a remainder-of-the-hour recording for
+// any stream with no current-hour file yet. That naturally starts a brand-new
+// stream right away, skips streams already recording/recorded this hour (the
+// "exists = skip" check), and is harmless for streams the cron already handles.
+// Each poll is wrapped so a transient DB read error logs and is retried on the
+// next tick (never crashes the recorder), and poll-triggered recordings are
+// supervised/backed-off like any other. OPTION A (recorder-only) is used
+// deliberately: pushing this from the api would be out of this workflow's scope.
+const NEW_STREAM_POLL_MS = 30 * 1000; // re-check for newly-added streams every 30s
+let newStreamPollTimer = null;
+
+function newStreamPollTick() {
+    try {
+        const streams = readStreams();
+        runCatchup(streams, 'new-stream poll catch-up');
+    } catch (err) {
+        // Failure-isolated: log and let the next tick retry.
+        console.error('recorder: new-stream poll failed, will retry next tick:', err);
+    }
+}
+
+function scheduleNewStreamPoll() {
+    if (shuttingDown) {
+        return;
+    }
+    newStreamPollTimer = setInterval(newStreamPollTick, NEW_STREAM_POLL_MS);
+    newStreamPollTimer.unref();
+}
+scheduleNewStreamPoll();
 
 console.log(`Recorder is OK! The recorder process will run every hour at xx:`+currentMinute.toString().padStart(2, '0')+`.`);

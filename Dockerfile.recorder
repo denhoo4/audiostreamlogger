@@ -17,6 +17,8 @@ RUN npm install
 COPY src/recorder/recorder.js ./
 COPY src/recorder/time-helpers.js ./
 COPY src/recorder/streams-db.js ./
+COPY src/recorder/backoff-helpers.js ./
+COPY src/recorder/catchup-helpers.js ./
 
 # Ensure the audio directory exists
 RUN mkdir -p /usr/src/app/audio
