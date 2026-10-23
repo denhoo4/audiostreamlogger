@@ -6,6 +6,10 @@ play, and download the recordings.
 
 The services are managed with Docker Compose.
 
+For a deeper walkthrough of how the services fit together, where configuration
+lives, and the CI/dependency setup, see [ARCHITECTURE.md](ARCHITECTURE.md). For
+the testing approach and how to run the suites, see [docs/TESTING.md](docs/TESTING.md).
+
 ## Architecture
 
 The application consists of four services (source under `src/`):
@@ -156,8 +160,15 @@ npm install
 npm run dev
 ```
 
-Tests (where present) run per service with the built-in `node --test`, and in the frontend with
-Vitest.
+Tests run per service with the built-in `node --test`, and in the frontend with
+Vitest. See [docs/TESTING.md](docs/TESTING.md) for the unit-vs-integration split,
+where tests live, the cold-temp-DB integration pattern, and the exact commands
+(the host has no Node, so backend suites run inside the `node:26-bookworm` image).
+
+Continuous integration (`.github/workflows/ci.yml`) runs those same commands on
+every push and pull request and also builds all four service images; Dependabot
+(`.github/dependabot.yml`) opens weekly PRs for npm, Docker base-image, and
+GitHub Actions updates.
 
 Each service's Docker image installs dependencies with `npm ci` against the committed
 `package-lock.json` for reproducible builds, so keep the lockfile in sync with `package.json`

@@ -9,5 +9,11 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
+    // Report-only coverage (no failing threshold yet): CI surfaces the baseline
+    // so a threshold can be chosen later. See docs/TESTING.md.
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+    },
   },
 });

@@ -5,7 +5,8 @@
     "main": "recorder.js",
     "scripts": {
         "start": "node recorder.js",
-        "test": "node --test"
+        "test": "node --test",
+        "test:coverage": "node --test --experimental-test-coverage"
     },
     "license": "MIT",
     "dependencies": {

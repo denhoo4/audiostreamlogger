@@ -6,7 +6,8 @@
   "license": "MIT",
   "main": "index.js",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage"
   },
   "dependencies": {
     "argon2": "^0.41.1",

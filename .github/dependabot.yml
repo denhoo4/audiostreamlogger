@@ -1,0 +1,72 @@
+version: 2
+updates:
+  # --- npm: one entry per service (each has its own package.json + lockfile) ---
+  - package-ecosystem: npm
+    directory: /src/api
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      api-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /src/worker
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      worker-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /src/recorder
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      recorder-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: npm
+    directory: /src/frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # --- docker: base-image updates for the four root Dockerfiles ---
+  # The Dockerfiles live at the repo root (Dockerfile.api/.worker/.recorder/
+  # .frontend), so directory is "/". Dependabot tracks the FROM tags
+  # (node:26-bookworm, nginx:1.27-bookworm) and opens a PR for a newer digest or
+  # tag. A major bump (node:26 -> node:27) also surfaces as a PR to review.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      docker-base-images:
+        patterns:
+          - "*"
+
+  # --- github-actions: keep the CI workflow's actions current ---
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"

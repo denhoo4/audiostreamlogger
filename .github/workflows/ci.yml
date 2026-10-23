@@ -1,0 +1,68 @@
+name: CI
+
+# Run on every push and pull request. The backend/frontend jobs run the exact
+# commands documented in docs/TESTING.md; docker-build catches image breakage.
+on:
+  push:
+  pull_request:
+
+jobs:
+  backend:
+    name: backend (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    env:
+      # A cold temp SQLite DB needs no secrets; provide a dummy SESSION_SECRET
+      # so any session code has a value (the api otherwise falls back to a dev
+      # secret with a warning).
+      SESSION_SECRET: dummy-ci-secret
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, worker, recorder]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - name: Install dependencies (npm ci)
+        working-directory: src/${{ matrix.service }}
+        run: npm ci
+      - name: Run tests (node --test)
+        working-directory: src/${{ matrix.service }}
+        run: npm test
+      - name: Coverage (report-only, non-blocking)
+        working-directory: src/${{ matrix.service }}
+        continue-on-error: true
+        run: npm run test:coverage
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - name: Install dependencies (npm ci)
+        working-directory: src/frontend
+        run: npm ci
+      - name: Build
+        working-directory: src/frontend
+        run: npm run build
+      - name: Run tests (vitest)
+        working-directory: src/frontend
+        run: npm run test -- --run
+      - name: Coverage (report-only, non-blocking)
+        working-directory: src/frontend
+        continue-on-error: true
+        run: npm run test:coverage
+
+  docker-build:
+    name: docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate the compose file
+        run: docker compose config
+      - name: Build all four service images
+        run: docker compose build
