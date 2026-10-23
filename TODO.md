@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. settings.json still holds cron/retention. .env untracked on main. NOW IN PROGRESS: `job-queue` branch — requirements + technical design authored and implementation underway (FEAT-001 schema + seed + api data-access layer and FEAT-002 generic `worker` service + `Dockerfile.worker` done + tested; see item 10) for the job-queue/worker consolidation that removes the cleaner + peakfilegenerator containers and deletes settings.json. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13.)
+Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. .env untracked on main. NOW IN PROGRESS: `job-queue` branch — requirements + technical design authored; implementation FEAT-001 (schema + seed + api data-access), FEAT-002 (generic `worker` service + `Dockerfile.worker`), FEAT-003 (DB-driven scheduler in the api), FEAT-004 (compose wiring: cleaner/peakfilegenerator removed, worker added) and FEAT-005 (settings.json removed entirely — recorder reads recorder_minute from the DB with best-effort hot-reschedule; old sources + Dockerfiles deleted) all DONE + tested (see item 10). settings.json is now GONE on this branch. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13.)
 
 ---
 
@@ -381,6 +381,44 @@ IMPLEMENTATION PROGRESS (2026-10-23):
       §2.4). The worker is NOT yet wired into `docker-compose.yml` (FEAT-004); when it is, its
       `./data` mount MUST be read-write (the recorder stays `:ro`), else the first claim throws
       `SQLITE_READONLY`. Committed locally; not pushed.
+- [x] FEAT-003 (DB-driven scheduler hosted in the api) DONE on branch `job-queue`. New
+      `src/api/scheduler/index.js` exports `startScheduler(db)` + the pure, DB-free
+      `previousScheduledInstant`/`withinLookback`/`isDue` (CALENDAR-FIELD date math, never ms
+      subtraction, so a daily/weekly step-back across a Europe/Amsterdam DST transition keeps HH:MM).
+      `startScheduler` runs a 30s `setInterval` (unref'd): for each enabled schedule it enqueues a
+      pending job + `markScheduleRun` when owed (3-minute lookback + `last_run_at===dueInstant`
+      guard = no double-enqueue), then prunes job output via `pruneJobOutput(parseOutputRetentionCount(...))`.
+      Wired into `startServer()` AFTER the routers mount (a scheduler failure never blocks the HTTP
+      server). Tests: `test/scheduler.test.js` (14 pure cases incl. one-minute-late-still-fires,
+      stale-beyond-lookback, the guard, + DST crossings) and `test/scheduler-enqueue.test.js`
+      (integration: two evaluations a minute apart enqueue exactly one row). `cd src/api && node
+      --test` → 40 pass / 0 fail. Committed locally; not pushed.
+- [x] FEAT-004 (docker-compose wiring) DONE on branch `job-queue`. Removed the `cleaner` +
+      `peakfilegenerator` service blocks; added the `worker` service (build `Dockerfile.worker`,
+      `restart: unless-stopped`, `./audio` rw + `./data` READ-WRITE [documented override so it can
+      write job status], `TZ=Europe/Amsterdam`, `depends_on` api `service_healthy`, NO `networks:`
+      key, heartbeat healthcheck tightened to age<30s / interval 15s / timeout 10s / retries 3 /
+      start_period 30s). `recorder` kept separate (still `./data:...:ro`). `docker compose config
+      --services` → api, frontend, recorder, worker. `docker compose build worker` succeeds; ffmpeg
+      + audiowaveform both on PATH. Committed locally; not pushed.
+- [x] FEAT-005 (remove `settings.json` entirely + delete ported-away sources/Dockerfiles) DONE on
+      branch `job-queue`. `src/recorder/streams-db.js` gains `readRecorderMinute()` (opens the `:ro`
+      handle, `SELECT value FROM app_config WHERE key='recorder_minute'`, validates 0..59, returns a
+      number; not-ready/missing/invalid → default 0 + log, NEVER `process.exit`, mirroring
+      `readStreams`). `recorder.js`: the `settings.json` `readFileSync`/`JSON.parse`/`process.exit`
+      blocks are gone; the minute is now a reassignable `let currentMinute = readRecorderMinute()`,
+      the cron task is captured (`let task = cron.schedule(...)`), and a best-effort re-read timer
+      (shortened first retries ~15s/~60s after a fallback boot, then a steady 5-min cadence) calls
+      `readRecorderMinute()` and, on change, `task.stop()` + reassigns a new `cron.schedule(newExpr,
+      fn)` and logs it (fallback documented in-code: a changed minute otherwise takes effect on next
+      restart). The startup catch-up IIFE and the recorder's `path.join(__dirname,'./audio/...')`
+      are UNCHANGED. Deleted the root `settings.json`, both `settings.json` bind-mounts (recorder +
+      api) from compose, and `src/cleaner/`, `src/peakfilegenerator/`, `Dockerfile.cleaner`,
+      `Dockerfile.peakfilegenerator`. `grep -rn 'settings.json' src docker-compose.yml` shows only
+      explanatory comments (no runtime reader, no mount). New `src/recorder/streams-db.test.js`
+      covers `readRecorderMinute` (stored value, 0/59 bounds, missing row, out-of-range, non-integer,
+      not-ready → 0); `cd src/recorder && node --test` → 13 pass / 0 fail. `docker compose config`
+      validates; service set is recorder/worker/api/frontend. Committed locally; not pushed.
 
 ### 11. Recorder: robust per-stream process management (DECIDED — Option B)
 Current: one recorder container loops over all streams and starts an ffmpeg process per stream

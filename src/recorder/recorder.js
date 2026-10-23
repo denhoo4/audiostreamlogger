@@ -3,7 +3,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const cron = require('node-cron');
 const { secondsUntilNextHour, currentHourStamp } = require('./time-helpers');
-const { readStreams } = require('./streams-db');
+const { readStreams, readRecorderMinute } = require('./streams-db');
 
 // Heartbeat file touched at boot and on every tick; the compose healthcheck
 // checks its freshness to detect a worker that has silently stopped ticking.
@@ -16,28 +16,12 @@ function writeHeartbeat() {
     }
 }
 
-// Getting the retention time of logs from the settings.json
-const settingsPath = '/usr/src/app/settings.json';
-let settings;
-// If the settings.json cannot be read, throw and error
-try {
-    const settingsData = fs.readFileSync(settingsPath, 'utf8');
-    settings = JSON.parse(settingsData);
-} catch (err) {
-    console.error('Error reading settings.json:', err);
-    process.exit(1);
-}
-const recorder_minute = settings.recorder.recorder_minute;
-
-// If the peakfile_minute variable is not between 0 and 59 and an integer, it throws an error.
-try {
-    if (!Number.isInteger(recorder_minute) || recorder_minute < 0 || recorder_minute > 59) {
-      throw new Error("ERROR! The recorder_minute variable in settings.json must be an integer between 0 and 59.");
-    }
-  } catch (error) {
-    console.error(error.message);
-    process.exit(1);
-  }
+// The recorder schedule minute now comes from the shared DB (app_config), not
+// settings.json. readRecorderMinute() returns a validated 0..59 integer and
+// falls back to 0 (never process.exit) when the DB is not ready. It is a
+// reassignable `let` so the re-read timer below can hot-reschedule the cron
+// task when the minute changes without a full container restart.
+let currentMinute = readRecorderMinute();
 
 // Function to execute ffmpeg command using fluent-ffmpeg
 function recordStream(name, folder, url, durationSeconds = 3600) {
@@ -74,20 +58,67 @@ function startRecording() {
     });
 }
 
-// Schedule the startRecording function to run at the beginning of every hour
-cron.schedule(`${recorder_minute} * * * *`, () => {
+// The per-tick body, shared by the original task and any rescheduled task.
+function recordingTick() {
     writeHeartbeat();
     try {
         const now = new Date;
-        console.log(`Starting recording at `+String(now.getHours()).padStart(2, '0')+`:`+recorder_minute.toString().padStart(2, '0')+`.`);
+        console.log(`Starting recording at `+String(now.getHours()).padStart(2, '0')+`:`+currentMinute.toString().padStart(2, '0')+`.`);
         startRecording();
     } catch (err) {
-        // A transient error (e.g. unreadable settings/stream) must not crash the
+        // A transient error (e.g. unreadable stream list) must not crash the
         // worker; log a greppable line and wait for the next tick.
         console.error('recorder: error during scheduled recording tick:', err);
         return;
     }
-});
+}
+
+// Schedule the startRecording function to run at `currentMinute` of every hour.
+// The task handle is captured so the re-read timer can stop and replace it when
+// the minute changes (hot-reschedule).
+let task = cron.schedule(`${currentMinute} * * * *`, recordingTick);
+
+// Best-effort hot-reschedule (design §5.1, A5). A low-frequency timer re-reads
+// recorder_minute from the DB; when it differs from the currently scheduled
+// minute, the existing node-cron task is stopped and replaced with a new one at
+// the new minute (node-cron@^4.6.0 exposes task.stop()). FALLBACK: if the task
+// cannot be replaced, a changed minute takes effect on the next container
+// restart (the minute is always read from the DB, never settings.json).
+//
+// A not-ready DB at boot falls back to minute 0, so the first hour can record
+// at xx:00 until this timer first corrects it. To shrink that window after a
+// fallback boot, the first few re-reads run sooner (~15s, then ~60s) before
+// settling into the steady 5-minute cadence; this is accepted best-effort
+// behavior, not a bug.
+const RESCHEDULE_STEADY_MS = 5 * 60 * 1000;
+const RESCHEDULE_FIRST_RETRIES_MS = [15 * 1000, 60 * 1000];
+
+function rescheduleCheck() {
+    try {
+        const newMinute = readRecorderMinute();
+        if (newMinute !== currentMinute) {
+            const newExpr = `${newMinute} * * * *`;
+            task.stop();
+            task = cron.schedule(newExpr, recordingTick);
+            console.log(`recorder: recorder_minute changed from ${currentMinute} to ${newMinute}; rescheduled to run at xx:${newMinute.toString().padStart(2, '0')}.`);
+            currentMinute = newMinute;
+        }
+    } catch (err) {
+        // Best-effort: a failed re-read/reschedule must not crash the recorder;
+        // the next timer fire (or a restart) will retry.
+        console.error('recorder: re-read/reschedule check failed:', err);
+    }
+}
+
+function scheduleReread(delays) {
+    const [next, ...rest] = delays;
+    const delay = next !== undefined ? next : RESCHEDULE_STEADY_MS;
+    setTimeout(() => {
+        rescheduleCheck();
+        scheduleReread(rest);
+    }, delay).unref();
+}
+scheduleReread(RESCHEDULE_FIRST_RETRIES_MS);
 
 // Boot succeeded: record an initial heartbeat so the healthcheck has a fresh
 // timestamp before the first cron tick fires.
@@ -131,4 +162,4 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     console.error('recorder: startup catch-up failed:', err);
 });
 
-console.log(`Recorder is OK! The recorder process will run every hour at xx:`+recorder_minute.toString().padStart(2, '0')+`.`);
+console.log(`Recorder is OK! The recorder process will run every hour at xx:`+currentMinute.toString().padStart(2, '0')+`.`);
