@@ -1,6 +1,34 @@
-node_modules
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output / caches
+**/dist/
+**/build/
+*.tsbuildinfo
+.vite/
+
+# Runtime data & config (operator-provided, not committed)
 audio/*
 settings.json
 .env
+.env.*
+!.env.example
+
+# Agent / workflow artifacts & worktrees
 .agents/
 .worktrees/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS / editor cruft
+.DS_Store
+**/.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
