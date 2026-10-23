@@ -1,11 +1,11 @@
 # Use the official Node.js image
-FROM node:16
+FROM node:26-bookworm
 
 # Create and change to the app directory
 WORKDIR /usr/src/app
 
 # Install ffmpeg
-RUN apt-get update && apt-get install -y ffmpeg
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
 # Copy package.json and package-lock.json from the frontend directory
 COPY frontend/package*.json ./

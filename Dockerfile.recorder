@@ -1,8 +1,8 @@
 # Use the official Node.js image
-FROM node:16
+FROM node:26-bookworm
 
 # Install ffmpeg
-RUN apt-get update && apt-get install -y ffmpeg
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
 # Create and change to the app directory
 WORKDIR /usr/src/app
