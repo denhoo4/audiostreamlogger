@@ -307,6 +307,27 @@ Grotere feature (NÁ de DB er is; aparte latere workflow):
 - Raakt alle lagen (recorder/cleaner/peakfilegenerator/api/frontend); natuurlijke vervolgstap
   zodra de SQLite-DB bestaat. Bewust NIET in de eerste settings-DB-workflow (die is al groot).
 
+### 9. Echte teststrategie (user-wens)
+Huidige staat: er is WEL al wat testing, maar mager en lukraak (alleen pure helpers die
+toevallig bij bugfixes betrokken waren):
+- `node:test` in src/cleaner (validateMinute/validateRetentionHours), src/peakfilegenerator
+  (extractFileDateTime), src/api (buildBrowseTree), src/recorder (secondsUntilNextHour).
+- src/frontend heeft een vitest-test.
+Wat ontbreekt (= het echte werk):
+- [ ] Samenhangende teststrategie i.p.v. losse testjes: afspraken over wat we unit vs
+      integratie testen, waar tests staan, hoe je ze draait (per service + overkoepelend).
+- [ ] Endpoint-/integratietests voor de API (login/auth-flow, stream-CRUD, /settings, /settings2,
+      /util/selection-export) i.p.v. alleen pure helpers. Groeit mee met de DB/auth-features.
+- [ ] Frontend: meer dan de ene render-test (interactie met wavesurfer-knoppen, settings-scherm,
+      login-flow).
+- [ ] Workers: testbare logica verder isoleren en dekken (nu alleen enkele helpers).
+- [ ] CI die tests bij elke push/PR afdwingt (GitHub Actions) — sluit aan op item 3 (Renovate)
+      en op "ik wil gewoon bij zijn".
+- [ ] Coverage-beeld (welke lib, welke drempel) bepalen.
+Volgorde: deels organisch (elke feature-workflow voegt nu al tests toe), maar een bewuste
+teststrategie + CI als eigen stap plannen. Keuzes (testrunner-consistentie node:test vs vitest
+overal, coverage-tool, CI-provider) nog te bepalen met user.
+
 ---
 
 ## Technical debt / lelijke dingen
