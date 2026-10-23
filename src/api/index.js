@@ -14,6 +14,9 @@ const utilRouter = require('./routes/util');
 app.use('/api', apiRouter);
 app.use('/util', utilRouter);
 
+// Lightweight liveness probe for the compose healthcheck: plain 200 JSON, no disk I/O.
+app.get('/healthz', (req, res) => res.json({ status: 'ok' }));
+
 
 // Start the server
 app.listen(PORT, () => {

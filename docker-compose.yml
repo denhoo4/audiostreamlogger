@@ -3,36 +3,64 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.recorder
+    restart: unless-stopped
     volumes:
       - ./audio:/usr/src/app/audio
       - ./settings.json:/usr/src/app/settings.json
     environment:
       - TZ=Europe/Amsterdam
+    healthcheck:
+      # 4500s (~75min) > the 60-min cron period, so a worker is flagged unhealthy
+      # only once it misses a full tick (not merely between ticks).
+      test: ["CMD", "node", "-e", "const fs=require('fs');const age=(Date.now()-fs.statSync('/tmp/heartbeat').mtimeMs)/1000;process.exit(age<4500?0:1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
 
   cleaner:
     build:
       context: .
       dockerfile: Dockerfile.cleaner
+    restart: unless-stopped
     volumes:
       - ./audio:/usr/src/app/audio
       - ./settings.json:/usr/src/app/settings.json
     environment:
       - TZ=Europe/Amsterdam
+    healthcheck:
+      # 4500s (~75min) > the 60-min cron period, so a worker is flagged unhealthy
+      # only once it misses a full tick (not merely between ticks).
+      test: ["CMD", "node", "-e", "const fs=require('fs');const age=(Date.now()-fs.statSync('/tmp/heartbeat').mtimeMs)/1000;process.exit(age<4500?0:1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
 
   peakfilegenerator:
     build:
       context: .
       dockerfile: Dockerfile.peakfilegenerator
+    restart: unless-stopped
     volumes:
       - ./audio:/usr/src/app/audio
       - ./settings.json:/usr/src/app/settings.json
     environment:
       - TZ=Europe/Amsterdam
+    healthcheck:
+      # 4500s (~75min) > the 60-min cron period, so a worker is flagged unhealthy
+      # only once it misses a full tick (not merely between ticks).
+      test: ["CMD", "node", "-e", "const fs=require('fs');const age=(Date.now()-fs.statSync('/tmp/heartbeat').mtimeMs)/1000;process.exit(age<4500?0:1)"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
 
   api:
     build:
       context: .
       dockerfile: Dockerfile.api
+    restart: unless-stopped
     volumes:
       - ./audio:/usr/src/app/audio
       - ./settings.json:/usr/src/app/settings.json:ro
@@ -41,11 +69,18 @@ services:
     # Internal only: reached by nginx via http://api:3000. Not published.
     networks:
       - web-network
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+    restart: unless-stopped
     depends_on:
       - api
     volumes:
@@ -57,6 +92,12 @@ services:
       - TZ=Europe/Amsterdam
     networks:
       - web-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
 
 networks:

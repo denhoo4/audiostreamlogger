@@ -5,6 +5,17 @@ const cron = require('node-cron');
 const { extractFileDateTime } = require('./filename-utils');
 const audioDirectory = path.join(__dirname, `/audio`);
 
+// Heartbeat file touched at boot and on every tick; the compose healthcheck
+// checks its freshness to detect a worker that has silently stopped ticking.
+const HEARTBEAT = '/tmp/heartbeat';
+function writeHeartbeat() {
+    try {
+        fs.writeFileSync(HEARTBEAT, new Date().toISOString());
+    } catch (err) {
+        console.error('peakfilegenerator: failed to write heartbeat:', err);
+    }
+}
+
 // Getting the retention time of logs from the settings.json
 const settingsPath = '/usr/src/app/settings.json';
 let settings;
@@ -75,8 +86,20 @@ function generatePeakFiles() {
 
 // Schedule the generatePeakFiles function to run every hour at xx:03
 cron.schedule(`${peakfile_minute} * * * *`, () => {
-    console.log(`Running scheduled peak file generation at ${new Date().toISOString()}`);
-    generatePeakFiles();
+    writeHeartbeat();
+    try {
+        console.log(`Running scheduled peak file generation at ${new Date().toISOString()}`);
+        generatePeakFiles();
+    } catch (err) {
+        // A transient error (e.g. unreadable audio dir) must not crash the
+        // worker; log a greppable line and wait for the next tick.
+        console.error('peakfilegenerator: error during scheduled generation tick:', err);
+        return;
+    }
 });
+
+// Boot succeeded: record an initial heartbeat so the healthcheck has a fresh
+// timestamp before the first cron tick fires.
+writeHeartbeat();
 
 console.log(`Peakfile generator is OK! Generation process will run every hour at xx:`+peakfile_minute.toString().padStart(2, '0')+`.`);

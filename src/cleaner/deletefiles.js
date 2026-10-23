@@ -3,6 +3,17 @@ const path = require('path');
 const cron = require('node-cron');
 const { validateRetentionHours } = require('./settings-utils');
 
+// Heartbeat file touched at boot and on every tick; the compose healthcheck
+// checks its freshness to detect a worker that has silently stopped ticking.
+const HEARTBEAT = '/tmp/heartbeat';
+function writeHeartbeat() {
+    try {
+        fs.writeFileSync(HEARTBEAT, new Date().toISOString());
+    } catch (err) {
+        console.error('cleaner: failed to write heartbeat:', err);
+    }
+}
+
 
 // Getting the retention time of logs from the settings.json
 const settingsPath = '/usr/src/app/settings.json';
@@ -76,12 +87,23 @@ function deleteOldFiles(dir, thresholdTime) {
 
 // Schedule the deleteOldFiles function to run every hour at xx:05
 cron.schedule(`${cleaner_minute} * * * *`, () => {
-    console.log(`Running scheduled file deletion at ${new Date().toISOString()}`);
-    // Recompute the threshold on every run so the cutoff stays relative to "now".
-    const thresholdTime = new Date(Date.now() - log_retention * 60 * 60 * 1000);
-    deleteOldFiles(folderPath, thresholdTime);
+    writeHeartbeat();
+    try {
+        console.log(`Running scheduled file deletion at ${new Date().toISOString()}`);
+        // Recompute the threshold on every run so the cutoff stays relative to "now".
+        const thresholdTime = new Date(Date.now() - log_retention * 60 * 60 * 1000);
+        deleteOldFiles(folderPath, thresholdTime);
+    } catch (err) {
+        // A transient error must not crash the worker; log a greppable line and
+        // wait for the next tick.
+        console.error('cleaner: error during scheduled deletion tick:', err);
+        return;
+    }
 });
 
+// Boot succeeded: record an initial heartbeat so the healthcheck has a fresh
+// timestamp before the first cron tick fires.
+writeHeartbeat();
 
 // Logging to see if the cleaner container is initialized properly
 console.log(`Cleaner is OK! File deletion process will run every hour at xx:`+cleaner_minute.toString().padStart(2, '0')+` and deletes files older than `+log_retention+` hour(s).`);

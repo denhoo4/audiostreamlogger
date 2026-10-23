@@ -3,6 +3,17 @@ const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const cron = require('node-cron');
 
+// Heartbeat file touched at boot and on every tick; the compose healthcheck
+// checks its freshness to detect a worker that has silently stopped ticking.
+const HEARTBEAT = '/tmp/heartbeat';
+function writeHeartbeat() {
+    try {
+        fs.writeFileSync(HEARTBEAT, new Date().toISOString());
+    } catch (err) {
+        console.error('recorder: failed to write heartbeat:', err);
+    }
+}
+
 // Getting the retention time of logs from the settings.json
 const settingsPath = '/usr/src/app/settings.json';
 let settings;
@@ -65,9 +76,21 @@ function startRecording() {
 
 // Schedule the startRecording function to run at the beginning of every hour
 cron.schedule(`${recorder_minute} * * * *`, () => {
-    const now = new Date;
-    console.log(`Starting recording at `+String(now.getHours()).padStart(2, '0')+`:`+recorder_minute.toString().padStart(2, '0')+`.`);
-    startRecording();
+    writeHeartbeat();
+    try {
+        const now = new Date;
+        console.log(`Starting recording at `+String(now.getHours()).padStart(2, '0')+`:`+recorder_minute.toString().padStart(2, '0')+`.`);
+        startRecording();
+    } catch (err) {
+        // A transient error (e.g. unreadable settings/stream) must not crash the
+        // worker; log a greppable line and wait for the next tick.
+        console.error('recorder: error during scheduled recording tick:', err);
+        return;
+    }
 });
+
+// Boot succeeded: record an initial heartbeat so the healthcheck has a fresh
+// timestamp before the first cron tick fires.
+writeHeartbeat();
 
 console.log(`Recorder is OK! The recorder process will run every hour at xx:`+recorder_minute.toString().padStart(2, '0')+`.`);
