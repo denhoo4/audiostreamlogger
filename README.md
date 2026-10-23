@@ -12,7 +12,7 @@ The application consists of four services (source under `src/`):
 
 | Service | Directory | Role |
 | --- | --- | --- |
-| `recorder` | `src/recorder/` | Records each stream every hour (ffmpeg). On startup it catches up the remaining part of the current hour if no recording exists yet. Reads its run minute from the database. |
+| `recorder` | `src/recorder/` | Records each stream every hour (ffmpeg), supervising each stream's ffmpeg process independently: if one stream drops mid-hour it is restarted on its own with capped backoff (a restart writes a `.partN.mp3` segment) without disturbing the others. On startup, and on a periodic poll, it catches up the remaining part of the current hour for any stream with no recording yet — so a newly-added stream starts recording right away. Shuts down cleanly on SIGTERM/SIGINT (finalizes each mp3). Reads its run minute from the database. |
 | `worker` | `src/worker/` | Generic job runner. Polls the `jobs` table and executes one job at a time (cleaner = delete recordings past the retention window; peakfilegenerator = generate `audiowaveform` peak files). Replaces the old `cleaner` + `peakfilegenerator` containers. |
 | `api` | `src/api/` | Express API: serves the stream list and the recordings browse tree, handles cutting/downloading fragments, powers the login-gated admin screen (authentication, stream CRUD, job scheduling + Run-now + a live job feed), and hosts the DB-driven scheduler that enqueues jobs. Runs internally on port 3000, not public. |
 | `frontend` | `src/frontend/` | React + Vite single-page app, served by nginx. nginx also serves the audio and reverse-proxies `/api`, `/util`, and `/auth` to the `api` service (same-origin, so no CORS needed). |

@@ -1,17 +1,110 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (`job-queue` branch COMPLETE + APPROVED, fast-forward merged into main AND pushed to origin/main: the generic `worker` service replaces the old `cleaner` + `peakfilegenerator` containers, `settings.json` is removed entirely, a DB-driven scheduler in the api enqueues per-type hourly/daily/weekly jobs with a global single-job busy=SKIP lock, and an SSE live job view + Run-now admin UI land. All six FEATs (FEAT-001…006) implemented + tested and the full cross-FEAT integration verification + cold-data docker compose convergence smoke PASSED iteration 1 with no code fixes — see `.agents/tasks/job-queue-2026-10-23/verification.md` and item 10. `main` == `job-queue` == 428a385, pushed to origin/main. AUTO-ADVANCE: the next chunk on the list is CHUNK A — see "Next up (CHUNK A)" below. Earlier on main: settings-db-core step 1 (SQLite DB via node:sqlite after better-sqlite3 failed on Node 26 + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring). .env untracked on main. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13.)
+Last updated: 2026-10-23 (`job-queue` branch COMPLETE + APPROVED, fast-forward merged into main AND pushed to origin/main: the generic `worker` service replaces the old `cleaner` + `peakfilegenerator` containers, `settings.json` is removed entirely, a DB-driven scheduler in the api enqueues per-type hourly/daily/weekly jobs with a global single-job busy=SKIP lock, and an SSE live job view + Run-now admin UI land. All six FEATs (FEAT-001…006) implemented + tested and the full cross-FEAT integration verification + cold-data docker compose convergence smoke PASSED iteration 1 with no code fixes — see `.agents/tasks/job-queue-2026-10-23/verification.md` and item 10. `main` == `job-queue` == 428a385, pushed to origin/main. AUTO-ADVANCE: the next chunk on the list is CHUNK A — see "Next up (CHUNK A)" below. Earlier on main: settings-db-core step 1 (SQLite DB via node:sqlite after better-sqlite3 failed on Node 26 + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring). .env untracked on main. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13. ALSO IN PROGRESS: `admin-config` branch (CHUNK A) — implementation plan authored and the work decomposed into three FEATs (editable title + favicon; worker status + existing-hours selector; DB backup/import) — ALL THREE FEATs (FEAT-001..003) now implemented+tested+committed on the branch, and the full cross-FEAT INTEGRATION verification PASSED iteration 1 with NO code fixes (api 69 / worker 15 node:test green, frontend `npm run build` + 14 vitest green, `docker compose build api worker frontend` all three images built — all run in node:26-bookworm since the host has no node; the inter-feature seams are clean: one validateConfig branch per key, each router mounted once in index.js, api.ts compiles across all three, nginx `location /api/` already covers every new path). Awaiting the review gate + merge step. See the `admin-config` branch section below. ALSO: `recorder-resilience` branch (CHUNK B) — ran in PARALLEL with admin-config, strictly confined to `src/recorder/` so the two do not collide; now IMPLEMENTED + TESTED + COMMITTED, semantic review APPROVED, and fast-forward MERGED into main AND PUSHED to origin/main (main == recorder-resilience == b293435; branch also pushed to origin with upstream tracking): per-stream ffmpeg supervision with capped backoff, recorder-scope graceful shutdown (SIGTERM/SIGINT), greppable per-stream error/gap logging, and a scope-added periodic poll that auto-starts a newly-added stream for the rest of the current hour (recorder-only Option A), see item 11 and the `recorder-resilience` branch section below.)
 
 ---
 
 ## Branches
 
-### `admin-config` — IN PROGRESS (CHUNK A worktree set up)
-Status: isolated git worktree created for the Chunk A admin-config work, branched off `main`
-(base commit 9e31b3a). Worktree lives at `.worktrees/admin-config` on branch `admin-config`; no
-source edited yet. Task/artifact dir `.agents/tasks/admin-config-2026-10-23/` created for later
-plan/review files. Runs in parallel with the current workflow without touching `main`.
+### `admin-config` — ALL 3 FEATs DONE + INTEGRATION VERIFIED (CHUNK A: awaiting review gate + merge)
+Status: isolated git worktree branched off `main` (base commit 9e31b3a) at
+`.worktrees/admin-config` on branch `admin-config`. Implementation plan authored at
+`.agents/tasks/admin-config-2026-10-23/plan.md` and the work decomposed into three
+dependency-ordered FEATs (task.json + context.json + features/FEAT-001..003.json); the workflow
+tail was restructured into one coder step per FEAT + a fixer/reviewer convergence loop
+(gate `.agents/tasks/admin-config-2026-10-23/review.json`, `verdict` → `APPROVED`) + a merge step.
+Chunk A delivers five admin-screen / DB-config features, all reusing the existing `app_config`
+store, `requireAuth`, the `api.ts` typed clients, and the `node:sqlite` handle (no new config store,
+no new native dep):
+- FEAT-001 — editable page title (app_config `app_title`, default "Dé radiologger"; public
+  `GET /api/app-config/public`, auth'd `PUT /api/app-config/title`; frontend sets `document.title`
+  at runtime) + editable favicon (binary upload stored as a FILE under `./data/branding/` with a DB
+  reference `favicon_path`/`favicon_mime`; auth'd raw-body upload with png/ico/svg + ≤1 MiB
+  validation; public `GET /api/branding/favicon` streams the stored file or a bundled default;
+  `<link rel=icon>` added to index.html).
+- FEAT-002 — worker status in the admin screen (the worker UPSERTs `worker_last_heartbeat`/
+  `worker_status`/`worker_current_job_id` into `app_config` over its RW handle on its existing 5 s
+  timer; auth'd `GET /api/worker/status` joins the current job id to the jobs row) + player
+  hour-selector limited to hours that actually exist, derived from the public `/api/settings2`
+  browse tree (still works anonymously). IMPLEMENTED + VERIFIED on `admin-config` (worker
+  `writeWorkerStatus` best-effort upsert + 5 s timer, `GET /api/worker/status` requireAuth,
+  `WorkerStatus.tsx` admin panel, pure `player-hours.ts` helpers wired into `App.tsx`'s hour
+  selector; app_config validateConfig gained worker_* passthrough branches). Tests: worker
+  `worker-status.test.js` (4) + frontend `player-hours.test.ts` (5); api 60 / worker 15 /
+  frontend 14 green, `npm run build` + `docker compose build api worker frontend` green.
+- FEAT-003 — DB backup/export + import from the admin screen. IMPLEMENTED + VERIFIED on
+  `admin-config` (commit df303d1): pure `src/api/lib/backup.js` (`buildBackup`/`validateBackup`/
+  `pickSafeConfig` + `SAFE_CONFIG_KEYS` allowlist), new `src/api/routes/backup.js` mounted at
+  `app.use('/api/backup', ...)` — auth'd `GET /export` (JSON streams + safe `app_config`),
+  `GET /db` (raw `app.db` octet-stream, 404 if missing), `POST /import` (route-local
+  `express.json({limit:'5mb'})`, upsert streams by folder via the SAME `validateStream`, apply ONLY
+  allowlisted config keys, NEVER users/sessions/jobs/schedules; returns imported/updated/skipped/
+  config_applied/config_skipped). `getStreamByFolder` added to `services/streams.js`. Frontend
+  `BackupSettings.tsx` (download JSON / download raw db / import-with-summary) mounted in
+  SettingsPage. Tests: `src/api/test/backup.test.js` (9).
+Pure logic extracted for tests: favicon type/size validation, backup JSON shape/validation/scoping,
+existing-hours derivation. Runs in parallel with other work without touching `main` until the merge
+step. PROGRESS: ALL THREE FEATs (FEAT-001 title+favicon, FEAT-002 worker status+existing-hours
+selector, FEAT-003 DB backup/import) are implemented, tested and committed on `admin-config`. The
+full cross-FEAT INTEGRATION verification PASSED iteration 1 with NO code fixes — api 69 / worker 15
+node:test green, frontend `npm run build` + 14 vitest green, `docker compose build api worker
+frontend` built all three images (all in node:26-bookworm; host has no node). Inter-feature seams
+are clean: `validateConfig` carries one branch per key (branding + worker_* with no duplication),
+`/api/branding` + `/api/backup` + `/api/jobs` each mounted once in `index.js`, the three features'
+`api.ts` additions type-check together, SettingsPage mounts each admin section once, and nginx
+`location /api/` already covers every new path. Awaiting the review gate (`review.json` verdict) +
+the merge step.
+
+### `recorder-resilience` — MERGED + PUSHED (CHUNK B: coded + tested + committed + semantic review APPROVED, fast-forward merged into main AND pushed to origin/main)
+Status: isolated git worktree branched off `main` at `.worktrees/recorder-resilience` on branch
+`recorder-resilience`. Runs in PARALLEL with `admin-config` (CHUNK A); scope is STRICTLY confined to
+`src/recorder/` (recorder.js, its helper modules + tests, and `Dockerfile.recorder` for two COPY
+lines) so the two branches cannot collide — admin-config owns api/worker/frontend/compose/schema.
+Implementation plan authored at `.agents/tasks/audiostreamlogger-recorder-resilience-2026-10-23/plan.md`;
+verification evidence at `.agents/tasks/audiostreamlogger-recorder-resilience-2026-10-23/verification.md`.
+NOT decomposed into FEATs and the workflow tail is NOT restructured — the existing implement-and-review
+loop runs the plan. Three recorder-only deliverables (all implemented), plus a scope addition:
+- Per-stream ffmpeg process supervision (Option B): if one stream's ffmpeg dies/errors mid-hour,
+  restart ONLY that stream with capped exponential backoff, within the current hour's window only;
+  the hourly cron run and startup catch-up are preserved unchanged. DESIGN CHOICE: a mid-hour
+  restart writes a NEW same-hour segment file (`<folder>-<stamp>.partN.mp3`) rather than appending,
+  because ffmpeg cannot cleanly append to an mp3 — no overwrite, no data loss, the primary
+  `<folder>-<stamp>.mp3` name is untouched.
+- Graceful shutdown (recorder scope only): on SIGTERM/SIGINT, `command.kill('SIGTERM')` each ffmpeg
+  so the mp3 is finalized (not truncated), stop the cron task + clear the hot-reschedule timer,
+  close the read-only DB handle, exit 0. Worker/api shutdown stays out of scope.
+- Per-stream gap/error logging: replace the swallowed `console.error` with clear greppable per-stream
+  lines on ffmpeg error/exit/restart (conventional console logging, no logging framework) — closes
+  the LOW "ffmpeg errors swallowed" debt.
+- SCOPE ADDITION (user, 2026-10-23) — auto-start a newly-added stream for the remainder of the
+  current hour. A stream added on the settings page (appears in the DB `streams` table) is now
+  recorded immediately instead of waiting for the next hourly cron tick. MECHANISM: Option A, a
+  recorder-only periodic DB poll (`NEW_STREAM_POLL_MS = 30s`) that re-reads the stream list over the
+  existing read-only `node:sqlite` handle and reuses the EXACT startup catch-up path
+  (`runCatchup` → `streamsNeedingCatchup` + the `exists=skip` check → `superviseStream`). This starts
+  a brand-new stream right away, skips streams already recording/recorded this hour, is harmless for
+  streams the cron already handles, is failure-isolated (try/catch per tick, retries next tick), its
+  recordings are supervised/backed-off like any other, and its timer is cleared on SIGTERM/SIGINT.
+  Option B (api pushes to the recorder) was rejected as out of this workflow's recorder-only scope.
+Pure logic extracted for `node:test`: capped backoff-delay calculator + segment-name/within-hour
+helpers in a new `src/recorder/backoff-helpers.js`, and the `streamsNeedingCatchup` selector in a new
+`src/recorder/catchup-helpers.js`, both mirroring the `time-helpers.js` split. Verified in a throwaway
+`node:26-bookworm` container (host has no Node): `node --check` on all five recorder JS files +
+`node --test` for the recorder (existing suites stay green + the new backoff/catchup helper tests
+pass — 28 tests total), `docker compose build recorder` (confirms the two new COPY lines), a built-image
+`require()` smoke check, and a `git diff --name-only` scope check listing only `src/recorder/`
+(+ `Dockerfile.recorder`). Committed on `recorder-resilience`, then fast-forward merged into `main`
+(f348ccc..b293435, recorder files only) and pushed: `main` == `recorder-resilience` == b293435 on
+origin/main, and `recorder-resilience` pushed to origin with upstream tracking.
+REVIEW (2026-10-23): semantic review APPROVED — gate `.agents/tasks/audiostreamlogger-recorder-resilience-2026-10-23/review.json`
+`verdict=APPROVED`, no blocking findings. All six requirement areas (per-stream supervision + bounded
+backoff + current-hour segment behavior, graceful SIGTERM/SIGINT shutdown, per-stream greppable
+logging, preservation of DB-minute read/hot-reschedule/catch-up/time-helpers/heartbeat/cron try-catch,
+pure helpers + node:test, and strict `src/recorder/`-only scope) verified. Two NON-blocking findings
+noted for later: (1) an early ffmpeg `end` with no `error` is not restarted (dropped inputs normally
+surface as `error`, which IS restarted); (2) the 30s new-stream poll could re-select a just-started
+stream if ffmpeg has not yet created its file within the window. Next: the merge step.
 
 ### `security-update` — MERGED INTO `main`
 Status: done, APPROVED, rebased onto `main` and fast-forward merged. Worktree + branch cleaned up.
@@ -251,10 +344,14 @@ merge minimal. `node:test` suite `time-helpers.test.js` added (7/7).
 Two parts, independent:
 
 Quick win (frontend; can fold into the settings workflow or stand alone, NO DB needed):
-- [ ] The hour dropdown currently shows a hardcoded 00-23. Replace it with only the hours that
+- [x] The hour dropdown currently shows a hardcoded 00-23. Replace it with only the hours that
       actually exist for the chosen stream + day. That data is already in /settings2 (browse tree
       station -> year -> month -> day -> hours[]). Wire the selector to that instead of hardcoded.
-      (Likewise optionally limit the day picker to days with recordings.)
+      DONE on `admin-config` (FEAT-002): `App.tsx` fetches `getSettings2()` and derives the
+      `#hourSelector` options via pure `player-hours.ts` helpers
+      (`displayNameForFolder` + `existingHoursFor`, vitest-covered); the hardcoded HOURS constant
+      is gone and it still works for anonymous users (/settings2 is public). The day picker was
+      left unconstrained for now (noted as optional in the step).
 
 Larger feature (AFTER the DB exists; separate later workflow):
 - [ ] `recordings` table in the DB: per recording stream/date/hour + duration + file size + status
@@ -494,7 +591,14 @@ IMPLEMENTATION PROGRESS (2026-10-23):
       0 restarts across the job runs. Torn down with `down` (NOT `-v`); root-owned smoke artifacts
       cleaned up so `./data` and `.worktrees` stay clean.
 
-### 11. Recorder: robust per-stream process management (DECIDED — Option B)
+### 11. Recorder: robust per-stream process management (DECIDED — Option B) — MERGED + PUSHED (CHUNK B)
+IMPLEMENTED + TESTED + COMMITTED on the `recorder-resilience` branch (plan at
+`.agents/tasks/audiostreamlogger-recorder-resilience-2026-10-23/plan.md`, verification at
+`.agents/tasks/audiostreamlogger-recorder-resilience-2026-10-23/verification.md`; see the branch
+section above), reviewed APPROVED, then fast-forward merged into main and pushed (main == b293435). Ran in parallel with CHUNK A, strictly confined to
+`src/recorder/`. Per-stream supervision with capped exponential backoff, recorder-scope graceful
+shutdown (SIGTERM/SIGINT finalizes each mp3 via `kill('SIGTERM')`), greppable per-stream error/gap
+logging, and the scope-added periodic new-stream catch-up poll are all in place.
 Current: one recorder container loops over all streams and starts an ffmpeg process per stream
 inside that single container; all streams share one fate and failures are logged-and-swallowed.
 User confirmed the recorder stays ONE container (continuous recording, not an on-demand job — see
@@ -534,6 +638,49 @@ Icon / favicon (a bit more — it's an uploaded BINARY file, not a text setting)
 
 Order: small-to-medium; fold into the settings/admin-screen + DB-config work. The title is trivial;
 the icon upload needs a small file-upload + storage/validation story.
+
+### 16. Auto-start a newly-added stream for the rest of the current hour (user wish)
+When a new stream is added on the settings page, it should immediately start recording and keep
+going until the end of the current hour, then join the normal hourly cycle — exactly like the
+existing startup catch-up, but triggered by a stream being ADDED rather than by boot.
+- Reuses the recorder's existing building blocks: the startup catch-up logic, the
+  `secondsUntilNextHour` helper, and the DB-backed stream list (recorder already reads streams
+  read-only from the DB).
+- Mechanism (PROPOSED — Option A, confirm when building): the recorder PERIODICALLY polls the DB
+  stream list (e.g. every 30-60s) and, for any stream with no recording yet for the current hour,
+  starts a remainder-of-the-hour recording. The existing "exists = skip" check prevents
+  double-recording streams that already have a file. Simple, fits the read-only-DB model, no new
+  infra; downside is up-to-~1-min latency before recording starts.
+  - Alternative (Option B, heavier): the api actively signals the recorder (HTTP endpoint or a job
+    row). More direct but makes the recorder half-controllable — less preferred.
+- Order: AFTER Chunk B merges (it touches src/recorder/recorder.js — doing this concurrently would
+  conflict). NOT folded into Chunk B (its plan was already finalized as supervision/shutdown/logging
+  only). Decide Option A vs B with the user at build time.
+
+### 14. Validate stream URLs are reachable/valid when setting them (user wish)
+Two levels — decide at build time how deep to go:
+- [ ] Format validation (already done in settings-db-core / stream CRUD: must be a valid http(s)
+      URL). Keep this.
+- [ ] NEW: actually CHECK the stream URL is reachable / is a real audio stream when the user
+      saves it in the admin screen — i.e. a server-side test request (HEAD/GET with a short
+      timeout, check status + content-type looks like audio, maybe read a few bytes), returning a
+      clear pass/fail to the admin UI. Consider: do it on save (block invalid) vs. a "Test" button
+      next to the field (non-blocking). Network-dependent, so handle timeouts/unreachable
+      gracefully and don't hang the request. Likely a small api endpoint + a button in the stream
+      form. Decide blocking-on-save vs. test-button with the user when building.
+Order: small-to-medium admin feature; fold into the admin-screen work or a follow-up to Chunk A.
+
+### 15. Stop replacing `_` with a space in stream names (user decision 2026-10-23)
+History: the project was originally built requiring stream names to use `_` instead of spaces
+(spaces broke the old code), and the frontend compensated by replacing `_` -> space when
+displaying. User now wants `_` to stay `_` everywhere — no display-time substitution.
+- [ ] Remove the `name.replace(/_/g, ' ')` display substitution everywhere it occurs (the player
+      stream selector in App.tsx and anywhere in the admin screen / browse-tree that does it).
+      Show the stored name verbatim. (Also check the api's /settings2 browse-tree key building —
+      it historically mapped underscores to spaces for the station key; that must stay verbatim too
+      if we want names shown as stored.)
+- Being FOLDED INTO the running `admin-config` (Chunk A) workflow since it touches src/frontend
+  (sent as a scope addition 2026-10-23) to avoid a frontend merge conflict.
 
 ### 13. Wavesurfer: scroll-to-zoom at the cursor (user wish)
 - [ ] In the waveform, scrolling (mouse wheel) should zoom IN/OUT, centered on the point under
