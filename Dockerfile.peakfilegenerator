@@ -21,6 +21,7 @@ RUN npm install
 
 # Copy the peakfilegenerator script
 COPY src/peakfilegenerator/peakfilegenerator.js ./
+COPY src/peakfilegenerator/filename-utils.js ./
 
 # Ensure the audio directory exists
 RUN mkdir -p /usr/src/app/audio

@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const cron = require('node-cron');
+const { extractFileDateTime } = require('./filename-utils');
 const audioDirectory = path.join(__dirname, `/audio`);
 
 // Getting the retention time of logs from the settings.json
@@ -46,7 +47,11 @@ function generatePeakFiles() {
                 const jsonFilePath = path.join(outputFolder, `${filename}.json`);
 
                 // Extract date-time from this specific filename
-                const fileDateTime = filename.match(/\d{4}-\d{2}-\d{2}-\d{2}/)[0];
+                const fileDateTime = extractFileDateTime(filename);
+                if (fileDateTime === null) {
+                    console.log(`Skipping file with no date pattern: ${file}`);
+                    return;
+                }
 
                 // Skip the file if the file is of the current hour
                 if (fileDateTime === currentDateTime) {

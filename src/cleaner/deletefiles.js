@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const cron = require('node-cron');
+const { validateRetentionHours } = require('./settings-utils');
 
 
 // Getting the retention time of logs from the settings.json
@@ -17,15 +18,13 @@ try {
 const log_retention = settings.cleaner.log_retention;
 const cleaner_minute = settings.cleaner.cleaner_minute;
 
-// If the log_retention variable is bigger than 0 and an integer, it throws an error.
-try {
-    if (!Number.isInteger(log_retention) || log_retention < 1 || log_retention > 59) {
-      throw new Error("ERROR! The log_retention variable in settings.json must be an integer bigger than 0. The cleaner is will be shutdown.");
-    }
-  } catch (error) {
-    console.error(error.message);
+// The log_retention (in hours) must be a valid integer; otherwise the config is
+// unrecoverable and the cleaner shuts down.
+const retentionCheck = validateRetentionHours(log_retention);
+if (!retentionCheck.ok) {
+    console.error(retentionCheck.message);
     process.exit(1);
-  }
+}
 
   // If the cleaner_minute variable is bigger than 0 and an integer, it throws an error.
 try {
@@ -41,11 +40,10 @@ try {
 // Setting up constants
 const folder = "/audio";
 const folderPath = path.join(__dirname, folder);
-const thresholdTime = new Date(Date.now() - log_retention * 60 * 60 * 1000);
 
 
 // The function that will be called to actually delete files
-function deleteOldFiles(dir) {
+function deleteOldFiles(dir, thresholdTime) {
     fs.readdir(dir, { withFileTypes: true }, (err, files) => {
         if (err) {
             console.error(`Error reading directory ${dir}:`, err);
@@ -56,7 +54,7 @@ function deleteOldFiles(dir) {
             const filePath = path.join(dir, file.name);
             if (file.isDirectory()) {
                 // Recursively check subdirectories
-                deleteOldFiles(filePath);
+                deleteOldFiles(filePath, thresholdTime);
             } else {
                 // If there are files in this directory, check their creation timestamp
                 fs.stat(filePath, (err, stats) => {
@@ -79,7 +77,9 @@ function deleteOldFiles(dir) {
 // Schedule the deleteOldFiles function to run every hour at xx:05
 cron.schedule(`${cleaner_minute} * * * *`, () => {
     console.log(`Running scheduled file deletion at ${new Date().toISOString()}`);
-    deleteOldFiles(folderPath);
+    // Recompute the threshold on every run so the cutoff stays relative to "now".
+    const thresholdTime = new Date(Date.now() - log_retention * 60 * 60 * 1000);
+    deleteOldFiles(folderPath, thresholdTime);
 });
 
 
