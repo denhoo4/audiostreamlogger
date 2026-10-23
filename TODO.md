@@ -7,6 +7,12 @@ Last updated: 2026-10-23 (`job-queue` branch COMPLETE + APPROVED, fast-forward m
 
 ## Branches
 
+### `admin-config` — IN PROGRESS (CHUNK A worktree set up)
+Status: isolated git worktree created for the Chunk A admin-config work, branched off `main`
+(base commit 9e31b3a). Worktree lives at `.worktrees/admin-config` on branch `admin-config`; no
+source edited yet. Task/artifact dir `.agents/tasks/admin-config-2026-10-23/` created for later
+plan/review files. Runs in parallel with the current workflow without touching `main`.
+
 ### `security-update` — MERGED INTO `main`
 Status: done, APPROVED, rebased onto `main` and fast-forward merged. Worktree + branch cleaned up.
 Commits on main: a13c97e, a141df3, ce89639.
