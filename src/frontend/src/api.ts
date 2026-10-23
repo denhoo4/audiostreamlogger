@@ -68,6 +68,60 @@ export type ScheduleInput = Pick<
 >;
 
 /**
+ * Per-stream recording roll-up as returned inside GET /api/analysis/summary
+ * (requireAuth). One entry per stream_folder; total_hours == recording_count
+ * (one row per hour-slot). earliest/latest are 'YYYY-MM-DD-HH' slot keys, or
+ * null when the stream has no rows; avg_duration_seconds is null when no
+ * durations are known. See FEAT-001 services/recordings.js::summarize.
+ */
+export interface AnalysisStreamSummary {
+  stream_folder: string;
+  total_hours: number;
+  storage_bytes: number;
+  recording_count: number;
+  avg_duration_seconds: number | null;
+  earliest: string | null;
+  latest: string | null;
+}
+
+/**
+ * Overall roll-up across every stream, returned alongside per_stream in
+ * GET /api/analysis/summary. Same aggregate fields as a per-stream row plus a
+ * distinct stream_count.
+ */
+export interface AnalysisOverall {
+  total_hours: number;
+  storage_bytes: number;
+  recording_count: number;
+  avg_duration_seconds: number | null;
+  earliest: string | null;
+  latest: string | null;
+  stream_count: number;
+}
+
+/** Shape of GET /api/analysis/summary (requireAuth). */
+export interface AnalysisSummary {
+  per_stream: AnalysisStreamSummary[];
+  overall: AnalysisOverall;
+}
+
+/**
+ * Shape of GET /api/analysis/gaps?folder=&start=&end= (requireAuth): hourly
+ * coverage for one folder over an inclusive date range. `missing` lists the
+ * expected hour slots with no recorded row; coverage_ratio is
+ * present_count/expected_count (0 when expected_count is 0).
+ */
+export interface AnalysisGaps {
+  folder: string;
+  start: string;
+  end: string;
+  expected_count: number;
+  present_count: number;
+  missing: { date: string; hour: string }[];
+  coverage_ratio: number;
+}
+
+/**
  * An api error carrying the backend's {error, field?} body so forms can show
  * the server-side validation message (400) or conflict message (409).
  */
@@ -549,4 +603,41 @@ export function openJobStream(
     onJob(JSON.parse((e as MessageEvent).data) as JobRecord);
   });
   return source;
+}
+
+// --- Recordings analysis client (/api/analysis) --------------------------
+// Read-only admin analytics (storage/duration summary + hourly gap analysis);
+// both routes are behind requireAuth, so the same-origin session cookie travels
+// with each request and ApiError surfaces the backend's {error, field}.
+
+/** GET /api/analysis/summary -> per-stream + overall recording roll-up. */
+export async function getAnalysisSummary(): Promise<AnalysisSummary> {
+  const res = await fetch(`${window.location.origin}/api/analysis/summary`, {
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as AnalysisSummary;
+}
+
+/**
+ * GET /api/analysis/gaps?folder=&start=&end= -> hourly coverage for one folder
+ * over an inclusive date range (YYYY-MM-DD). Throws ApiError on the backend's
+ * 400 validation failures (folder required, start/end format, start <= end).
+ */
+export async function getAnalysisGaps(
+  folder: string,
+  start: string,
+  end: string,
+): Promise<AnalysisGaps> {
+  const params = new URLSearchParams({ folder, start, end });
+  const res = await fetch(
+    `${window.location.origin}/api/analysis/gaps?${params.toString()}`,
+    { credentials: "same-origin" },
+  );
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as AnalysisGaps;
 }

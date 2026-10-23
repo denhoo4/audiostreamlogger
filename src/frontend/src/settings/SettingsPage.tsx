@@ -7,6 +7,7 @@ import JobViewer from "./JobViewer";
 import ChangePasswordForm from "./ChangePasswordForm";
 import BrandingSettings from "./BrandingSettings";
 import WorkerStatus from "./WorkerStatus";
+import RecordingsAnalysis from "./RecordingsAnalysis";
 import BackupSettings from "./BackupSettings";
 
 /**
@@ -80,6 +81,7 @@ export default function SettingsPage() {
       <StreamTable />
       <SchedulerConfig />
       <WorkerStatus />
+      <RecordingsAnalysis />
       <JobViewer />
       <BackupSettings />
       <ChangePasswordForm />
