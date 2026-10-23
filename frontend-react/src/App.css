@@ -1,0 +1,12 @@
+/* Legacy ".button" style preserved 1:1 from frontend/web/style.css for #downloadbutton */
+.button {
+  font: bold 11px Arial;
+  text-decoration: none;
+  background-color: #eeeeee;
+  color: #333333;
+  padding: 2px 6px 2px 6px;
+  border-top: 1px solid #cccccc;
+  border-right: 1px solid #333333;
+  border-bottom: 1px solid #333333;
+  border-left: 1px solid #cccccc;
+}
