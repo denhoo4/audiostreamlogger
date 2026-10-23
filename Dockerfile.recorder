@@ -16,6 +16,7 @@ RUN npm install
 # Copy the recorder script
 COPY src/recorder/recorder.js ./
 COPY src/recorder/time-helpers.js ./
+COPY src/recorder/streams-db.js ./
 
 # Ensure the audio directory exists
 RUN mkdir -p /usr/src/app/audio

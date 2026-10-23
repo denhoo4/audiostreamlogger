@@ -5,39 +5,42 @@
  * object and a `.name`) and returns the nested
  * `{ "Station Name": { year: { month: { day: [hours] } } } }` tree.
  *
- * Behavior is preserved byte-for-byte from the original inline implementation
- * in src/api/routes/api.js (including the implicit-global `transformedJson`
- * and the leaking `station['test']` field, which are deferred follow-ups).
+ * Output is byte-for-byte identical to the original inline implementation in
+ * src/api/routes/api.js. Two earlier cleanups have now been applied: the
+ * `transformedJson` accumulator is a local (no longer an implicit global shared
+ * across requests), and the `transformData` helper is defined once at module
+ * scope instead of being redefined on every call.
  */
+function transformData(originalData) {
+    const transformedData = {};
+
+    for (const station in originalData) {
+        const stationData = originalData[station].logs;
+        transformedData[station] = {};
+
+        for (const year in stationData) {
+            transformedData[station][year] = {};
+
+            for (const month in stationData[year]) {
+                transformedData[station][year][month] = {};
+                const days = Object.keys(stationData[year][month]);
+
+                for (const day of days) {
+                    transformedData[station][year][month][day] = stationData[year][month][day];
+                }
+            }
+        }
+    }
+    return transformedData;
+}
+
 function buildBrowseTree(streams) {
-    transformedJson = {};
+    let transformedJson = {};
     streams.forEach((item) => {
         const key = item.name;
         transformedJson[key] = { ...item };
         delete transformedJson[key].name;
     });
-    function transformData(originalData) {
-        const transformedData = {};
-
-        for (const station in originalData) {
-            const stationData = originalData[station].logs;
-            transformedData[station] = {};
-
-            for (const year in stationData) {
-                transformedData[station][year] = {};
-
-                for (const month in stationData[year]) {
-                    transformedData[station][year][month] = {};
-                    const days = Object.keys(stationData[year][month]);
-
-                    for (const day of days) {
-                        transformedData[station][year][month][day] = stationData[year][month][day];
-                    }
-                }
-            }
-        }
-        return transformedData;
-    }
     transformedJson = transformData(transformedJson);
     const transformedData = {};
 

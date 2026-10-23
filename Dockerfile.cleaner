@@ -13,6 +13,7 @@ RUN npm install
 # Copy the deletefiles script
 COPY src/cleaner/deletefiles.js ./
 COPY src/cleaner/settings-utils.js ./
+COPY src/cleaner/streams-db.js ./
 
 # Ensure the audio directory exists
 RUN mkdir -p /usr/src/app/audio

@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (`recorder-catchup` fast-forward merged into `main` == c36d630; README rewritten as README.md; pushed to origin. `settings-db-core` workflow running — design finalized: the iteration-3 review's 3 open findings (ISO 3166-1 `country` scope, Express-5 session-stack gate, FR-6 cleanup relocation) + 3 NITs closed in `design-final.md`; ISO 3166-1 `country` scope addition folded into the step-1 scope.)
+Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. settings.json still holds cron/retention. .env untracked on main.)
 
 ---
 
@@ -174,16 +174,40 @@ Consequence — settings.json holds two things, both of which get a new home:
 - Remove the settings.json bind-mounts from all services in docker-compose.yml.
 
 EXECUTION (broken into sequential, mergeable steps to keep recorder.js/compose conflicts small):
-- [running] `settings-db-core` (step 1): SQLite + Argon2id admin/admin + session cookie +
-  stream CRUD + basic settings screen + write-path validation + API cleanup + .env.example.
+- [x] `settings-db-core` (step 1) — COMPLETE on branch `settings-db-core` (not yet merged):
+  SQLite + Argon2id admin/admin + session cookie + stream CRUD + basic settings screen +
+  write-path validation + API cleanup + .env.example.
   Streams move to the DB (workers read from the DB too). Cron/retention config STAYS in
   settings.json for this step. (branch settings-db-core, workflow wf_57ab8ef97967fddf)
-  SCOPE ADDITION (user, 2026-10-23): keep all stream fields (country, name, folder, url) on the
-  record and in the add/edit form — do NOT drop `country` even though the player doesn't use it
-  yet. `country` is an ISO 3166-1 dropdown of all countries; store the alpha-2 code (e.g. "NL") in
-  `streams.country`, show the full name in the UI. Seed/migrated stream data stores the code, not
-  the name ("Netherlands" -> "NL"). Folder validation (^[a-z0-9_-]+$) and other field validation
-  unchanged.
+  SCOPE ADDITION (user, 2026-10-23) [DONE in step 1]: kept all stream fields (country, name,
+  folder, url) on the record and in the add/edit form — `country` kept even though the player
+  doesn't use it yet. `country` is an ISO 3166-1 dropdown; stored as alpha-2 code (e.g. "NL") in
+  `streams.country`, full name shown in the UI. Folder validation (^[a-z0-9_-]+$) and other field
+  validation in place.
+  - FEAT-005 (infra + docs wiring) DONE: nginx `/auth/` proxy block added alongside `/api/` +
+    `/util/`; docker-compose mounts `./data` (api RW, recorder/cleaner/peakfilegenerator RO),
+    passes `SESSION_SECRET`/`COOKIE_SECURE` to the api, frontend port defaults to `${PORT:-9703}`,
+    recorder `depends_on` api `service_healthy` while cleaner/peakfilegenerator use plain
+    `depends_on: [api]`; committed `.env.example`; README/TODO updated. settings.json bind mounts
+    kept (cron/retention still read from it this step).
+  - NOTE (DB foundation landed): `better-sqlite3` does NOT compile on node:26-bookworm (its
+    native addon uses V8 APIs removed in Node 26), so the api DB handle uses Node's built-in
+    `node:sqlite` (`DatabaseSync`) instead — no native build, same prepare/exec surface. `argon2`
+    still compiles and is used for the admin hash. `better-sqlite3-session-store` was dropped too.
+    DECIDED for step 2's auth wiring: implement a node:sqlite-backed server-side express-session
+    store (Option A), so logout AND change-password can invalidate sessions server-side (keeps the
+    revocable-session decision; no extra infra). Stateless cookies were rejected.
+  - NOTE (frontend admin view landed): the `/settings` React view is in — a `window.location`
+    path check in `main.tsx` (no router added) renders `SettingsPage` for `/settings` and the
+    unchanged player elsewhere. Logged out shows a login form; logged in shows the stream CRUD
+    table (country as an ISO 3166-1 `<select>`: option value = alpha-2 code, label = full name;
+    read view maps code -> full name) plus a change-password form and logout. Typed
+    `credentials:'same-origin'` client fns added to `api.ts` (`getAuthMe`/`postLogin`/`postLogout`/
+    `changePassword`/`getStreams`/`createStream`/`updateStream`/`deleteStream`) with a `StreamRecord`
+    type (id + timestamps) distinct from the public `Stream`. The frontend bundles its own copy of
+    `iso-3166-1.json` (identical content to the api copy; keep in sync). Also fixed a stale
+    pre-existing assertion in `App.test.tsx` (`dateTimeSelector` -> the actual `dateSelector`/
+    `hourSelector`) so the Vitest suite is green; player behavior unchanged.
 - [ ] step 2: cron + retention into the DB + settings-screen UI; workers reload without restart.
   This is where settings.json is fully removed.
 - [ ] step 3: realtime log viewer in admin (SSE) + conventional logging in the services.
@@ -207,11 +231,14 @@ merge minimal. `node:test` suite `time-helpers.test.js` added (7/7).
   it simple for now, perfection touches graceful shutdown.
 
 ### 7. Tidy up .env handling (user wish, fold into/around the settings workflow)
-- [ ] Add `.env.example` (DOES go into git, with dummy values). The real `.env` stays gitignored
-      (the `!.env.example` exception already exists in .gitignore). (Part of step 1 above.)
-- [ ] Review the frontend port for production: the current `${PORT}:80` in compose + nginx on 80
-      internally is conventional, but check: missing default if PORT is unset, no TLS/HTTPS, a
-      reverse proxy in front. Tidy up where needed.
+- [x] Add `.env.example` (DOES go into git, with dummy values). The real `.env` stays gitignored
+      (the `!.env.example` exception already exists in .gitignore). DONE in FEAT-005 (step 1):
+      committed `.env.example` with `PORT`, `SESSION_SECRET`, `COOKIE_SECURE` + a commented,
+      documented `# APP_PORT=3000`.
+- [~] Review the frontend port for production: the missing-default part is DONE — compose now uses
+      `${PORT:-9703}:80` so an unset PORT no longer breaks compose. TLS/HTTPS and a reverse proxy
+      in front are still out of scope (deferred to step 5); `COOKIE_SECURE` is already plumbed
+      through so enabling the Secure cookie flag under TLS is a config change, not a code change.
 
 ### 8. Hour selector based on existing hours + recordings in the DB for analysis (user wish)
 Two parts, independent:

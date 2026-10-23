@@ -7,8 +7,12 @@ services:
     volumes:
       - ./audio:/usr/src/app/audio
       - ./settings.json:/usr/src/app/settings.json
+      - ./data:/usr/src/app/data:ro
     environment:
       - TZ=Europe/Amsterdam
+    depends_on:
+      api:
+        condition: service_healthy
     healthcheck:
       # 4500s (~75min) > the 60-min cron period, so a worker is flagged unhealthy
       # only once it misses a full tick (not merely between ticks).
@@ -26,8 +30,11 @@ services:
     volumes:
       - ./audio:/usr/src/app/audio
       - ./settings.json:/usr/src/app/settings.json
+      - ./data:/usr/src/app/data:ro
     environment:
       - TZ=Europe/Amsterdam
+    depends_on:
+      - api
     healthcheck:
       # 4500s (~75min) > the 60-min cron period, so a worker is flagged unhealthy
       # only once it misses a full tick (not merely between ticks).
@@ -45,8 +52,11 @@ services:
     volumes:
       - ./audio:/usr/src/app/audio
       - ./settings.json:/usr/src/app/settings.json
+      - ./data:/usr/src/app/data:ro
     environment:
       - TZ=Europe/Amsterdam
+    depends_on:
+      - api
     healthcheck:
       # 4500s (~75min) > the 60-min cron period, so a worker is flagged unhealthy
       # only once it misses a full tick (not merely between ticks).
@@ -64,8 +74,11 @@ services:
     volumes:
       - ./audio:/usr/src/app/audio
       - ./settings.json:/usr/src/app/settings.json:ro
+      - ./data:/usr/src/app/data
     environment:
       - TZ=Europe/Amsterdam
+      - SESSION_SECRET=${SESSION_SECRET:-dev-insecure-session-secret-change-me}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
     # Internal only: reached by nginx via http://api:3000. Not published.
     networks:
       - web-network
@@ -87,7 +100,7 @@ services:
       # nginx serves recorded audio straight from the shared volume (read-only).
       - ./audio:/usr/src/app/audio:ro
     ports:
-      - "${PORT}:80"
+      - "${PORT:-9703}:80"
     environment:
       - TZ=Europe/Amsterdam
     networks:

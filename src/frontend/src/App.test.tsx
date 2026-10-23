@@ -112,7 +112,8 @@ describe("App smoke test", () => {
 
     // Selector row
     expect(document.getElementById("stringSelector")).toBeInTheDocument();
-    expect(document.getElementById("dateTimeSelector")).toBeInTheDocument();
+    expect(document.getElementById("dateSelector")).toBeInTheDocument();
+    expect(document.getElementById("hourSelector")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Inladen!" })).toBeInTheDocument();
 
     // Hidden wait message

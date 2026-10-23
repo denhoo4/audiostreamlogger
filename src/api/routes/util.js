@@ -5,7 +5,9 @@ const os = require('os');
 const path = require('path');
 const ffmpeg = require('fluent-ffmpeg');
 
-router.use(express.json());
+// Body parsing is handled by the single global express.json({limit}) in
+// index.js, mounted before any router — do not add a per-router parser here
+// (design §2.4 step 5).
 
 // Safely remove a temp file; never throws so it can be called from any path.
 function cleanupTempFile(filePath) {
