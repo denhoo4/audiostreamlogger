@@ -4,7 +4,8 @@
     "description": "A Node.js application to record audio streams using fluent-ffmpeg.",
     "main": "recorder.js",
     "scripts": {
-        "start": "node recorder.js"
+        "start": "node recorder.js",
+        "test": "node --test"
     },
     "author": "Your Name",
     "license": "MIT",
