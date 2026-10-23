@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (`job-queue` branch COMPLETE + APPROVED, fast-forward merged into main AND pushed to origin/main: the generic `worker` service replaces the old `cleaner` + `peakfilegenerator` containers, `settings.json` is removed entirely, a DB-driven scheduler in the api enqueues per-type hourly/daily/weekly jobs with a global single-job busy=SKIP lock, and an SSE live job view + Run-now admin UI land. All six FEATs (FEAT-001…006) implemented + tested and the full cross-FEAT integration verification + cold-data docker compose convergence smoke PASSED iteration 1 with no code fixes — see `.agents/tasks/job-queue-2026-10-23/verification.md` and item 10. `main` == `job-queue` == 428a385, pushed to origin/main. Earlier on main: settings-db-core step 1 (SQLite DB via node:sqlite after better-sqlite3 failed on Node 26 + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring). .env untracked on main. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13. `admin-config` branch (CHUNK A) — DONE: APPROVED by the review gate, rebased onto the current main tip and fast-forward MERGED into main AND PUSHED to origin/main. Chunk A delivers five admin-screen / DB-config features: editable page title + editable favicon upload, worker status in the admin screen + a player hour-selector limited to hours that actually exist, and DB backup/export + import. Also folded in: the underscore-to-space name-display workaround is removed (stream/station names shown VERBATIM everywhere incl. /settings2 keys). Verified green in node:26-bookworm (host has no node): api 69 / worker 15 node:test, frontend `npm run build` + 14 vitest. See the `admin-config` branch section below. ALSO: `recorder-resilience` branch (CHUNK B) — ran in PARALLEL with admin-config, strictly confined to `src/recorder/` so the two do not collide; now IMPLEMENTED + TESTED + COMMITTED, semantic review APPROVED, and fast-forward MERGED into main AND PUSHED to origin/main (main == recorder-resilience == b293435; branch also pushed to origin with upstream tracking): per-stream ffmpeg supervision with capped backoff, recorder-scope graceful shutdown (SIGTERM/SIGINT), greppable per-stream error/gap logging, and a scope-added periodic poll that auto-starts a newly-added stream for the rest of the current hour (recorder-only Option A), see item 11 and the `recorder-resilience` branch section below.)
+Last updated: 2026-10-23 (`job-queue` branch COMPLETE + APPROVED, fast-forward merged into main AND pushed to origin/main: the generic `worker` service replaces the old `cleaner` + `peakfilegenerator` containers, `settings.json` is removed entirely, a DB-driven scheduler in the api enqueues per-type hourly/daily/weekly jobs with a global single-job busy=SKIP lock, and an SSE live job view + Run-now admin UI land. All six FEATs (FEAT-001…006) implemented + tested and the full cross-FEAT integration verification + cold-data docker compose convergence smoke PASSED iteration 1 with no code fixes — see `.agents/tasks/job-queue-2026-10-23/verification.md` and item 10. `main` == `job-queue` == 428a385, pushed to origin/main. Earlier on main: settings-db-core step 1 (SQLite DB via node:sqlite after better-sqlite3 failed on Node 26 + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring). .env untracked on main. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13. `admin-config` branch (CHUNK A) — DONE: APPROVED by the review gate, rebased onto the current main tip and fast-forward MERGED into main AND PUSHED to origin/main. Chunk A delivers five admin-screen / DB-config features: editable page title + editable favicon upload, worker status in the admin screen + a player hour-selector limited to hours that actually exist, and DB backup/export + import. Also folded in: the underscore-to-space name-display workaround is removed (stream/station names shown VERBATIM everywhere incl. /settings2 keys). Verified green in node:26-bookworm (host has no node): api 69 / worker 15 node:test, frontend `npm run build` + 14 vitest. See the `admin-config` branch section below. ALSO: `recorder-resilience` branch (CHUNK B) — ran in PARALLEL with admin-config, strictly confined to `src/recorder/` so the two do not collide; now IMPLEMENTED + TESTED + COMMITTED, semantic review APPROVED, and fast-forward MERGED into main AND PUSHED to origin/main (main == recorder-resilience == b293435; branch also pushed to origin with upstream tracking): per-stream ffmpeg supervision with capped backoff, recorder-scope graceful shutdown (SIGTERM/SIGINT), greppable per-stream error/gap logging, and a scope-added periodic poll that auto-starts a newly-added stream for the rest of the current hour (recorder-only Option A), see item 11 and the `recorder-resilience` branch section below. ALSO IN PROGRESS: `recordings-analysis` branch (CHUNK C) — FEAT-001 (api foundation) DONE: a `recordings` table + indexes, the pure filename parser + analysis helpers + upsert data-access, the requireAuth `GET /api/analysis/summary` + `/api/analysis/gaps` router, and a one-time startup backfill reconcile, all in `src/api` with three new node:test files green (api 83 node:test in node:26-bookworm); `/api/settings2` unchanged; recorder/worker/frontend/compose untouched (FEAT-002..004). See the "Larger feature" item 9.)
 
 ---
 
@@ -363,15 +363,28 @@ Quick win (frontend; can fold into the settings workflow or stand alone, NO DB n
       (/settings2 is public). The day picker was left unconstrained for now (noted as optional in
       the step).
 
-Larger feature (AFTER the DB exists; separate later workflow):
-- [ ] `recordings` table in the DB: per recording stream/date/hour + duration + file size + status
-      (complete/partial). Replaces the filesystem scanning in /settings2 with fast, rich queries.
-- [ ] Recorder writes a row per recording; cleaner removes the row on cleanup; peakfilegenerator
-      knows the duration (can fill/update it).
-- [ ] Analysis endpoints on the API (total recording time, gaps/missing hours, storage per stream,
-      average duration) + an analysis view in the frontend.
-- Touches all layers (recorder/cleaner/peakfilegenerator/api/frontend); natural next step once the
-  SQLite DB exists. Deliberately NOT in the first settings-DB workflow (already large).
+Larger feature (AFTER the DB exists; separate later workflow) — IN PROGRESS on branch
+`recordings-analysis` (CHUNK C), decomposed into FEAT-001..004 under
+`.agents/tasks/audiostreamlogger-recordings-analysis-2026-10-23/`:
+- [x] FEAT-001 (api foundation) DONE on `recordings-analysis`: `recordings` table + indexes in
+      `src/api/db/schema.js` (one row per (stream_folder,date,hour) hour-slot, keyed on
+      stream_folder TEXT — NOT a FK; status recording/complete/partial/missing; UNIQUE
+      (stream_folder,date,hour) + idx_recordings_folder_date + idx_recordings_date). Pure
+      filename parser `src/api/lib/recording-name.js` (`parseRecordingFilename` handling the
+      primary + `.partN` convention). `src/api/services/recordings.js` — pure helpers
+      (`expectedHourSlots`/`missingSlots`/`aggregateByStream`) + data-access (`upsertRecording`
+      ON CONFLICT upsert, `listAll`/`listByStreamAndRange`/`summarize`). requireAuth analysis
+      router `src/api/routes/analysis.js` (`GET /api/analysis/summary`, `GET /api/analysis/gaps`)
+      mounted in `index.js`. One-time startup backfill `src/api/services/recordings-backfill.js`
+      (pure `reconcilePlan` + `runBackfill`) wired into the guarded bootstrap after seedJobConfig.
+      Three `node:test` files added; `cd src/api && node --test` green (83 tests) in
+      node:26-bookworm. `GET /api/settings2` unchanged. Recorder/worker/frontend/compose
+      deliberately untouched (owned by FEAT-002..004).
+- [ ] FEAT-002/003/004: recorder writes a row per recording (needs a new RW handle mirroring
+      `src/worker/db.js` + the compose `./data` `:ro`→`rw` flip); worker fills duration/size +
+      cleaner removes/tombstones the row; frontend analysis view consuming the endpoints.
+- Touches all layers (recorder/worker/api/frontend); natural next step now the SQLite DB exists.
+  Deliberately NOT in the first settings-DB workflow (already large).
 
 ### 10. Job queue for on-demand + scheduled cleaner/peakfilegenerator runs — MERGED INTO `main` + PUSHED (Option A)
 Status: done, APPROVED (no findings — `.agents/tasks/job-queue-2026-10-23/review.json`),

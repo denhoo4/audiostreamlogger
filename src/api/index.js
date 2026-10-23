@@ -20,6 +20,14 @@ try {
     const { seedAdmin } = require('./db/seed');
     applySchema(db); // (2) CREATE TABLE IF NOT EXISTS ...
     seedJobConfig(db); // (3) synchronous insert-if-absent schedule/config seed (NIT-4)
+    // (3b) One-time recordings reconcile scan (design_decisions.backfill_owner).
+    // Wrapped so a scan error only logs and never blocks startup.
+    try {
+        const { runBackfill } = require('./services/recordings-backfill');
+        runBackfill(db);
+    } catch (err) {
+        console.error('api: recordings backfill scan failed (non-fatal):', err);
+    }
     // (4) seedAdmin is async (argon2); await it before listening.
     seedAdmin(db)
         .then(startServer)
@@ -83,6 +91,7 @@ function startServer() {
     app.use('/auth', authRouter);
     app.use('/api', apiRouter);
     app.use('/api/jobs', jobsRouter);
+    app.use('/api/analysis', require('./routes/analysis'));
     app.use('/api/branding', brandingRouter);
     app.use('/api/backup', backupRouter);
     app.use('/util', utilRouter);

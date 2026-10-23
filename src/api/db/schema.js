@@ -76,6 +76,37 @@ CREATE TABLE IF NOT EXISTS app_config (
 );
 `;
 
+// One row per (stream_folder, date, hour) hour-slot (design_decisions.table_grain):
+// .partN segments fold into the single hour row via segment_count + aggregate
+// size_bytes/duration_seconds. stream_folder is the stable on-disk key, NOT a FK
+// to streams.id (design_decisions.key_choice) — files/rows outlive a deleted or
+// renamed stream, so per-stream queries lean on the index below instead.
+const RECORDINGS_TABLE = `
+CREATE TABLE IF NOT EXISTS recordings (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  stream_folder    TEXT    NOT NULL,
+  date             TEXT    NOT NULL,
+  hour             TEXT    NOT NULL,
+  file_path        TEXT    NOT NULL,
+  status           TEXT    NOT NULL
+                     CHECK (status IN ('recording','complete','partial','missing')),
+  duration_seconds REAL,
+  size_bytes       INTEGER,
+  segment_count    INTEGER NOT NULL DEFAULT 1,
+  created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (stream_folder, date, hour)
+);
+`;
+
+const RECORDINGS_FOLDER_DATE_INDEX = `
+CREATE INDEX IF NOT EXISTS idx_recordings_folder_date ON recordings (stream_folder, date);
+`;
+
+const RECORDINGS_DATE_INDEX = `
+CREATE INDEX IF NOT EXISTS idx_recordings_date ON recordings (date);
+`;
+
 function applySchema(db) {
     db.exec(STREAMS_TABLE);
     db.exec(USERS_TABLE);
@@ -84,6 +115,9 @@ function applySchema(db) {
     db.exec(JOBS_CREATED_INDEX);
     db.exec(SCHEDULES_TABLE);
     db.exec(APP_CONFIG_TABLE);
+    db.exec(RECORDINGS_TABLE);
+    db.exec(RECORDINGS_FOLDER_DATE_INDEX);
+    db.exec(RECORDINGS_DATE_INDEX);
 }
 
 module.exports = { applySchema };

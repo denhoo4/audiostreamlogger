@@ -1,0 +1,86 @@
+/**
+ * Backfill reconcile coverage (FEAT-001): reconcilePlan plans an upsert only for
+ * slots not already present, folds a .partN segment into segment_count + status
+ * 'partial', and is idempotent on a second run over the same scanned set.
+ */
+const { test } = require('node:test');
+const assert = require('node:assert');
+
+const { reconcilePlan } = require('../services/recordings-backfill');
+
+function scanned(folder, date, hour, part) {
+    return {
+        folder,
+        date,
+        hour,
+        part,
+        file_path: `/audio/${folder}/${folder}-${date}-${hour}${
+            part === 1 ? '' : `.part${part}`
+        }.mp3`,
+    };
+}
+
+test('reconcilePlan plans upserts only for slots not already present', () => {
+    const existing = new Set(['radio1|2026-10-23|09']);
+    const files = [
+        scanned('radio1', '2026-10-23', '09', 1), // already present -> skipped
+        scanned('radio1', '2026-10-23', '10', 1), // new
+        scanned('radio2', '2026-10-23', '00', 1), // new
+    ];
+
+    const plan = reconcilePlan(existing, files);
+    assert.strictEqual(plan.length, 2);
+    const keys = plan.map((p) => `${p.stream_folder}|${p.date}|${p.hour}`).sort();
+    assert.deepStrictEqual(keys, ['radio1|2026-10-23|10', 'radio2|2026-10-23|00']);
+    for (const p of plan) {
+        assert.strictEqual(p.status, 'complete');
+        assert.strictEqual(p.segment_count, 1);
+    }
+});
+
+test('reconcilePlan folds a .partN segment into segment_count + status partial', () => {
+    const files = [
+        scanned('radio1', '2026-10-23', '09', 1),
+        scanned('radio1', '2026-10-23', '09', 2),
+        scanned('radio1', '2026-10-23', '09', 3),
+    ];
+    const plan = reconcilePlan(new Set(), files);
+    assert.strictEqual(plan.length, 1, 'all segments fold into one hour-slot');
+    assert.strictEqual(plan[0].status, 'partial');
+    assert.strictEqual(plan[0].segment_count, 3);
+    // file_path points at the primary file for the slot.
+    assert.strictEqual(
+        plan[0].file_path,
+        '/audio/radio1/radio1-2026-10-23-09.mp3'
+    );
+});
+
+test('reconcilePlan with only a .partN (no primary) is still partial', () => {
+    const files = [scanned('radio1', '2026-10-23', '09', 2)];
+    const plan = reconcilePlan(new Set(), files);
+    assert.strictEqual(plan.length, 1);
+    assert.strictEqual(plan[0].status, 'partial');
+    assert.strictEqual(plan[0].segment_count, 1);
+    assert.strictEqual(
+        plan[0].file_path,
+        '/audio/radio1/radio1-2026-10-23-09.part2.mp3'
+    );
+});
+
+test('reconcilePlan is idempotent: a second run over the same set plans nothing', () => {
+    const files = [
+        scanned('radio1', '2026-10-23', '09', 1),
+        scanned('radio1', '2026-10-23', '09', 2),
+        scanned('radio2', '2026-10-23', '00', 1),
+    ];
+
+    const first = reconcilePlan(new Set(), files);
+    assert.strictEqual(first.length, 2);
+
+    // Feed the first run's produced keys back as "already present".
+    const now = new Set(
+        first.map((p) => `${p.stream_folder}|${p.date}|${p.hour}`)
+    );
+    const second = reconcilePlan(now, files);
+    assert.strictEqual(second.length, 0, 'nothing new to upsert on a re-run');
+});
