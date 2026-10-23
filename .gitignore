@@ -2,3 +2,5 @@ node_modules
 audio/*
 settings.json
 .env
+.agents/
+.worktrees/

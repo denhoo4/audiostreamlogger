@@ -1,7 +1,0 @@
-{
-  "task_id": "task-audiostreamlogger-modernize-secure",
-  "task_description": "Modernize the audiostreamlogger Node.js + Docker Compose project (Node 26, Express 5, node-cron 4, fluent-ffmpeg latest, rewrite the peakfilegenerator Dockerfile to install audiowaveform 1.10.2 from the BBC bookworm .deb, remove bogus/builtin npm deps and unused auth packages, add .dockerignore, fix readme) and fix all confirmed security issues in the frontend (path traversal + temp-file leak in /selection-export, wide-open CORS, nginx autoindex, hardcoded port). All work happens in the worktree; every image must build and the stack must run without crash-looping.",
-  "status": "completed",
-  "feature_order": ["FEAT-001", "FEAT-002"],
-  "blocked_reason": null
-}
