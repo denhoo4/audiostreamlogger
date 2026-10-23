@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Levend document om de modernisering/opschoning van het project bij te houden.
-Laatst bijgewerkt: 2026-10-23 (API-split gemerged naar main via fast-forward)
+Laatst bijgewerkt: 2026-10-23 (`recorder-catchup` fast-forward gemerged naar `main` == c36d630, inhaal-opname afgerond; lokaal, nog NIET gepusht)
 
 ---
 
@@ -51,14 +51,86 @@ geen blokkerende findings.
 
 ---
 
+### `techdebt-high` — GEMERGED NAAR `main` (lokaal, nog NIET gepusht)
+Status: afgerond, APPROVED, fast-forward gemerged in `main` (`main` == `techdebt-high` == 5625599,
+was al op de `main`-tip fccedef gebaseerd dus rebase was een no-op). NIET gepusht — origin staat op
+"Rollback", de user pusht handmatig. Worktree `.worktrees/techdebt-high` blijft staan tot de
+orchestrator opruimt. Commits op `main` (op fccedef): 7d967db, 446b46f, ff28ff3, f69df16, 5625599.
+Alle vijf HIGH-items zijn hiermee afgevinkt (zie de HIGH-lijst onderaan).
+
+Worktree op `.worktrees/techdebt-high`, branch `techdebt-high` op basis van `main`
+(fccedef). Hier zijn de HIGH technical-debt-items opgepakt (zie de HIGH-lijst onderaan).
+Plan + FEAT-decompositie zijn geschreven (`.agents/tasks/techdebt-plan.md`,
+`.agents/tasks/task.json` + `context.json` + `features/FEAT-001..004.json`). De vijf items zijn
+opgeknipt in vier features: FEAT-001 (api `/settings2` bevestigen + transform-helper),
+FEAT-002 (peakfile-regex guard + cleaner-retentie), FEAT-003 (crash-resilience: try/catch in
+cron, `restart: unless-stopped` + healthchecks, `/healthz`), FEAT-004 (minimale `node:test`-suite).
+Keuze: per-service helpers i.p.v. één gedeelde module, om de Docker-COPY's simpel te houden
+(de `validateMinute`-duplicatie blijft een uitgestelde MEDIUM-follow-up). De implementatie-workflow
+(coder-per-FEAT + convergentie-loop met reviewer) loopt nu; een latere stap rebaset de worktree en
+merget naar `main`, de orchestrator ruimt daarna op.
+
+Voortgang op de branch (nog NIET op `main`):
+- FEAT-002 AFGEROND (worker-correctheid, HIGH-items 2 en 4). Nieuwe per-service helpers
+  `src/peakfilegenerator/filename-utils.js` (`extractFileDateTime` → match of `null`, geen
+  `[0]` op null) en `src/cleaner/settings-utils.js` (`validateMinute` 0..59 +
+  `validateRetentionHours` 1..8760). `peakfilegenerator.js` slaat nu `.mp3`-bestanden zonder
+  datumpatroon over (log + `return`) i.p.v. de hele run te laten crashen. `deletefiles.js`
+  accepteert `log_retention` tot 8760u (168 werkt nu) en berekent `thresholdTime` elke cron-run
+  opnieuw (via parameter). `cleaner_minute`-check bewust op de oude 1..59-grens gehouden
+  (gedrag niet verruimd). Beide nieuwe modules hebben een eigen `COPY`-regel gekregen in
+  `Dockerfile.peakfilegenerator`/`Dockerfile.cleaner`. Geverifieerd: `node --check` op alle vier
+  bestanden + `docker compose -p asl-techdebt build peakfilegenerator cleaner` (beide images, exit 0).
+- FEAT-003 AFGEROND (crash-resilience, HIGH-item 3). Elke cron-callback in `recorder.js`,
+  `deletefiles.js` en `peakfilegenerator.js` zit nu in een try/catch die een greppable
+  `'<service>:'`-regel logt en `return`t i.p.v. te crashen; de boot-config-exits (settings lezen +
+  minuut-/retentie-validatie) zijn bewust intact gelaten. Alle drie workers schrijven een
+  `/tmp/heartbeat` (ISO-timestamp) via een logging-only helper, één keer na boot-validatie en aan
+  het begin van elke cron-tick. `src/api/index.js` heeft een `GET /healthz` → 200 `{status:'ok'}`
+  (geen disk-I/O). `docker-compose.yml`: `restart: unless-stopped` op alle vijf services +
+  healthchecks (workers = heartbeat-versheid `age<4500s`, api = `node http /healthz`, frontend =
+  `curl` op nginx-root). `curl` moest worden toegevoegd aan stage 2 van `Dockerfile.frontend`
+  (nginx:1.27-bookworm heeft het niet). Geverifieerd: `node --check` op de vier bestanden,
+  `PORT=9797 docker compose -p asl-techdebt build` (alle vijf images), en een smoke-test
+  (`-p asl-techdebt`, `PORT=9797`) waarin alle vijf containers `healthy` werden en
+  `curl /api/settings` → 200; daarna `down -v`. NB: `/api/settings2` gaf 500 door een lege
+  gemounte `audio/` (geen stream-subfolders → ENOENT in `routes/api.js`), een
+  omgevings-/data-conditie los van FEAT-003 (opgelost tijdens de integratieverificatie, zie hieronder).
+- CROSS-FEAT INTEGRATIEVERIFICATIE AFGEROND (integration-fixer op `techdebt-high`). Alle drie de
+  `node:test`-suites (cleaner 4/4, peakfilegenerator 2/2, api 3/3) + `node --check` op de negen
+  runtime/helper-bestanden draaiden exit 0 in node:26-bookworm. `PORT=9797 docker compose
+  -p asl-techdebt build` bouwde alle vijf images; smoke-up had alle vijf containers `healthy` en
+  `/api/settings` → 200. Eén seam gefixt: de in FEAT-003 gesignaleerde `/settings2`-500 op een
+  verse stack is opgelost — `folderContent()` in `src/api/routes/api.js` behandelt een nog-niet-
+  bestaande stream-subfolder (ENOENT) nu als lege logs (`return {}`) i.p.v. de hele `Promise.all`
+  te laten rejecten; andere fouten blijven doorpropageren. `/api/settings2` → 200 (geneste tree,
+  leeg per station zolang er geen opnames zijn). Daarna `down -v`; de 9703/audiostreamlogger-stack
+  bleef onaangeroerd. Commit op `techdebt-high` (nog NIET gemerged/gepusht).
+- FEAT-004 AFGEROND (minimale backend-testsuite, HIGH-item 5). Drie `node:test`+`node:assert`-
+  suites toegevoegd op de pure helpers uit FEAT-001/FEAT-002, zonder nieuwe dependency:
+  `src/cleaner/test/settings-utils.test.js` (`validateMinute` 0/59 ok, verwerpt -1/60/1.5/'x';
+  `validateRetentionHours` 1/168/8760 ok, verwerpt 0/9000/1.5/'x'),
+  `src/peakfilegenerator/test/filename-utils.test.js` (`extractFileDateTime` → stamp of `null`),
+  `src/api/test/settings-transform.test.js` (`buildBrowseTree` → geneste tree, `_`→spatie in namen,
+  `{}` bij lege array). `"test": "node --test"` toegevoegd aan de drie `package.json`'s (api kreeg
+  een nieuw `scripts`-blok). `test/`-mappen bewust NIET in enige Dockerfile-COPY opgenomen (images
+  kopiëren alleen runtime-`.js`). Geverifieerd via `node:26-bookworm`-containers (geen host-Node):
+  cleaner 4/4, api 3/3, peakfilegenerator 2/2 — alle exit 0.
+
+---
+
 ## Afgesproken vervolgstappen
 
 ### 1. Merge-volgorde — AFGEROND
 - [x] `security-update` -> `main` (gerebased, ff-merge, artefact-conflicten opgelost).
 - [x] `frontend-react` -> `main` (ff-merge).
+- [x] `techdebt-high` -> `main` (ff-merge; `main` == 5625599). Commits: 7d967db, 446b46f,
+      ff28ff3, f69df16, 5625599.
 - [x] `docker compose build` op gemergde `main` bouwt alle vier de images schoon.
 - [x] Worktrees + tijdelijke branches opgeruimd; `.agents/` uit tracking gehaald en gitignored.
+      (Worktree `.worktrees/techdebt-high` blijft nog even staan tot de orchestrator opruimt.)
 - [ ] Nog NIET gepusht naar `origin/main` (wacht op akkoord user; origin staat op "Rollback").
+      Lokaal staat `main` nu 5 commits voor op `origin/main`.
 
 ### 2. API-laag lostrekken van de frontend  (netheid; API is alleen voor de frontend)
 Gekozen eindbeeld (same-origin, geen CORS nodig). STATUS: GEÏMPLEMENTEERD + GEVERIFIEERD
@@ -106,13 +178,134 @@ Besloten aanpak (LATERE fase, ná de API-splitsing):
 - [ ] Recorder (en peakfilegenerator/cleaner waar relevant) leest streams per cron-run uit de DB
       i.p.v. het bestand, zodat wijzigingen werken zonder container-herstart.
 - [ ] Cron/retentie-config: standaard naar env vars in compose (zet-en-vergeet).
-Beslissingen vooraf nodig:
-- [ ] AUTH. Een schrijvend settings-scherm mag niet publiek-schrijfbaar zijn. Auth is nu
-      bewust uitgesteld; die vraag komt hier onvermijdelijk terug. Beslissen vóór bouw.
-- [ ] Open vraag aan user: moeten cron/retentie óók via het scherm aanpasbaar zijn
-      (maakt het complexer: services moeten dan herladen), of blijft dat env-only?
-- [ ] DB-keuze SQLite vs Postgres (hangt af van verwachte aantal streams / gebruikers).
-Volgorde: doen ná de API-splitsing (stap 2), want het scherm hangt af van de API-vorm.
+AUTH (BESLOTEN: settings-scherm komt achter een inlogmuur). Voorgestelde aanpak,
+wacht op bevestiging van 4 keuzes door user:
+- Wachtwoord NOOIT plain opslaan — alleen een bcrypt (of argon2) hash in de DB.
+- `users`/`admin`-tabel in dezelfde DB als de streams.
+- Seed bij verse installatie (voorstel A): idempotente startup-seed vanuit env var
+  `ADMIN_PASSWORD` (in .env / compose). Bij opstart: bestaat er een admin? Zo nee,
+  aanmaken met de hash van ADMIN_PASSWORD. Geen secret in code of DB-seed. Sluit aan
+  op bestaand .env-patroon + de `.env.example` die al in .gitignore-uitzondering staat.
+- Login-flow (voorstel): POST /auth/login -> httpOnly session-cookie (geen JWT; overkill).
+  Werkt same-origin via nginx, geen CORS-gedoe.
+- Alleen de BEHEER-endpoints (POST/PUT/DELETE /api/streams) achter auth-middleware;
+  de publieke lees-endpoint /api/settings (selector) blijft open.
+BESLOTEN keuzes (user, 2026-10-23):
+- Cron + retentie OOK via het settings-scherm (NIET env-only). Dus deze config komt in de DB,
+  en de workers moeten de waarden kunnen herladen zonder herstart (recorder plant zijn cron
+  opnieuw in bij wijziging). Bewust gekozen complexiteit.
+- Sessie-duur: gangbare default (bv. 7 dagen, httpOnly cookie).
+- Write-path validatie: JA — folder-allowlist (^[a-z0-9_-]+$) + path.resolve-containment,
+  want folder wordt user-input via het scherm.
+- Graceful shutdown: netjes afkappen — SIGTERM/SIGINT handler sluit lopende ffmpeg netjes af.
+  (Raakt recorder.js; plannen t.o.v. recorder-catchup + settings-db.)
+- Logging: realtime log-schermpje in het admin/settings-scherm (logs streamen naar frontend,
+  bv. via Server-Sent Events). Gebruikelijke, niet te uitgebreide logging; later bijsturen.
+- Push-beleid: ik MAG pushen naar origin/main na elke geslaagde merge (user akkoord).
+- DB: SQLite op een persistent volume (./data/app.db bind-mount, overleeft rebuild).
+  Postgres bewust NIET (te veel overhead voor 1 beheerder + handvol streams).
+- Hashing: Argon2id (npm `argon2`). Post-quantum bewust NIET — PQC gaat over asymmetrische
+  crypto (RSA/ECC/Shor); wachtwoord-hashing is hash-gebaseerd, Grover halveert alleen de
+  bit-sterkte. Argon2id is de OWASP-aanbeveling 2026. Post-quantum hashing is academisch/overkill.
+- Seed: kale opstart => idempotent één admin-user, username `admin` / wachtwoord `admin`
+  (Argon2id-hash). GEEN env-override (puur admin/admin, user-keuze).
+- `users`-tabel (schema klaar voor meerdere users), nu met één admin geseed.
+- Wachtwoord-wijzigen in het settings-scherm (om van admin/admin af te komen).
+- Auth: httpOnly session-cookie, opgezet zodat het later óók functies op het HOOFDscherm
+  kan afschermen (niet alleen settings).
+- Schrijf-endpoints (POST/PUT/DELETE /api/streams + auth) achter de muur; publieke lees-
+  endpoint /api/settings (selector) blijft open.
+SCOPE-AANSCHERPING (user, 2026-10-23): settings.json moet NA deze workflow HELEMAAL weg.
+Gevolg — settings.json bevat nu twee dingen, die allebei een nieuw huis krijgen IN deze workflow:
+- Streams -> SQLite DB. De workers (recorder/cleaner/peakfilegenerator) moeten dus óók uit de
+  DB gaan lezen i.p.v. settings.json (de eerder geparkeerde "fase 2" wordt nu onderdeel hiervan,
+  want het bestand mag niet blijven bestaan).
+- Cron-minuten + log_retention (recorder_minute/cleaner_minute/peakfile_minute/log_retention)
+  -> env vars in docker-compose.yml (zet-en-vergeet infra-config, hoort niet in de DB).
+- De settings.json bind-mounts uit alle services in docker-compose.yml verwijderen.
+GEVOLG VOOR VOLGORDE: omdat dit nu óók recorder.js raakt, botst het met de recorder-inhaal-
+opname. BESLUIT user (2026-10-23): Optie Y — TOCH PARALLEL starten; het merge-conflict op
+recorder.js wordt achteraf handmatig opgelost (recorder-inhaalopname voegt startup-logica toe,
+settings-workflow zet de stream-bron om naar de DB).
+
+### 7. .env netjes verwerken (user-wens, meenemen in/rond de settings-workflow)
+- [ ] `.env.example` toevoegen (gaat WEL mee naar git, met dummy-waarden). Echte `.env` blijft
+      gitignored (uitzondering `!.env.example` staat al in .gitignore).
+- [ ] Frontend-poort beoordelen voor productie: huidige `${PORT}:80` in compose + nginx op 80
+      intern is gangbaar, maar check: ontbrekende default als PORT niet gezet is, geen TLS/HTTPS,
+      reverse-proxy ervoor. Netjes maken waar nodig.
+
+AANDACHTSPUNT (uit FEAT-003 notificatie) — OPGELOST op `techdebt-high` tijdens de cross-FEAT
+integratieverificatie: `/api/settings2` gooide 500 (ENOENT) als een stream-subfolder in `audio/`
+nog niet bestond (verse stack). `folderContent()` behandelt ENOENT nu als lege logs (`return {}`),
+dus het endpoint geeft weer 200 (geneste tree, leeg per station). Verdere `/settings2`-opschoning
+(impliciete global, dubbel transform-pass, lekkend `test`-veld) blijft bij het API-werk in de
+settings-workflow.
+
+AUTOMATISCH STARTEN (user-opdracht): zodra de tech-debt-workflow (wf_0322f1b98fd9ecf7) klaar
+is EN gemerged naar main, start ik UIT MEZELF twee PARALLELLE workflows (Optie Y):
+  1. recorder-catchup  — branch recorder-catchup: startup-inhaalopname voor het restant van
+     het huidige uur per stream (zie item 6). Raakt src/recorder/recorder.js.
+  2. settings-db       — branch settings-db: SQLite + Argon2id admin/admin + session-cookie +
+     stream-CRUD + settings-scherm; settings.json VOLLEDIG weg (streams->DB incl. workers,
+     cron-minuten/retentie->env vars, mounts eruit); + .env.example + productie-poort-check
+     (/settings2-ENOENT-randgeval is al opgelost op `techdebt-high`). Raakt api/frontend/compose
+     EN src/recorder/recorder.js.
+     + API-OPSCHONING (user-wens): maak de API netter. Concreet:
+       - /settings2 opschonen: transformData niet meer per-request definiëren, dubbele
+         transform-pass samenvoegen, impliciete global transformedJson (geen const/let) weg
+         = gedeelde mutable state tussen requests, en het lekkende debug-veld `test`
+         (intern absoluut pad) uit de response halen.
+       - consistente error-handling + response-vormen over endpoints; nette express.json() limit;
+         dode/dubbele route-mounts opruimen (check /logger-alias is echt weg).
+       - logische mapstructuur (routes/controllers/lib) nu de API een echte service wordt
+         met DB + auth. Combineren met de DB-omzetting want databron van /settings2 verandert
+         toch (streams uit DB i.p.v. settings.json).
+Na beide merges: recorder.js-conflict handmatig oplossen.
+
+### 6. Recorder: inhaal-opname bij opstarten  (AFGEROND — gemerged naar `main`, lokaal, NIET gepusht)
+Status: GEÏMPLEMENTEERD op branch `recorder-catchup`, APPROVED, fast-forward gemerged in `main`
+(`main` == `recorder-catchup` == c36d630, rebase op `main`-tip 5625599 was een no-op/clean).
+NIET gepusht. Worktree `.worktrees/recorder-catchup` blijft staan tot de orchestrator opruimt.
+Commit op `main`: c36d630 `feat(recorder): catch-up recording for current hour on startup`.
+Implementatie: nieuwe pure module `src/recorder/time-helpers.js` (`secondsUntilNextHour` +
+`currentHourStamp` als single source of truth voor filenames), `recordStream` kreeg een optionele
+`durationSeconds=3600` param (default gedrag-identiek aan de oude `'01:00:00'`), en een additieve
+startup-inhaalblok (outer + per-stream try/catch) dat na de cron-registratie per stream checkt of
+er al een opname voor het huidige uur is en zo niet opneemt voor het restant. Stream/settings-lees
+bewust ONGEMOEID gelaten (zelfde settings.json-pad) om de merge met settings-db minimaal te houden.
+`node:test`-suite `time-helpers.test.js` toegevoegd (7/7), Dockerfile.recorder kopieert de helper.
+Geverifieerd: `node --check` op recorder.js + time-helpers.js OK (node:26-bookworm container) na merge.
+User-wens: bij het opstarten moet de recorder voor elke stream checken of er al een opname
+bestaat voor het HUIDIGE uur (`<folder>/<folder>-YYYY-MM-DD-HH.mp3`). Zo niet: meteen beginnen
+op te nemen voor het RESTANT van het uur (bv. om 14:37 → ~23 min, tot 15:00). Zo ja: niks doen.
+Daarna neemt de normale cron op het hele uur het weer over.
+- [x] Startup-check per stream + opname voor het resterende deel van het uur.
+- [x] Zelfde try/catch-resilience als de scheduled runs (sluit aan op tech-debt-item 3b).
+- Aandachtspunt: "bestaat = overslaan" telt ook een half/corrupt bestand als bestaand
+  (van een eerdere crash); voor nu simpel houden, perfectie raakt aan graceful-shutdown.
+- Mag PARALLEL aan het settings-scherm (raakt andere code: recorder-logica vs API+DB+frontend).
+  Leest gewoon settings.json zoals nu; pas later evt. uit de DB.
+
+### 8. Uren-selector op basis van bestaande uren + opnames in de DB voor analyse (user-wens)
+Twee delen, los van elkaar te doen:
+
+Quick win (frontend; kan mee in settings-workflow of los, GEEN DB nodig):
+- [ ] De uren-dropdown toont nu hardcoded 00-23. Vervang door alleen de uren die daadwerkelijk
+      bestaan voor de gekozen stream + dag. Die data zit al in /settings2 (browse-boom
+      station -> jaar -> maand -> dag -> uren[]). Koppel de selector daaraan i.p.v. hardcoded.
+      (Idem evt. de dag-selector beperken tot dagen met opnames.)
+
+Grotere feature (NÁ de DB er is; aparte latere workflow):
+- [ ] `recordings`-tabel in de DB: per opname stream/datum/uur + duur + bestandsgrootte +
+      status (compleet/partieel). Vervangt het filesystem-scannen van /settings2 door snelle,
+      rijke queries.
+- [ ] Recorder schrijft een rij bij elke opname; cleaner verwijdert de rij bij opruimen;
+      peakfilegenerator kent de duur (kan die invullen/bijwerken).
+- [ ] Analyse-endpoints op de API (totale opname-tijd, gaten/missende uren, opslag per stream,
+      gemiddelde duur) + een analyse-view in de frontend.
+- Raakt alle lagen (recorder/cleaner/peakfilegenerator/api/frontend); natuurlijke vervolgstap
+  zodra de SQLite-DB bestaat. Bewust NIET in de eerste settings-DB-workflow (die is al groot).
 
 ---
 
@@ -126,18 +319,27 @@ Eerst oppakken (HIGH):
 - [x] `routes/api.js` `/settings2` roept `.map()` aan op het settings-*object* i.p.v.
       `.streams` → endpoint gooit altijd een TypeError (500). Fix: `JSON.parse(...).streams`.
       GEFIXT in de api-split (bestand verhuisd naar `api/routes/api.js`).
-- [ ] `peakfilegenerator.js`: `filename.match(/…/)[0]` crasht op elke `.mp3` zonder datumpatroon
-      (bv. `temp-*.mp3`) en breekt de hele run af. Fix: match guarden.
-- [ ] Geen `restart:`-policy en geen healthchecks in `docker-compose.yml`; gecombineerd met
+- [x] `peakfilegenerator.js`: `filename.match(/…/)[0]` crasht op elke `.mp3` zonder datumpatroon
+      (bv. `temp-*.mp3`) en breekt de hele run af. Fix: match guarden. GEFIXT op `techdebt-high`
+      (FEAT-002, commit 446b46f): `extractFileDateTime` geeft `null` i.p.v. `[0]` op null; bestanden
+      zonder datumpatroon worden overgeslagen.
+- [x] Geen `restart:`-policy en geen healthchecks in `docker-compose.yml`; gecombineerd met
       `process.exit(1)` als enige foutafhandeling is een crash permanent. Fix: `restart:
       unless-stopped` + healthcheck per service, en niet meer blind exiten bij transiente fouten.
-- [ ] `cleaner/deletefiles.js`: `thresholdTime` wordt één keer bij boot berekend → retentievenster
+      GEFIXT op `techdebt-high` (FEAT-003, commit ff28ff3): `restart: unless-stopped` + healthchecks
+      op alle vijf services, cron-callbacks in try/catch (geen crash op transiente fouten),
+      heartbeats + `GET /healthz`.
+- [x] `cleaner/deletefiles.js`: `thresholdTime` wordt één keer bij boot berekend → retentievenster
       groeit met elk draaiuur. Plus `log_retention` is gevalideerd op `< 60`, dus >59u retentie
       kan niet (readme-voorbeeld gebruikt 168). Fix: threshold in de cron-callback berekenen en
-      `log_retention` een eigen zinnige bovengrens geven.
-- [ ] Geen tests in de originele services (recorder/cleaner/peakfilegenerator/API). Fix: minimale
+      `log_retention` een eigen zinnige bovengrens geven. GEFIXT op `techdebt-high` (FEAT-002,
+      commit 446b46f): `thresholdTime` per cron-run herberekend; `validateRetentionHours` staat
+      1..8760u toe (168 werkt nu).
+- [x] Geen tests in de originele services (recorder/cleaner/peakfilegenerator/API). Fix: minimale
       `node:test`-suite op de pure logica (minuut-validatie, datumregex, `/settings2`-transform,
-      retentie-threshold).
+      retentie-threshold). GEDAAN op `techdebt-high` (FEAT-004): drie suites op de pure helpers,
+      geen nieuwe deps, `test`-script in de drie `package.json`'s; alle suites exit 0 in
+      node:26-bookworm.
 
 Daarna (MEDIUM):
 - [ ] Gedupliceerde settings-lees + minuut-validatie in alle drie workers, met afwijkende grenzen
@@ -162,7 +364,8 @@ Lager (LOW):
 - [ ] Logging: alleen `console.log`, geen levels, inconsistente timestamps/foutmeldingen.
 - [ ] Vier bijna-identieke Dockerfiles + worker-`package.json`s (duplicatie, drift); `npm install`
       i.p.v. `npm ci`.
-- [ ] `readme.txt` → `README.md`; poort- (9702 vs 9703) en retentie-voorbeeld (168 vs <60)
-      kloppen niet met de echte config.
+- [ ] `readme.txt` → `README.md`; poort-voorbeeld (9702 in de tekst vs 9703 in `.env`) klopt nog
+      niet met de echte config. Retentie-voorbeeld (168) is nu WEL consistent: `techdebt-high`
+      verruimde `log_retention` naar 1..8760u, dus de readme-waarde 168 is geldig geworden.
 - [ ] Placeholder-metadata (`author: "Your Name"`); frontend-`package.json` mist name/version/scripts.
 - [ ] `.DS_Store` in de repo-root; toevoegen aan `.gitignore`.
