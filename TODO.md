@@ -171,9 +171,10 @@ EXECUTION (broken into sequential, mergeable steps to keep recorder.js/compose c
   - NOTE (DB foundation landed): `better-sqlite3` does NOT compile on node:26-bookworm (its
     native addon uses V8 APIs removed in Node 26), so the api DB handle uses Node's built-in
     `node:sqlite` (`DatabaseSync`) instead — no native build, same prepare/exec surface. `argon2`
-    still compiles and is used for the admin hash. Consequence: the SQLite-backed
-    `express-session` store choice is reopened for step 2's auth wiring — either a node:sqlite
-    session store (keeps revocable server-side logout) or stateless signed cookies (loses it).
+    still compiles and is used for the admin hash. `better-sqlite3-session-store` was dropped too.
+    DECIDED for step 2's auth wiring: implement a node:sqlite-backed server-side express-session
+    store (Option A), so logout AND change-password can invalidate sessions server-side (keeps the
+    revocable-session decision; no extra infra). Stateless cookies were rejected.
 - [ ] step 2: cron + retention into the DB + settings-screen UI; workers reload without restart.
   This is where settings.json is fully removed.
 - [ ] step 3: realtime log viewer in admin (SSE) + conventional logging in the services.
