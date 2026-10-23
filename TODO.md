@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. settings.json still holds cron/retention. .env untracked on main. Also: mouse-wheel scroll-to-zoom implemented on branch `wavesurfer-zoom` — wheel listener on the waveform container replicating the old bundle (sign-only deltaY, 5 px/sec step, lower clamp 0) + cursor-anchoring + pure exported `nextZoom` helper with vitest tests.)
+Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. settings.json still holds cron/retention. .env untracked on main. NOW IN PROGRESS: `job-queue` branch — requirements + technical design authored (see item 10) for the job-queue/worker consolidation that removes the cleaner + peakfilegenerator containers and deletes settings.json. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13.)
 
 ---
 
@@ -42,11 +42,8 @@ APPROVED (see .agents/tasks/review.md / review.json); no blocking findings.
 - Non-blocking review findings (pick up later): selection download now fails silently
   (only console.error instead of a visible error like legacy); optional extras from the old
   bundle (right-click=pause, double-click=play, mouse-wheel=zoom) not yet implemented — NOTE:
-  right-click/double-click have since been added (see item 6 note), and mouse-wheel
-  scroll-to-zoom is now implemented on branch `wavesurfer-zoom` (wheel listener on the
-  waveform container, sign-only deltaY with a fixed 5 px/sec step and lower clamp 0 to match
-  the old bundle, plus cursor-anchoring via v7's zoom(pxPerSec) + scrollLeft; pure exported
-  `nextZoom` helper with vitest unit tests). Smoke test only covers
+  right-click/double-click have since been added (see item 6 note); mouse-wheel=zoom is now
+  planned and in progress (see item 13). Smoke test only covers
   render, not the selection math/export flow.
 - Finalized: `frontend-react` is now on `main`. Dev run: `cd src/frontend && npm install && npm run dev`.
 
@@ -298,11 +295,41 @@ DECIDED (user, 2026-10-23):
     cleaner job reads.
 
 OPEN decisions:
-- [ ] How much job output/log to retain and show.
+- [x] How much job output/log to retain and show — DECIDED in the `job-queue` design: keep the most
+      recent N job rows (default N=100, stored as `app_config.output_retention_count` so it is
+      tunable without a rebuild) and prune older whole rows; the viewer shows the live/most-recent
+      output.
 
 Order: LATER feature — depends on the SQLite DB + workers-read-DB (settings-db-core) and couples
 with the realtime log viewer and the `recordings` table (item 8). Replaces the old "step 2". Do
 NOT fold into settings-db-core (the running step 1).
+
+IN PROGRESS: branch `job-queue` / worktree `.worktrees/job-queue` (started 2026-10-23). Requirements
+(`.agents/tasks/job-queue-2026-10-23/requirements.md`) and the technical design
+(`.agents/tasks/job-queue-2026-10-23/design.md`) are authored (no production code yet). Design
+decomposes the work into six dependency-ordered FEATs mirroring requirements §1–6:
+(1) `jobs` + `schedules` + `app_config` schema + in-place migration/seed in `src/api/db/`;
+(2) generic `worker` service (`src/worker/`, 3s poll loop, global single-job lock via conditional
+claim, busy=SKIP marking "skipped, busy", ported cleaner + peakfilegenerator handlers,
+`Dockerfile.worker` with ffmpeg + audiowaveform, RW `./data` so it can write job status, stale-lock
+reclaim at boot); (3) scheduler hosted in the **api** (A1) with a pure `isDue` and a `last_run_at`
+no-double-enqueue guard; (4) docker-compose: remove cleaner + peakfilegenerator services, add
+`worker`, keep `recorder` separate; (5) delete `settings.json` entirely and move
+recorder_minute/cleaner_minute/peakfile_minute/log_retention into the DB (recorder re-reads its
+minute from the DB, best-effort hot-reschedule via a 5-min re-read timer, else on restart);
+(6) SSE live job view (`GET /api/jobs/stream`, 1s DB-poll + diff, behind requireAuth) + scheduler
+config / Run-now admin UI + output retention. New pure logic gets `node:test` coverage:
+`isDue` (hourly/daily/weekly, incl. a "one-minute-late evaluation still fires" case), `decideClaim`
+(busy-skip), retention threshold + `validateRetentionHours`.
+The design went through a design review (`design-review.json` / `design-review.md`, verdict
+CHANGES_REQUESTED: 0 HIGH / 4 MEDIUM / 3 NIT) and was revised to Pass 2, resolving all findings:
+shared `AUDIO_DIR` constant for the ported handlers (no `__dirname`-relative paths after the move),
+a `SQLITE_BUSY` bounded-retry on the worker's terminal/claim/skip writes (so a contended write never
+strands a `running` row) backed by the boot stale-lock reclaim, a concrete nginx change
+(`proxy_buffering off` + `proxy_read_timeout 1h` on the existing `/api/` block) for SSE, and a
+bounded catch-up scheduler (`previousScheduledInstant` + 3-minute lookback + `last_run_at` guard)
+so a delayed loop cannot lose a daily/weekly fire. Still no production code — design is review-clean
+and ready to implement.
 
 ### 11. Recorder: robust per-stream process management (DECIDED — Option B)
 Current: one recorder container loops over all streams and starts an ffmpeg process per stream
@@ -344,6 +371,23 @@ Icon / favicon (a bit more — it's an uploaded BINARY file, not a text setting)
 
 Order: small-to-medium; fold into the settings/admin-screen + DB-config work. The title is trivial;
 the icon upload needs a small file-upload + storage/validation story.
+
+### 13. Wavesurfer: scroll-to-zoom at the cursor (user wish)
+- [ ] In the waveform, scrolling (mouse wheel) should zoom IN/OUT, centered on the point under
+      the cursor where you scroll (zoom toward the pointer, not just a global zoom). wavesurfer v7
+      has zoom support; wire wheel events on the waveform container to adjust the zoom level and
+      keep the scroll position anchored at the cursor's time position.
+- Note: the legacy webpack bundle had a mouse-wheel-zoom extra that was not carried into the React
+  rebuild (noted under frontend-react findings); this item is the cursor-anchored version of that.
+- Frontend-only (src/frontend), touches the useWavesurfer hook; small-to-medium.
+- IN PROGRESS: `wavesurfer-zoom` branch/worktree. Implementation plan authored at
+  `.agents/tasks/wavesurfer-zoom-plan.md`. Old behavior recovered from the pre-React bundle
+  (`git show 687eafd~1:frontend/web/main.js`): wheel on `#waveform`, `preventDefault`, step 5
+  px/sec per event (deltaY sign only), lower-clamp 0, no upper clamp, `zoom(minPxPerSec)` units,
+  and it was a GLOBAL zoom (no cursor anchor). Decision: keep the old direction/step/clamp but
+  ADD cursor-x anchoring (the user's explicit ask) via the v7 scroll math; extract a pure
+  `nextZoom(current, deltaY)` helper so the step/clamp is unit-testable. Change confined to
+  `useWavesurfer.ts`.
 
 ### 9. A real testing strategy (user wish)
 Current state: there IS some testing already, but thin and opportunistic (only pure helpers that
