@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (`job-queue` branch COMPLETE + APPROVED, fast-forward merged into main AND pushed to origin/main: the generic `worker` service replaces the old `cleaner` + `peakfilegenerator` containers, `settings.json` is removed entirely, a DB-driven scheduler in the api enqueues per-type hourly/daily/weekly jobs with a global single-job busy=SKIP lock, and an SSE live job view + Run-now admin UI land. All six FEATs (FEAT-001…006) implemented + tested and the full cross-FEAT integration verification + cold-data docker compose convergence smoke PASSED iteration 1 with no code fixes — see `.agents/tasks/job-queue-2026-10-23/verification.md` and item 10. `main` == `job-queue` == 428a385, pushed to origin/main. AUTO-ADVANCE: the next chunk on the list is CHUNK A — see "Next up (CHUNK A)" below. Earlier on main: settings-db-core step 1 (SQLite DB via node:sqlite after better-sqlite3 failed on Node 26 + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring). .env untracked on main. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13. ALSO IN PROGRESS: `admin-config` branch (CHUNK A) — implementation plan authored and the work decomposed into three FEATs (editable title + favicon; worker status + existing-hours selector; DB backup/import) — ALL THREE FEATs (FEAT-001..003) now implemented+tested+committed on the branch, and the full cross-FEAT INTEGRATION verification PASSED iteration 1 with NO code fixes (api 69 / worker 15 node:test green, frontend `npm run build` + 14 vitest green, `docker compose build api worker frontend` all three images built — all run in node:26-bookworm since the host has no node; the inter-feature seams are clean: one validateConfig branch per key, each router mounted once in index.js, api.ts compiles across all three, nginx `location /api/` already covers every new path). Awaiting the review gate + merge step. See the `admin-config` branch section below. ALSO: `recorder-resilience` branch (CHUNK B) — ran in PARALLEL with admin-config, strictly confined to `src/recorder/` so the two do not collide; now IMPLEMENTED + TESTED + COMMITTED, semantic review APPROVED, and fast-forward MERGED into main AND PUSHED to origin/main (main == recorder-resilience == b293435; branch also pushed to origin with upstream tracking): per-stream ffmpeg supervision with capped backoff, recorder-scope graceful shutdown (SIGTERM/SIGINT), greppable per-stream error/gap logging, and a scope-added periodic poll that auto-starts a newly-added stream for the rest of the current hour (recorder-only Option A), see item 11 and the `recorder-resilience` branch section below.)
+Last updated: 2026-10-23 (`job-queue` branch COMPLETE + APPROVED, fast-forward merged into main AND pushed to origin/main: the generic `worker` service replaces the old `cleaner` + `peakfilegenerator` containers, `settings.json` is removed entirely, a DB-driven scheduler in the api enqueues per-type hourly/daily/weekly jobs with a global single-job busy=SKIP lock, and an SSE live job view + Run-now admin UI land. All six FEATs (FEAT-001…006) implemented + tested and the full cross-FEAT integration verification + cold-data docker compose convergence smoke PASSED iteration 1 with no code fixes — see `.agents/tasks/job-queue-2026-10-23/verification.md` and item 10. `main` == `job-queue` == 428a385, pushed to origin/main. Earlier on main: settings-db-core step 1 (SQLite DB via node:sqlite after better-sqlite3 failed on Node 26 + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring). .env untracked on main. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13. `admin-config` branch (CHUNK A) — DONE: APPROVED by the review gate, rebased onto the current main tip and fast-forward MERGED into main AND PUSHED to origin/main. Chunk A delivers five admin-screen / DB-config features: editable page title + editable favicon upload, worker status in the admin screen + a player hour-selector limited to hours that actually exist, and DB backup/export + import. Also folded in: the underscore-to-space name-display workaround is removed (stream/station names shown VERBATIM everywhere incl. /settings2 keys). Verified green in node:26-bookworm (host has no node): api 69 / worker 15 node:test, frontend `npm run build` + 14 vitest. See the `admin-config` branch section below. ALSO: `recorder-resilience` branch (CHUNK B) — ran in PARALLEL with admin-config, strictly confined to `src/recorder/` so the two do not collide; now IMPLEMENTED + TESTED + COMMITTED, semantic review APPROVED, and fast-forward MERGED into main AND PUSHED to origin/main (main == recorder-resilience == b293435; branch also pushed to origin with upstream tracking): per-stream ffmpeg supervision with capped backoff, recorder-scope graceful shutdown (SIGTERM/SIGINT), greppable per-stream error/gap logging, and a scope-added periodic poll that auto-starts a newly-added stream for the rest of the current hour (recorder-only Option A), see item 11 and the `recorder-resilience` branch section below.)
 
 ---
 
@@ -616,25 +616,29 @@ stream is overkill for this project (same "keep it manageable" reasoning as SQLi
 Order: later; pairs naturally with the graceful-shutdown work and the recordings-table/gap analysis.
 
 ### 12. Editable branding (page title + icon/favicon) from the settings screen (user wish)
+Status: IMPLEMENTED on branch `admin-config` (CHUNK A, FEAT-001; not yet merged). Verified: api 60
+`node:test` green in node:26-bookworm, frontend `npm run build` + 9 vitest green, `docker compose
+build api frontend` green.
 Currently the page title ("Dé radiologger") is hardcoded in src/frontend/index.html and the
 favicon is a static src/frontend/... asset. User wants to change both from the admin/settings
 screen (white-labeling).
 
 Title (simple, text):
-- [ ] Store the title as an app-config setting in the DB (a small app_settings/config table, or a
-      key in whatever config store the settings work introduces).
-- [ ] Expose via the API (public GET so the frontend can read it; write behind auth).
-- [ ] Frontend reads the title and sets document.title (and any visible header) at runtime instead
-      of the hardcoded value.
-- [ ] Edit field in the settings screen.
+- [x] Store the title as `app_config.app_title` (default 'Dé radiologger', seeded INSERT OR IGNORE
+      in src/api/db/seed-jobconfig.js; validated in app-config.js: non-empty, trimmed <=200).
+- [x] Expose via the API: PUBLIC `GET /api/app-config/public` -> {title}; authed
+      `PUT /api/app-config/title`.
+- [x] Frontend reads the title and sets document.title at runtime (src/frontend/src/App.tsx).
+- [x] Edit field in the settings screen (src/frontend/src/settings/BrandingSettings.tsx).
 
 Icon / favicon (a bit more — it's an uploaded BINARY file, not a text setting):
-- [ ] Upload the icon from the admin screen (auth-protected upload endpoint).
-- [ ] Store/serve it (decide: on the ./data or audio volume as a file + a DB reference, or a blob
-      in the DB — a file on the volume is simpler and nginx can serve it). Validate type/size.
-- [ ] Frontend/nginx serves the current favicon dynamically instead of the static asset
-      (update the <link rel="icon"> / document head at runtime, or serve a fixed path whose
-      contents are the uploaded file).
+- [x] Upload the icon from the admin screen — authed `POST /api/branding/favicon` with a
+      route-local express.raw (png/ico/svg, 1 MiB cap; type+size validated in lib/validate-favicon.js).
+- [x] Store/serve it: bytes written to a file under ./data (/usr/src/app/data/branding/favicon.<ext>)
+      with a DB reference (app_config.favicon_path + favicon_mime). Chosen file-on-volume approach.
+- [x] Serve the current favicon dynamically: PUBLIC `GET /api/branding/favicon` streams the stored
+      file or a bundled default (src/api/assets/default-favicon.png); index.html <link rel="icon">
+      points at that stable path.
 
 Order: small-to-medium; fold into the settings/admin-screen + DB-config work. The title is trivial;
 the icon upload needs a small file-upload + storage/validation story.
@@ -681,6 +685,12 @@ displaying. User now wants `_` to stay `_` everywhere — no display-time substi
       if we want names shown as stored.)
 - Being FOLDED INTO the running `admin-config` (Chunk A) workflow since it touches src/frontend
   (sent as a scope addition 2026-10-23) to avoid a frontend merge conflict.
+- [x] DONE (folded into `admin-config` Chunk A, 2026-10-23): the historical underscore-to-space
+  display workaround is removed. Stream/station names now display VERBATIM —
+  src/frontend/src/App.tsx player selector renders `s.name` as stored, and
+  src/api/lib/settings-transform.js keys the /settings2 browse tree by the stored station name
+  verbatim (dropped the final `key.replace(/_/g,' ')` remap; its test asserts verbatim keying). No
+  `replace(/_/` underscore-to-space logic remains in source.
 
 ### 13. Wavesurfer: scroll-to-zoom at the cursor (user wish)
 - [ ] In the waveform, scrolling (mouse wheel) should zoom IN/OUT, centered on the point under

@@ -21,6 +21,7 @@ const CONFIG_DEFAULTS = [
     { key: 'log_retention', value: '2' },
     { key: 'recorder_minute', value: '0' },
     { key: 'output_retention_count', value: '100' },
+    { key: 'app_title', value: 'Dé radiologger' },
 ];
 
 function seedJobConfig(db) {

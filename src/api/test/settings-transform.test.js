@@ -29,7 +29,7 @@ test('buildBrowseTree builds the nested station->year->month->day->hours tree', 
     });
 });
 
-test('buildBrowseTree replaces underscores in station names with spaces', () => {
+test('buildBrowseTree keys underscored station names verbatim (no _ -> space)', () => {
     const streams = [
         {
             name: 'Glow_FM',
@@ -45,8 +45,8 @@ test('buildBrowseTree replaces underscores in station names with spaces', () => 
 
     const tree = buildBrowseTree(streams);
 
-    assert.ok(Object.prototype.hasOwnProperty.call(tree, 'Glow FM'));
-    assert.strictEqual(Object.prototype.hasOwnProperty.call(tree, 'Glow_FM'), false);
+    assert.ok(Object.prototype.hasOwnProperty.call(tree, 'Glow_FM'));
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(tree, 'Glow FM'), false);
 });
 
 test('buildBrowseTree returns {} for an empty array without throwing', () => {

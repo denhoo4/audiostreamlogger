@@ -3,13 +3,13 @@
  *
  * Takes an array of stream objects (each already carrying a nested `.logs`
  * object and a `.name`) and returns the nested
- * `{ "Station Name": { year: { month: { day: [hours] } } } }` tree.
+ * `{ "Station_Name": { year: { month: { day: [hours] } } } }` tree keyed by the
+ * stored station name VERBATIM (the historical underscore-to-space display
+ * workaround was removed — names are shown exactly as stored everywhere).
  *
- * Output is byte-for-byte identical to the original inline implementation in
- * src/api/routes/api.js. Two earlier cleanups have now been applied: the
- * `transformedJson` accumulator is a local (no longer an implicit global shared
- * across requests), and the `transformData` helper is defined once at module
- * scope instead of being redefined on every call.
+ * Two earlier cleanups remain: the `transformedJson` accumulator is a local (no
+ * longer an implicit global shared across requests), and the `transformData`
+ * helper is defined once at module scope instead of being redefined per call.
  */
 function transformData(originalData) {
     const transformedData = {};
@@ -41,14 +41,9 @@ function buildBrowseTree(streams) {
         transformedJson[key] = { ...item };
         delete transformedJson[key].name;
     });
-    transformedJson = transformData(transformedJson);
-    const transformedData = {};
-
-    for (const key in transformedJson) {
-        const newKey = key.replace(/_/g, ' ');
-        transformedData[newKey] = transformedJson[key];
-    }
-    return transformedData;
+    // Keys are the stored station name verbatim — no underscore-to-space
+    // substitution (the historical `_`->space display workaround was removed).
+    return transformData(transformedJson);
 }
 
 module.exports = { buildBrowseTree };

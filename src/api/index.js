@@ -77,10 +77,12 @@ function startServer() {
     const authRouter = require('./routes/auth');
     const apiRouter = require('./routes/api');
     const jobsRouter = require('./routes/jobs');
+    const brandingRouter = require('./routes/branding');
     const utilRouter = require('./routes/util');
     app.use('/auth', authRouter);
     app.use('/api', apiRouter);
     app.use('/api/jobs', jobsRouter);
+    app.use('/api/branding', brandingRouter);
     app.use('/util', utilRouter);
 
     // Lightweight liveness probe for the compose healthcheck: plain 200 JSON.

@@ -100,8 +100,8 @@ async function toApiError(res: Response): Promise<ApiError> {
 }
 
 /**
- * Nested browse tree returned by GET /api/settings2, keyed by display name
- * (underscores replaced by spaces): station -> year -> month -> day -> hours[].
+ * Nested browse tree returned by GET /api/settings2, keyed by the stored
+ * station name verbatim: station -> year -> month -> day -> hours[].
  * Defined for future work; the UI does not consume it yet (it uses /api/settings,
  * matching the legacy app exactly).
  */
@@ -187,6 +187,61 @@ export async function exportSelection(body: SelectionExportBody): Promise<Blob> 
     throw new Error(`POST /util/selection-export failed: ${res.status}`);
   }
   return await res.blob();
+}
+
+// --- Branding client (/api/app-config + /api/branding) -------------------
+
+/**
+ * GET /api/app-config/public -> runtime branding read by the public player
+ * (page title). No credentials: this endpoint is unauthenticated.
+ */
+export async function getPublicConfig(): Promise<{ title: string }> {
+  const res = await fetch(
+    `${window.location.origin}/api/app-config/public`,
+  );
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as { title: string };
+}
+
+/** PUT /api/app-config/title {title} -> update the editable page title. */
+export async function putTitle(title: string): Promise<{ title: string }> {
+  const res = await fetch(`${window.location.origin}/api/app-config/title`, {
+    method: "PUT",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as { title: string };
+}
+
+/**
+ * POST /api/branding/favicon -> upload a favicon. The File is sent as the raw
+ * body with Content-Type = file.type so the backend's route-local raw parser
+ * handles it (the global JSON parser does not intercept it).
+ */
+export async function uploadFavicon(
+  file: File,
+): Promise<{ ok: boolean; mime: string }> {
+  const res = await fetch(`${window.location.origin}/api/branding/favicon`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": file.type },
+    body: file,
+  });
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as { ok: boolean; mime: string };
+}
+
+/** Stable URL of the dynamic favicon serve route (used by <link> and preview). */
+export function faviconUrl(): string {
+  return `${window.location.origin}/api/branding/favicon`;
 }
 
 // --- Authenticated admin client (/auth + /api/streams) -------------------

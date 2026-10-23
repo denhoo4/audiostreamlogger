@@ -13,6 +13,11 @@ const { requireAuth } = require('../auth/middleware');
 const { validateStream } = require('../lib/validate-stream');
 const { buildSettings2 } = require('../services/browse');
 const {
+    getConfig,
+    setConfig,
+    ConfigValidationError,
+} = require('../services/app-config');
+const {
     listStreams,
     getStream,
     createStream,
@@ -46,6 +51,35 @@ router.get('/settings2', async (req, res) => {
     } catch (error) {
         console.error('Error:', error);
         res.status(500).json({ error: `Internal Server Error: ${error.message}` });
+    }
+});
+
+const DEFAULT_APP_TITLE = 'Dé radiologger';
+
+// GET /api/app-config/public (PUBLIC) — runtime branding the player reads
+// without a session (page title).
+router.get('/app-config/public', (req, res) => {
+    try {
+        const title = getConfig('app_title') ?? DEFAULT_APP_TITLE;
+        res.json({ title });
+    } catch (err) {
+        console.error('Error reading public app-config:', err);
+        res.status(500).json({ error: `Internal Server Error: ${err.message}` });
+    }
+});
+
+// PUT /api/app-config/title (requireAuth) — update the editable page title.
+router.put('/app-config/title', requireAuth, (req, res) => {
+    const body = req.body || {};
+    try {
+        const title = setConfig('app_title', body.title);
+        return res.json({ title });
+    } catch (err) {
+        if (err instanceof ConfigValidationError) {
+            return res.status(400).json({ error: err.error, field: 'title' });
+        }
+        console.error('Error updating app_title:', err);
+        return res.status(500).json({ error: `Internal Server Error: ${err.message}` });
     }
 });
 

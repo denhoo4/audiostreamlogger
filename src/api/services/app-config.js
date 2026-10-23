@@ -78,6 +78,31 @@ function validateConfig(key, value) {
         return;
     }
 
+    if (key === 'app_title') {
+        if (typeof value !== 'string' || value.trim() === '') {
+            throw new ConfigValidationError(
+                key,
+                'app_title must be a non-empty string'
+            );
+        }
+        if (value.trim().length > 200) {
+            throw new ConfigValidationError(
+                key,
+                'app_title must be at most 200 characters'
+            );
+        }
+        return;
+    }
+
+    // favicon_path / favicon_mime are written only by the api (after a validated
+    // upload), so a non-empty string is the only constraint here.
+    if (key === 'favicon_path' || key === 'favicon_mime') {
+        if (typeof value !== 'string' || value.trim() === '') {
+            throw new ConfigValidationError(key, `${key} must be a non-empty string`);
+        }
+        return;
+    }
+
     throw new ConfigValidationError(key, `unknown config key: ${key}`);
 }
 

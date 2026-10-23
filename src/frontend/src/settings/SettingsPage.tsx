@@ -5,6 +5,7 @@ import StreamTable from "./StreamTable";
 import SchedulerConfig from "./SchedulerConfig";
 import JobViewer from "./JobViewer";
 import ChangePasswordForm from "./ChangePasswordForm";
+import BrandingSettings from "./BrandingSettings";
 
 /**
  * Admin /settings view. On mount it checks GET /auth/me: logged out -> login
@@ -73,6 +74,7 @@ export default function SettingsPage() {
           </button>
         </div>
       </div>
+      <BrandingSettings />
       <StreamTable />
       <SchedulerConfig />
       <JobViewer />

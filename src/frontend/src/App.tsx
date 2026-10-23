@@ -3,6 +3,7 @@ import {
   audioJsonUrl,
   audioMp3Url,
   exportSelection,
+  getPublicConfig,
   getSettings,
   type Stream,
 } from "./api";
@@ -73,7 +74,8 @@ export default function App() {
   dateHourRef.current = { date, hour };
 
   // Populate the stream selector from GET /api/settings (value = folder,
-  // text = name with underscores replaced by spaces), matching the old app.
+  // text = the stored name verbatim; the old underscore-to-space display
+  // workaround has been removed).
   useEffect(() => {
     let cancelled = false;
     getSettings()
@@ -84,6 +86,22 @@ export default function App() {
       })
       .catch((err) => {
         console.error("Kon streams niet laden:", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Set the page title at runtime from the public branding config, falling
+  // back to the bundled default on error.
+  useEffect(() => {
+    let cancelled = false;
+    getPublicConfig()
+      .then(({ title }) => {
+        if (!cancelled && title) document.title = title;
+      })
+      .catch(() => {
+        if (!cancelled) document.title = "Dé radiologger";
       });
     return () => {
       cancelled = true;
@@ -246,7 +264,7 @@ export default function App() {
         >
           {streams.map((s) => (
             <option key={s.folder} value={s.folder}>
-              {s.name.replace(/_/g, " ")}
+              {s.name}
             </option>
           ))}
         </select>
