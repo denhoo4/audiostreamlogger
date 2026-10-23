@@ -84,7 +84,14 @@ function startServer() {
     // Lightweight liveness probe for the compose healthcheck: plain 200 JSON.
     app.get('/healthz', (req, res) => res.json({ status: 'ok' }));
 
-    // (8) Start the server.
+    // (8) Start the DB-driven scheduler AFTER the routers are mounted (NIT-4):
+    // a scheduler failure must never block the HTTP server from coming up, and
+    // the scheduler reads schedules fresh each tick so a UI change takes effect
+    // without a restart (design §3.1, FR-3.4).
+    const { startScheduler } = require('./scheduler');
+    startScheduler(db);
+
+    // (9) Start the server.
     app.listen(PORT, () => {
         console.log(`API service is running on port ${PORT}`);
     });
