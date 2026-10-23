@@ -5,13 +5,13 @@ FROM node:26-bookworm
 WORKDIR /usr/src/app
 
 # Copy package.json and package-lock.json from the cleaner directory
-COPY cleaner/package*.json ./
+COPY src/cleaner/package*.json ./
 
 # Install dependencies
 RUN npm install
 
 # Copy the deletefiles script
-COPY cleaner/deletefiles.js ./
+COPY src/cleaner/deletefiles.js ./
 
 # Ensure the audio directory exists
 RUN mkdir -p /usr/src/app/audio

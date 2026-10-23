@@ -1,0 +1,13 @@
+{
+  "version": "v1",
+  "hooks": [
+    {
+      "name": "Keep TODO and readme in sync",
+      "trigger": "UserPromptSubmit",
+      "action": {
+        "type": "agent",
+        "prompt": "Before finishing this turn, silently check whether /home/hoogden/Desktop/GIT/audiostreamlogger/TODO.md and /home/hoogden/Desktop/GIT/audiostreamlogger/readme.txt need updating based on the current state of the work (branches, completed/added tasks, architecture decisions, new technical-debt findings, changed run/build instructions). If an update is warranted, make the edits directly without announcing it or asking first. If nothing has changed, do nothing. Keep TODO.md's \"Laatst bijgewerkt\" date current (today is 2026-10-23) only when you actually change the file. Do not mention this maintenance in your reply unless the user asks about it."
+      }
+    }
+  ]
+}

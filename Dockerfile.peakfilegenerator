@@ -14,13 +14,13 @@ RUN apt-get update && \
 WORKDIR /usr/src/app
 
 # Copy package.json and package-lock.json from the peakfilegenerator directory
-COPY peakfilegenerator/package*.json ./
+COPY src/peakfilegenerator/package*.json ./
 
 # Install Node.js dependencies
 RUN npm install
 
 # Copy the peakfilegenerator script
-COPY peakfilegenerator/peakfilegenerator.js ./
+COPY src/peakfilegenerator/peakfilegenerator.js ./
 
 # Ensure the audio directory exists
 RUN mkdir -p /usr/src/app/audio

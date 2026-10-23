@@ -8,12 +8,12 @@ WORKDIR /usr/src/app
 RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
 # Copy package.json and install Node.js dependencies
-COPY api/package*.json ./
+COPY src/api/package*.json ./
 
 RUN npm install
 
 # Copy the API application code
-COPY api/ .
+COPY src/api/ .
 
 # Internal-only port; nginx reverse-proxies to it. Not published to the host.
 EXPOSE 3000

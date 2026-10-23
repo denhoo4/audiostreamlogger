@@ -4,11 +4,11 @@ FROM node:26-bookworm AS build
 WORKDIR /usr/src/app
 
 # Install dependencies from the React app's manifest
-COPY frontend-react/package*.json ./
+COPY src/frontend/package*.json ./
 RUN npm install
 
 # Copy the rest of the React source and build the static bundle (-> dist/)
-COPY frontend-react/ .
+COPY src/frontend/ .
 RUN npm run build
 
 # ---- Stage 2: serve the SPA with nginx + reverse-proxy to the api service ----
@@ -16,7 +16,7 @@ FROM nginx:1.27-bookworm
 
 # Custom server config: SPA fallback, /audio from the mounted volume, and
 # /api + /util reverse-proxied to the api service.
-COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
+COPY src/frontend/nginx.conf /etc/nginx/conf.d/default.conf
 
 # Copy the built static assets into nginx's web root
 COPY --from=build /usr/src/app/dist /usr/share/nginx/html
