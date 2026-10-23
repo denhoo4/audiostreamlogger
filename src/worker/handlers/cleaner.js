@@ -9,10 +9,17 @@
  * return a complete summary and a definite success/failure. A per-file delete
  * error is logged into the output buffer but does not fail the job; a top-level
  * unreadable-dir error throws -> failed.
+ *
+ * FEAT-003: when an unlinked file parses as a recording (parseRecordingParts),
+ * its matching (stream_folder,date,hour) recordings row is deleted so the row
+ * goes away with the file. The folder is the immediate parent directory name
+ * under AUDIO_DIR. A row-delete failure is logged + counted, never fatal.
  */
 const fs = require('fs');
 const path = require('path');
 const { validateRetentionHours } = require('../settings-utils');
+const { parseRecordingParts } = require('../filename-utils');
+const { deleteRecordingByFile } = require('../recordings-db');
 const { AUDIO_DIR } = require('./paths');
 
 const DEFAULT_RETENTION_HOURS = 2;
@@ -41,13 +48,13 @@ function resolveRetentionHours(db) {
  * top-level dir is surfaced to the caller (throws -> failed) by the caller
  * invoking this on AUDIO_DIR without a guard.
  */
-function deleteOldFiles(dir, thresholdTime, log, counters) {
+function deleteOldFiles(db, dir, thresholdTime, log, counters) {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
         const filePath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
             try {
-                deleteOldFiles(filePath, thresholdTime, log, counters);
+                deleteOldFiles(db, filePath, thresholdTime, log, counters);
             } catch (err) {
                 log.push(`Error reading directory ${filePath}: ${err.message}`);
             }
@@ -58,12 +65,38 @@ function deleteOldFiles(dir, thresholdTime, log, counters) {
                     fs.unlinkSync(filePath);
                     log.push(`Deleting: ${filePath}`);
                     counters.deleted += 1;
+                    removeRecordingRow(db, dir, entry.name, log, counters);
                 }
             } catch (err) {
                 log.push(`Error processing file ${filePath}: ${err.message}`);
                 counters.errors += 1;
             }
         }
+    }
+}
+
+/**
+ * After a recording mp3 is unlinked, delete its matching recordings row so the
+ * row goes away with the file. The folder is the immediate parent directory
+ * name under AUDIO_DIR; the stamp comes from parseRecordingParts. A non-recording
+ * filename is a no-op. A row-delete failure is logged + counted, never fatal.
+ */
+function removeRecordingRow(db, dir, fileName, log, counters) {
+    const parts = parseRecordingParts(fileName);
+    if (parts === null) {
+        return;
+    }
+    const folder = path.basename(dir);
+    try {
+        const removed = deleteRecordingByFile(db, { folder, stamp: parts.stamp });
+        if (removed > 0) {
+            counters.rowsRemoved += removed;
+        }
+    } catch (err) {
+        log.push(
+            `Error removing recordings row for ${path.join(dir, fileName)}: ${err.message}`
+        );
+        counters.rowErrors += 1;
     }
 }
 
@@ -80,12 +113,12 @@ function runCleaner(db) {
         `Cleaner run at ${new Date().toISOString()}: deleting files older than ${hours} hour(s) under ${AUDIO_DIR}.`
     );
 
-    const counters = { deleted: 0, errors: 0 };
+    const counters = { deleted: 0, errors: 0, rowsRemoved: 0, rowErrors: 0 };
     // A top-level unreadable audio dir throws -> the job fails.
-    deleteOldFiles(AUDIO_DIR, thresholdTime, log, counters);
+    deleteOldFiles(db, AUDIO_DIR, thresholdTime, log, counters);
 
     log.push(
-        `Cleaner done: ${counters.deleted} file(s) deleted, ${counters.errors} per-file error(s).`
+        `Cleaner done: ${counters.deleted} file(s) deleted, ${counters.errors} per-file error(s); ${counters.rowsRemoved} recordings row(s) removed, ${counters.rowErrors} row error(s).`
     );
     return log.join('\n');
 }
