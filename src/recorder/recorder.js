@@ -6,6 +6,55 @@ const { secondsUntilNextHour, currentHourStamp } = require('./time-helpers');
 const { readStreams, readRecorderMinute } = require('./streams-db');
 const { backoffDelayMs, shouldRestartWithinHour, segmentOutputName } = require('./backoff-helpers');
 const { streamsNeedingCatchup } = require('./catchup-helpers');
+const recordingsDb = require('./recordings-db');
+
+// The recorder's OWN scoped read-write DB handle (FEAT-002), opened once at
+// module load like streams-db is used per-read. recordings writes go through it
+// so the recorder can track each hour's row (status recording->partial/complete
+// + size_bytes). The open is wrapped so a not-ready DB at boot only logs and
+// leaves `recordingsHandle` null — every recordings write below is best-effort
+// and no-ops on a null handle, never crashing the recorder or disturbing ffmpeg.
+let recordingsHandle = null;
+try {
+    recordingsHandle = recordingsDb.openDb();
+} catch (err) {
+    console.error('recorder: recordings DB not ready at boot, recordings rows disabled until restart:', err.message);
+}
+
+// Best-effort recordings writers: each swallows a null handle and any error with
+// a greppable log line so a DB hiccup never throws into the ffmpeg callbacks.
+function recordStartRow(folder, stamp) {
+    if (!recordingsHandle) {
+        return;
+    }
+    try {
+        recordingsDb.upsertRecordingStart(recordingsHandle, { folder, stamp });
+    } catch (err) {
+        console.error(`recorder: recordings start-row write failed for ${folder} ${stamp}:`, err.message);
+    }
+}
+
+function recordSegmentRow(folder, stamp, attempt) {
+    if (!recordingsHandle) {
+        return;
+    }
+    try {
+        recordingsDb.markSegment(recordingsHandle, { folder, stamp, attempt });
+    } catch (err) {
+        console.error(`recorder: recordings segment-row write failed for ${folder} ${stamp} (attempt ${attempt}):`, err.message);
+    }
+}
+
+function recordCompleteRow(folder, stamp, sizeBytes) {
+    if (!recordingsHandle) {
+        return;
+    }
+    try {
+        recordingsDb.markComplete(recordingsHandle, { folder, stamp, sizeBytes });
+    } catch (err) {
+        console.error(`recorder: recordings complete-row write failed for ${folder} ${stamp}:`, err.message);
+    }
+}
 
 // Heartbeat file touched at boot and on every tick; the compose healthcheck
 // checks its freshness to detect a worker that has silently stopped ticking.
@@ -102,6 +151,22 @@ function superviseStream(item, attempt) {
     // error/end is treated as expected and does NOT trigger a restart (D4).
     const entry = { command: null, item, intentionalStop: false };
 
+    // The hour stamp + primary output path for this supervision, captured once
+    // so the recordings-row writes (FEAT-002) key on the same hour and the
+    // finalize stats the file ffmpeg is actually writing.
+    const stamp = currentHourStamp();
+    const outputName = segmentOutputName(item.folder, stamp, attempt);
+    const outputPath = path.join(__dirname, `./audio/${item.folder}/${outputName}`);
+
+    // Track the hour row: attempt 0 inserts a 'recording' row on start; a
+    // mid-hour restart (attempt >= 1) flips it to 'partial' with the new
+    // segment count. Best-effort — never throws into the supervisor.
+    if (attempt === 0) {
+        recordStartRow(item.folder, stamp);
+    } else {
+        recordSegmentRow(item.folder, stamp, attempt);
+    }
+
     const command = recordStream(item.name, item.folder, item.url, remaining, attempt);
     entry.command = command;
     active.set(id, entry);
@@ -154,7 +219,22 @@ function superviseStream(item, attempt) {
         cleanup();
         if (entry.intentionalStop) {
             console.log(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) finalized during shutdown.`);
+            return;
         }
+        if (shuttingDown) {
+            return;
+        }
+        // Normal finalize (not an intentional stop, not shutdown): stat the mp3
+        // ffmpeg just wrote and record size_bytes + status 'complete' for the
+        // hour. markComplete leaves an already-'partial' hour 'partial'. Best-
+        // effort: a stat/DB error only logs, never throws into this callback.
+        let sizeBytes = null;
+        try {
+            sizeBytes = fs.statSync(outputPath).size;
+        } catch (err) {
+            console.error(`recorder: could not stat ${outputPath} for recordings size:`, err.message);
+        }
+        recordCompleteRow(item.folder, stamp, sizeBytes);
     });
 
     return id;

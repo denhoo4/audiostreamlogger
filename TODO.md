@@ -380,9 +380,24 @@ Larger feature (AFTER the DB exists; separate later workflow) — IN PROGRESS on
       Three `node:test` files added; `cd src/api && node --test` green (83 tests) in
       node:26-bookworm. `GET /api/settings2` unchanged. Recorder/worker/frontend/compose
       deliberately untouched (owned by FEAT-002..004).
-- [ ] FEAT-002/003/004: recorder writes a row per recording (needs a new RW handle mirroring
-      `src/worker/db.js` + the compose `./data` `:ro`→`rw` flip); worker fills duration/size +
-      cleaner removes/tombstones the row; frontend analysis view consuming the endpoints.
+- [x] FEAT-002 (recorder writes recordings rows + compose RW flip) DONE on `recordings-analysis`:
+      new scoped RW handle `src/recorder/recordings-db.js` mirroring `src/worker/db.js`
+      (busy_timeout + bounded SQLITE_BUSY retry, NEVER journal_mode) exporting
+      `upsertRecordingStart`/`markSegment`/`markComplete` (parse the `YYYY-MM-DD-HH` stamp into
+      date+hour; start inserts `recording`+segment_count 1 with ON CONFLICT DO NOTHING; a mid-hour
+      restart flips to `partial` with segment_count=attempt+1; a normal finalize sets size_bytes
+      and `complete` but NEVER downgrades an already-`partial` hour). Wired into
+      `src/recorder/recorder.js`: the RW handle opens once at module load (a not-ready DB only logs
+      and leaves writes no-op), `superviseStream` writes the start row (attempt 0) / segment row
+      (attempt>=1), and the non-intentional, non-shutdown ffmpeg `end` stats the mp3 and writes the
+      complete row — every write best-effort/try-caught so it never throws into the ffmpeg
+      callbacks. `docker-compose.yml` recorder `./data` mount flipped `:ro`→rw with an explanatory
+      comment (mirrors the worker override); `Dockerfile.recorder` now COPYs `recordings-db.js`.
+      New `src/recorder/recordings-db.test.js`; `cd src/recorder && node --test` green (35 tests,
+      pre-existing suites included) in node:26-bookworm and `docker compose config` parses with the
+      recorder data mount no longer read-only. api/worker/frontend untouched.
+- [ ] FEAT-003/004: worker fills duration/size + cleaner removes/tombstones the row; frontend
+      analysis view consuming the endpoints.
 - Touches all layers (recorder/worker/api/frontend); natural next step now the SQLite DB exists.
   Deliberately NOT in the first settings-DB workflow (already large).
 

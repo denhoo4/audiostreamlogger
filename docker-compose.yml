@@ -6,7 +6,13 @@ services:
     restart: unless-stopped
     volumes:
       - ./audio:/usr/src/app/audio
-      - ./data:/usr/src/app/data:ro
+      # DELIBERATE OVERRIDE of the :ro requirement (FEAT-002): the recorder now
+      # opens its own read-write DatabaseSync handle (src/recorder/recordings-db.js)
+      # to write recordings rows for each hour it captures (status
+      # recording->partial/complete + size_bytes), so a :ro mount would throw
+      # SQLITE_READONLY on the first write. The api still owns every
+      # schema/config/stream/job write (same posture as the worker above).
+      - ./data:/usr/src/app/data
     environment:
       - TZ=Europe/Amsterdam
     depends_on:
