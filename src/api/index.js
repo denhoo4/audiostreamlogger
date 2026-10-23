@@ -16,9 +16,11 @@ let db;
 try {
     db = require('./db'); // (1) opens /usr/src/app/data/app.db + sets PRAGMAs
     const { applySchema } = require('./db/schema');
+    const { seedJobConfig } = require('./db/seed-jobconfig');
     const { seedAdmin } = require('./db/seed');
     applySchema(db); // (2) CREATE TABLE IF NOT EXISTS ...
-    // (3) seedAdmin is async (argon2); await it before listening.
+    seedJobConfig(db); // (3) synchronous insert-if-absent schedule/config seed (NIT-4)
+    // (4) seedAdmin is async (argon2); await it before listening.
     seedAdmin(db)
         .then(startServer)
         .catch((err) => {
@@ -31,7 +33,7 @@ try {
 }
 
 function startServer() {
-    // (4) Session secret with an explicit empty/whitespace guard: compose injects
+    // (5) Session secret with an explicit empty/whitespace guard: compose injects
     // an unset host variable as the empty string, so a bare `||` would still pass
     // '' through — trim-check it and fall back deterministically with a warning.
     const DEV_FALLBACK = 'dev-insecure-session-secret-change-me';
@@ -67,11 +69,11 @@ function startServer() {
         })
     );
 
-    // (5) Single global body parser with a limit, mounted BEFORE any router so
+    // (6) Single global body parser with a limit, mounted BEFORE any router so
     // exactly one parser runs on every route (util.js no longer mounts its own).
     app.use(express.json({ limit: '100kb' }));
 
-    // (6) Mount routers. Served same-origin behind nginx, so no CORS middleware.
+    // (7) Mount routers. Served same-origin behind nginx, so no CORS middleware.
     const authRouter = require('./routes/auth');
     const apiRouter = require('./routes/api');
     const utilRouter = require('./routes/util');
@@ -82,7 +84,7 @@ function startServer() {
     // Lightweight liveness probe for the compose healthcheck: plain 200 JSON.
     app.get('/healthz', (req, res) => res.json({ status: 'ok' }));
 
-    // (7) Start the server.
+    // (8) Start the server.
     app.listen(PORT, () => {
         console.log(`API service is running on port ${PORT}`);
     });

@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. settings.json still holds cron/retention. .env untracked on main. NOW IN PROGRESS: `job-queue` branch — requirements + technical design authored (see item 10) for the job-queue/worker consolidation that removes the cleaner + peakfilegenerator containers and deletes settings.json. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13.)
+Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. settings.json still holds cron/retention. .env untracked on main. NOW IN PROGRESS: `job-queue` branch — requirements + technical design authored and implementation underway (FEAT-001 schema + seed + api data-access layer done + tested; see item 10) for the job-queue/worker consolidation that removes the cleaner + peakfilegenerator containers and deletes settings.json. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13.)
 
 ---
 
@@ -330,6 +330,31 @@ strands a `running` row) backed by the boot stale-lock reclaim, a concrete nginx
 bounded catch-up scheduler (`previousScheduledInstant` + 3-minute lookback + `last_run_at` guard)
 so a delayed loop cannot lose a daily/weekly fire. Still no production code — design is review-clean
 and ready to implement.
+
+IMPLEMENTATION PROGRESS (2026-10-23):
+- [x] FEAT-001 (jobs/schedules/app_config schema + in-place migration/seed + api data-access layer)
+      DONE on branch `job-queue`. `src/api/db/schema.js` gains additive `CREATE TABLE IF NOT EXISTS`
+      for `jobs` (+ indexes `idx_jobs_status_created`, `idx_jobs_created`), `schedules`, `app_config`
+      — all run from `applySchema(db)`, so an existing `app.db` migrates in place (AC-11). New
+      synchronous idempotent `src/api/db/seed-jobconfig.js` (`seedJobConfig`) seeds the two schedule
+      rows (cleaner hourly min 10, peakfilegenerator hourly min 5, both enabled) + `app_config`
+      `log_retention=2`, `recorder_minute=0`, `output_retention_count=100` via `INSERT OR IGNORE`
+      (never overwrites user-changed values). Bootstrap in `src/api/index.js` is now
+      `applySchema(db); seedJobConfig(db); seedAdmin(db).then(startServer)` — `seedJobConfig`
+      synchronous and BEFORE the awaited `seedAdmin`. Data-access services added: `services/jobs.js`
+      (`enqueueJob`/`listRecentJobs`/`getJob` + a TERMINAL-ONLY `pruneJobOutput` that can never
+      prune a pending/running row), `services/schedules.js`
+      (`listSchedules`/`getSchedule`/`updateSchedule` with 0..59 minute unification +
+      `markScheduleRun`), `services/app-config.js` (`getConfig`/`setConfig` +
+      `parseOutputRetentionCount` fallback-to-100). `validateRetentionHours` +
+      `parseOutputRetentionCount` were PORTED into `src/api/lib/config-validate.js` (the api image
+      only COPYs `src/api/`, so a cross-service require into `src/cleaner` would break at runtime).
+      Tests: `test/config-validate.test.js` (retention bound + out-of-bounds + output-retention
+      parse/fallback) and `test/jobs-schema.test.js` (temp-DB integration: schema + indexes +
+      columns, idempotent schema + seed, enqueue, listRecentJobs, terminal-only prune). `cd src/api
+      && node --test` -> 23 pass / 0 fail in node:26-bookworm (host has no node; ran via the locked
+      image). Committed locally; not pushed. Later FEATs: read `output_retention_count` through
+      `parseOutputRetentionCount` before `pruneJobOutput(n)`.
 
 ### 11. Recorder: robust per-stream process management (DECIDED — Option B)
 Current: one recorder container loops over all streams and starts an ffmpeg process per stream
