@@ -1,88 +1,86 @@
 # audiostreamlogger
 
-Een multi-service Docker-applicatie die internet-audiostreams (radiostations) per uur
-opneemt, waveform-peakfiles genereert, oude opnames opruimt, en een webinterface
-serveert om de opnames te bekijken, af te spelen en te downloaden.
+A multi-service Docker application that records internet audio streams (radio stations) hourly,
+generates waveform peak files, cleans up old recordings, and serves a web interface to browse,
+play, and download the recordings.
 
-De services worden met Docker Compose beheerd.
+The services are managed with Docker Compose.
 
-## Architectuur
+## Architecture
 
-De applicatie bestaat uit vijf services (broncode onder `src/`):
+The application consists of five services (source under `src/`):
 
-| Service | Map | Rol |
+| Service | Directory | Role |
 | --- | --- | --- |
-| `recorder` | `src/recorder/` | Neemt elke stream elk uur op (ffmpeg). Haalt bij het opstarten het resterende deel van het huidige uur in als er nog geen opname is. |
-| `cleaner` | `src/cleaner/` | Verwijdert opnames ouder dan de ingestelde bewaartermijn. |
-| `peakfilegenerator` | `src/peakfilegenerator/` | Genereert waveform-peakfiles (`audiowaveform`) uit de mp3's, voor snelle weergave in de frontend. |
-| `api` | `src/api/` | Express-API: levert de streamlijst en de opname-boom, en verzorgt het knippen/downloaden van fragmenten. Draait intern op poort 3000, niet publiek. |
-| `frontend` | `src/frontend/` | React + Vite single-page app, geserveerd door nginx. nginx serveert ook de audio en proxyt `/api` + `/util` door naar de `api`-service (same-origin, dus geen CORS nodig). |
+| `recorder` | `src/recorder/` | Records each stream every hour (ffmpeg). On startup it catches up the remaining part of the current hour if no recording exists yet. |
+| `cleaner` | `src/cleaner/` | Deletes recordings older than the configured retention window. |
+| `peakfilegenerator` | `src/peakfilegenerator/` | Generates waveform peak files (`audiowaveform`) from the mp3s, for fast rendering in the frontend. |
+| `api` | `src/api/` | Express API: serves the stream list and the recordings browse tree, and handles cutting/downloading fragments. Runs internally on port 3000, not public. |
+| `frontend` | `src/frontend/` | React + Vite single-page app, served by nginx. nginx also serves the audio and reverse-proxies `/api` + `/util` to the `api` service (same-origin, so no CORS needed). |
 
-De `recorder`, `cleaner` en `peakfilegenerator` zijn cron-gebaseerde workers die op een
-ingesteld minuut per uur draaien. De audio wordt gedeeld via een volume (`./audio`).
+The `recorder`, `cleaner`, and `peakfilegenerator` are cron-based workers that run at a configured
+minute of each hour. Audio is shared via a volume (`./audio`).
 
-## Vereisten
+## Requirements
 
 - Docker
-- Docker Compose (v2, het `docker compose`-subcommando)
+- Docker Compose (v2, the `docker compose` subcommand)
 
-## Aan de slag
+## Getting started
 
-1. Clone de repository:
+1. Clone the repository:
 
    ```sh
    git clone https://github.com/denhoo4/audiostreamlogger.git
    cd audiostreamlogger
    ```
 
-2. Maak een `.env` aan met de poort waarop de webinterface bereikbaar moet zijn
-   (zie `.env.example`):
+2. Create a `.env` with the port the web interface should be reachable on (see `.env.example`):
 
    ```sh
    cp .env.example .env
-   # pas PORT aan indien gewenst
+   # adjust PORT if desired
    ```
 
-3. Zorg voor een `settings.json` in de root (zie "Configuratie" hieronder).
+3. Provide a `settings.json` in the root (see "Configuration" below).
 
-4. Bouw en start de applicatie:
+4. Build and run the application:
 
    ```sh
    docker compose up --build
    ```
 
-5. Open de webinterface op `http://localhost:<PORT>` (standaard `http://localhost:9703`).
+5. Open the web interface at `http://localhost:<PORT>` (default `http://localhost:9703`).
 
-## Stoppen
+## Stopping
 
-In de terminal waar `docker compose up` draait: `Ctrl+C`. Of, om de containers te stoppen
-en op te ruimen:
+In the terminal running `docker compose up`: `Ctrl+C`. Or, to stop and clean up the containers:
 
 ```sh
 docker compose down
 ```
 
-## Configuratie
+## Configuration
 
 ### `.env`
 
-De poort van de webinterface wordt bepaald in `.env`:
+The web interface port is set in `.env`:
 
 ```
 PORT=9703
 ```
 
-De echte `.env` staat niet in git; gebruik `.env.example` als sjabloon.
+The real `.env` is not in git; use `.env.example` as a template.
 
 ### `settings.json`
 
-De applicatie leest zijn configuratie uit `settings.json` in de root. Dit bestand
-specificeert de op te nemen streams en de minuut-van-het-uur waarop elke worker draait,
-plus de bewaartermijn voor opnames.
+The application reads its configuration from `settings.json` in the root. This file specifies the
+streams to record and the minute-of-the-hour each worker runs at, plus the retention window for
+recordings.
 
-`settings.json` staat niet in git (het wordt als volume in de containers gemount).
+`settings.json` is not in git (it is mounted into the containers as a volume).
 
-Voorbeeld:
+Example:
 
 ```json
 {
@@ -113,25 +111,23 @@ Voorbeeld:
 }
 ```
 
-Velden:
+Fields:
 
 - `recorder.recorder_minute`, `peakfilegenerator.peakfile_minute`, `cleaner.cleaner_minute`:
-  de minuut van het uur (0–59) waarop de betreffende worker draait.
-- `cleaner.log_retention`: bewaartermijn van opnames in **uren** (bijvoorbeeld `168` voor
-  zeven dagen).
-- `streams`: de op te nemen stations. `folder` is de submap onder `audio/` waarin de
-  opnames van dat station terechtkomen; opnamebestanden heten
-  `<folder>/<folder>-YYYY-MM-DD-HH.mp3`.
+  the minute of the hour (0–59) at which the respective worker runs.
+- `cleaner.log_retention`: retention window for recordings in **hours** (e.g. `168` for seven days).
+- `streams`: the stations to record. `folder` is the subdirectory under `audio/` where that
+  station's recordings go; recording files are named `<folder>/<folder>-YYYY-MM-DD-HH.mp3`.
 
-## Opnamestructuur
+## Recording layout
 
-Opnames worden opgeslagen onder `audio/<folder>/` met de naam
-`<folder>-YYYY-MM-DD-HH.mp3` (lokale tijd, tijdzone `Europe/Amsterdam`). Per mp3 wordt een
-`.json`-peakfile gegenereerd voor de waveform-weergave in de frontend.
+Recordings are stored under `audio/<folder>/` named `<folder>-YYYY-MM-DD-HH.mp3` (local time,
+timezone `Europe/Amsterdam`). A `.json` peak file is generated per mp3 for the waveform display in
+the frontend.
 
-## Ontwikkeling
+## Development
 
-De frontend is een React + Vite + TypeScript-app in `src/frontend/`. Lokaal draaien:
+The frontend is a React + Vite + TypeScript app in `src/frontend/`. Run locally:
 
 ```sh
 cd src/frontend
@@ -139,9 +135,9 @@ npm install
 npm run dev
 ```
 
-Tests (waar aanwezig) draaien per service met het ingebouwde `node --test`, en in de
-frontend met Vitest.
+Tests (where present) run per service with the built-in `node --test`, and in the frontend with
+Vitest.
 
-> **Let op:** dit project is volop in ontwikkeling. Een databasegestuurd beheerscherm
-> (met inlog) voor de streams en configuratie is in de maak; deze README beschrijft de
-> huidige `settings.json`-gebaseerde opzet en wordt bijgewerkt zodra dat landt.
+> **Note:** this project is under active development. A database-backed management screen (with
+> login) for the streams and configuration is being built; this README describes the current
+> `settings.json`-based setup and will be updated once that lands.
