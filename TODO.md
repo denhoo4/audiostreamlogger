@@ -1,7 +1,33 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (`job-queue` branch COMPLETE + APPROVED, fast-forward merged into main AND pushed to origin/main: the generic `worker` service replaces the old `cleaner` + `peakfilegenerator` containers, `settings.json` is removed entirely, a DB-driven scheduler in the api enqueues per-type hourly/daily/weekly jobs with a global single-job busy=SKIP lock, and an SSE live job view + Run-now admin UI land. All six FEATs (FEAT-001…006) implemented + tested and the full cross-FEAT integration verification + cold-data docker compose convergence smoke PASSED iteration 1 with no code fixes — see `.agents/tasks/job-queue-2026-10-23/verification.md` and item 10. `main` == `job-queue` == 428a385, pushed to origin/main. Earlier on main: settings-db-core step 1 (SQLite DB via node:sqlite after better-sqlite3 failed on Node 26 + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring). .env untracked on main. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13. `admin-config` branch (CHUNK A) — DONE: APPROVED by the review gate, rebased onto the current main tip and fast-forward MERGED into main AND PUSHED to origin/main. Chunk A delivers five admin-screen / DB-config features: editable page title + editable favicon upload, worker status in the admin screen + a player hour-selector limited to hours that actually exist, and DB backup/export + import. Also folded in: the underscore-to-space name-display workaround is removed (stream/station names shown VERBATIM everywhere incl. /settings2 keys). Verified green in node:26-bookworm (host has no node): api 69 / worker 15 node:test, frontend `npm run build` + 14 vitest. See the `admin-config` branch section below. ALSO: `recorder-resilience` branch (CHUNK B) — ran in PARALLEL with admin-config, strictly confined to `src/recorder/` so the two do not collide; now IMPLEMENTED + TESTED + COMMITTED, semantic review APPROVED, and fast-forward MERGED into main AND PUSHED to origin/main (main == recorder-resilience == b293435; branch also pushed to origin with upstream tracking): per-stream ffmpeg supervision with capped backoff, recorder-scope graceful shutdown (SIGTERM/SIGINT), greppable per-stream error/gap logging, and a scope-added periodic poll that auto-starts a newly-added stream for the rest of the current hour (recorder-only Option A), see item 11 and the `recorder-resilience` branch section below. ALSO IN PROGRESS: `recordings-analysis` branch (CHUNK C) — FEAT-001 (api foundation) DONE: a `recordings` table + indexes, the pure filename parser + analysis helpers + upsert data-access, the requireAuth `GET /api/analysis/summary` + `/api/analysis/gaps` router, and a one-time startup backfill reconcile, all in `src/api` with three new node:test files green (api 83 node:test in node:26-bookworm); `/api/settings2` unchanged; recorder/worker/frontend/compose untouched (FEAT-002..004). FEAT-002 (recorder writes rows + compose `:ro`→rw flip) DONE. FEAT-003 (worker fills duration/size via ffprobe + cleaner removes the recordings row; `parseRecordingParts` + `src/worker/recordings-db.js`) DONE: `cd src/worker && node --test` green (32 tests) in node:26-bookworm, api/recorder/frontend untouched. FEAT-004 (frontend analysis view) DONE: typed `getAnalysisSummary`/`getAnalysisGaps` clients + response interfaces in `src/frontend/src/api.ts`, a new `RecordingsAnalysis.tsx` admin section (per-stream table + gaps/coverage panel) rendered in `SettingsPage.tsx`, and a vitest component test; `cd src/frontend && npm install && npm run build` + `npm test` green (16 tests) in node:26-bookworm, no backend/public-player code touched. All four CHUNK C FEATs (FEAT-001..004) are now implemented + tested on `recordings-analysis`, and the cross-FEAT integration verification PASSED iteration 1 (api 83 / worker 32 / recorder 35 node:test, frontend build + 16 vitest, `docker compose config` parses with the recorder data mount read-write) with ONE test-only fix — the backfill test now seeds the temp-DB require.cache injection so it loads in the toolchain. See the "Larger feature" item 9.) CHUNK C NOW FINALIZED: semantic review APPROVED (two LOW, non-blocking findings), a final green re-check in node:26-bookworm reproduced api 83 / worker 32 / recorder 35 node:test + frontend build/16 vitest + `docker compose config`, and `recordings-analysis` was fast-forward MERGED into `main` (main == recordings-analysis == 835d515). NOT pushed (release handled separately). The recorder `./data` mount is now read-write, and the admin screen gained a recordings-analysis section (per-stream table + gap/coverage panel) backed by the `recordings` table + `GET /api/analysis/summary`/`/gaps`. ALSO MERGED + PUSHED: `code-quality` branch (CHUNK D) — worker/API code-quality sweep coded + verified + review APPROVED, fast-forward merged into main AND pushed to origin/main (main == code-quality == 3d779fc): worker peak-handler `execSync`→`execFileSync` with array args (pure `exec-args.js`, unit-tested), a dependency-free per-service `log` helper (ISO timestamp + level, unit-tested), all four `package-lock.json` in sync (api + worker created) with every Dockerfile moved to `npm ci` (added the missing `COPY src/recorder/log.js`), real `package.json` metadata, and the configured app_title applied on `/settings` via a shared `useAppTitle` hook. Already-resolved items (global `express.json({limit})`, recorder gap logging from Chunk B) deliberately skipped. Verified in node:26-bookworm: api 83 / worker 37 / recorder 35 node:test, frontend build + 16 vitest, `npm ci` exit 0 per service, `docker compose build` for all four, and a cold-data smoke (alternate port/project) confirming healthy services + login + public settings endpoints + settings title + a runtime peakfilegenerator peak-file generation. Semantic review APPROVED (two NON-blocking NITs: ISO-timestamp/level log-line prefix, and the byte-for-byte duplicated per-service `log` helper across the three Docker build contexts); the rebase onto `main` was a no-op (code-quality was already one commit on the current tip), `main` was fast-forwarded to `code-quality` and pushed to origin/main, and `code-quality` was pushed to origin with upstream tracking. See the `code-quality` branch section + `.worktrees/code-quality/.agents/tasks/verification.md`.) ALSO MERGED + PUSHED: `testing-ci` branch (CHUNK E) — tests + CI + dependency automation + architecture docs, NO application/runtime behavior change; fast-forward MERGED into main AND pushed to origin/main (main == testing-ci == bad6177; branch also pushed to origin with upstream tracking). Delivered: five new api route-integration suites over a cold temp SQLite DB (auth flow incl. the real express-session + SqliteSessionStore, stream CRUD behind requireAuth, public /api/settings + /settings2, backup export/import scoped to streams+safe config never users/sessions, analysis summary+gaps) taking api node:test 83→114; two new frontend vitest tests (SettingsPage login-vs-management gate, StreamTable render+create-submit) taking frontend 16→20; report-only coverage wired (`test:coverage` scripts + `node --test --experimental-test-coverage` / `vitest run --coverage` with `@vitest/coverage-v8` the only new, test-only devDep — lockfile updated, `npm ci` still green) with NO failing threshold yet; `.github/workflows/ci.yml` (push + PR: backend matrix api/worker/recorder on Node 26, frontend build+test, `docker compose build` of all four, coverage non-blocking); `.github/dependabot.yml` (npm per service + docker base images + github-actions, weekly, grouped); and new `ARCHITECTURE.md` + `docs/TESTING.md` with README links. Verified in node:26-bookworm (host has no node): api 114 / worker 37 / recorder 35 node:test, frontend build + 20 vitest, `npm ci` green per service, `docker compose build` for all four, YAML lint of both workflow files, and a cold-data smoke on an alternate port/project (9789, project `asl-testing`) — all four services healthy, login works, `/api/settings` 200, torn down with `down` (no -v), no root-owned artifacts, 9703 never bound. See `.agents/tasks/audiostreamlogger-testing-ci-2026-10-23/verification.md` and the `testing-ci` branch section below.)
+Last updated: 2026-10-23 (ALL FIVE CHUNKS (A–E) + all big steps DONE, merged, and pushed to
+origin/main == d16304a. Full roadmap complete; see HANDOVER.md for a fresh-start briefing.
+Dependabot + GitHub Actions are now enabled on the repo; its first run opened 10 PRs (#3–#12) —
+see item 19 below for which are green/safe vs. red. Open feature items remaining: 14 (stream URL
+reachability validation), 17 (stream ordering / default stream / country grouping), 18 (recordings
+reconcile job), 19 (Dependabot PR triage), and the FastAPI-vs-OpenAPI decision point (item 20).)
+
+STATUS SUMMARY (what is DONE + on origin/main):
+- Node 26 Docker stack, 4 services: recorder, worker, api, frontend (cleaner + peakfilegenerator
+  folded into the generic `worker`). `settings.json` is GONE — all config lives in the SQLite DB.
+- React + Vite + TS frontend (wavesurfer v7 + regions + scroll-to-zoom); player at `/`, login-gated
+  admin at `/settings`.
+- SQLite DB (node:sqlite / DatabaseSync, journal_mode=DELETE, on the `./data` volume) owned by the
+  api: tables streams, users, sessions, jobs, schedules, app_config, recordings. Argon2id auth,
+  server-side session store, requireAuth.
+- Job queue + DB-driven scheduler (worker): cleaner + peakfilegenerator job types, hourly/daily/
+  weekly schedules, global single-job busy=SKIP lock, SSE live job view + Run-now admin UI.
+- recordings table + analysis endpoints (`/api/analysis/summary` + `/gaps`) + admin analysis view.
+- Recorder: hourly record + startup catch-up + 30s new-stream poll + per-stream ffmpeg supervision
+  with backoff + graceful shutdown + greppable gap logging. recorder `./data` mount is read-write.
+- Admin/branding: editable page title + favicon upload, worker status, existing-hours selector,
+  DB backup/export + import. Stream names shown VERBATIM (no underscore→space).
+- Code quality: execFileSync (no shell), per-service `log` helper, `npm ci` + committed lockfiles,
+  real package.json metadata.
+- Tests + CI + deps: api 114 / worker 37 / recorder 35 node:test, frontend 20 vitest; report-only
+  coverage; `.github/workflows/ci.yml`; `.github/dependabot.yml`; `ARCHITECTURE.md` + `docs/TESTING.md`.
+- `.env` is untracked (gitignored); `.env.example` is committed.
 
 ---
 
@@ -865,6 +891,48 @@ out-of-band, a missed event). Add a periodic FULL SYNC that reconciles both dire
 - [ ] Expose it in the admin scheduler UI as a schedulable type with a "Run now" button.
 Order: AFTER Chunk C lands (needs the recordings table + job model). Natural follow-on; could fold
 into Chunk C follow-ups or be its own small workflow.
+
+### 19. Triage the first Dependabot PRs (opened 2026-10-23; user wants these picked up)
+Dependabot's first run opened 10 PRs. `gh` is installed and authenticated as `denhoo4`. CI
+(GitHub Actions) ran on each; status captured 2026-10-23:
+- GREEN / safe to merge (all checks SUCCESS):
+  - [ ] #3  docker: nginx 1.27-bookworm → 1.29-bookworm (base image)
+  - [ ] #5  dev: jsdom 25 → 30 (frontend)  — green despite being a major; verify locally anyway
+  - [ ] #7  github-actions group (2 updates)
+  - [ ] #9  argon2 0.41.1 → 0.45.1 (api, minor/patch group)  — native build, verify it compiles
+- RED / CI FAILING (do NOT merge as-is; need investigation, likely a linked toolchain break):
+  - [ ] #10 react + @types/react (frontend)  — fails CI (surprising for react; likely shares the
+         frontend toolchain breakage below, or a lockfile/peer issue)
+  - [ ] #4  dev: @vitejs/plugin-react 4.7 → 6.1.2 (major)
+  - [ ] #6  dev: vite 6.4.5 → 8.3.4 (two majors)
+  - [ ] #8  dev: vitest 2.1.9 → 5.0.5 (three majors)
+  - [ ] #11 @vitest/mocker + @vitest/coverage-v8 + vitest group
+  - [ ] #12 tinypool + @vitest/coverage-v8 + vitest group
+  The vite/vitest/plugin-react/jsdom/coverage bumps are interdependent — merging one in isolation
+  leaves the toolchain inconsistent and likely keeps CI red. Treat #4/#6/#8/#11/#12 (and possibly
+  #10) as ONE bundled frontend-toolchain upgrade: do it in a worktree, update all together, fix the
+  vite 8 / vitest 5 config/API changes, get the frontend build + vitest green, then close the
+  superseded individual Dependabot PRs.
+APPROACH when resuming: `gh pr list`; for each GREEN PR fetch the branch, run the relevant
+service's `npm ci && npm test` (+ `docker compose build` for #3) in node:26-bookworm locally to
+confirm, then `gh pr merge --squash`. Merge order matters (shared frontend package.json/lockfile):
+do the non-frontend ones (#3, #7, #9) first, then tackle the bundled frontend upgrade. Note #5 is a
+major but CI-green — still verify before merging.
+
+### 20. Decision point: API docs — add OpenAPI/Swagger to Express vs. migrate api to FastAPI
+Discussed 2026-10-23. The api is hand-written Express (Node) with NO OpenAPI/Swagger docs. Two paths:
+- [ ] Option 1 (cheap, recommended if the goal is just docs/validation): add OpenAPI docs to the
+      EXISTING Express api. Prefer a schema-first approach (e.g. `zod` + `zod-to-openapi`) so the
+      spec stays in sync with the code (closest to the FastAPI feel), served via `swagger-ui-express`
+      behind requireAuth. Alternative: hand-written `swagger-jsdoc` annotations (drifts more easily).
+- [ ] Option 2 (big, only with a broader motive): migrate the api service to FastAPI (Python), which
+      ships Swagger `/docs` + ReDoc `/redoc` automatically. This is a full rewrite of ONE service in
+      another language (all routes incl. SSE, Argon2id auth + session store, the node:sqlite DB layer
+      shared with the Node worker/recorder, ffmpeg call, Dockerfile, AND the api test suite). High
+      effort/risk, no functionality gain — justified only if moving the backend to Python for other
+      reasons (Python audio/data/ML ecosystem), NOT merely for docs.
+Recommendation: do NOT migrate just for docs — Option 1 (zod) gets ~80% of the FastAPI feel for a
+fraction of the effort. Decide deliberately before building; not started.
 
 ### 14. Validate stream URLs are reachable/valid when setting them (user wish)
 Two levels — decide at build time how deep to go:
