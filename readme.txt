@@ -5,7 +5,7 @@ This project contains a multi-service Docker application for recording, cleaning
 Prerequisites
 
 	•	Docker: Install Docker
-	•	Docker Compose: Install Docker Compose
+	•	Docker Compose: Install Docker Compose (the `docker compose` v2 plugin)
 
 Project Structure
 
@@ -23,7 +23,7 @@ Getting Started
         cd audiostreamlogger
 
     2.	Build and run the application:
-        docker-compose up --build
+        docker compose up --build
 
     3.	Access the application:
         Open your browser and navigate to http://localhost:9702.
@@ -31,7 +31,8 @@ Getting Started
 
 Stopping the Application
 
-    To stop the application, press Ctrl+C in the terminal where docker-compose up is running, or run:
+    To stop the application, press Ctrl+C in the terminal where docker compose up is running, or run:
+        docker compose down
 
 Configuration
 
