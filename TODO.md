@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (`recorder-catchup` fast-forward merged into `main` == c36d630; README rewritten as README.md; pushed to origin. `settings-db-core` workflow running; DB foundation landed on branch `settings-db-core` using Node's built-in `node:sqlite` after `better-sqlite3` failed to build on Node 26.)
+Last updated: 2026-10-23 (`recorder-catchup` fast-forward merged into `main` == c36d630; README rewritten as README.md; pushed to origin. `settings-db-core` step 1 COMPLETE on branch `settings-db-core` (not yet merged): DB foundation + Argon2id admin/admin + node:sqlite session store + stream CRUD + login-gated `/settings` screen + write-path validation + infra/docs wiring (nginx `/auth`, compose `./data` mounts, `.env.example`, `PORT` default). DB uses Node's built-in `node:sqlite` after `better-sqlite3` failed to build on Node 26.)
 
 ---
 
@@ -164,10 +164,17 @@ Consequence — settings.json holds two things, both of which get a new home:
 - Remove the settings.json bind-mounts from all services in docker-compose.yml.
 
 EXECUTION (broken into sequential, mergeable steps to keep recorder.js/compose conflicts small):
-- [running] `settings-db-core` (step 1): SQLite + Argon2id admin/admin + session cookie +
-  stream CRUD + basic settings screen + write-path validation + API cleanup + .env.example.
+- [x] `settings-db-core` (step 1) — COMPLETE on branch `settings-db-core` (not yet merged):
+  SQLite + Argon2id admin/admin + session cookie + stream CRUD + basic settings screen +
+  write-path validation + API cleanup + .env.example.
   Streams move to the DB (workers read from the DB too). Cron/retention config STAYS in
   settings.json for this step. (branch settings-db-core, workflow wf_57ab8ef97967fddf)
+  - FEAT-005 (infra + docs wiring) DONE: nginx `/auth/` proxy block added alongside `/api/` +
+    `/util/`; docker-compose mounts `./data` (api RW, recorder/cleaner/peakfilegenerator RO),
+    passes `SESSION_SECRET`/`COOKIE_SECURE` to the api, frontend port defaults to `${PORT:-9703}`,
+    recorder `depends_on` api `service_healthy` while cleaner/peakfilegenerator use plain
+    `depends_on: [api]`; committed `.env.example`; README/TODO updated. settings.json bind mounts
+    kept (cron/retention still read from it this step).
   - NOTE (DB foundation landed): `better-sqlite3` does NOT compile on node:26-bookworm (its
     native addon uses V8 APIs removed in Node 26), so the api DB handle uses Node's built-in
     `node:sqlite` (`DatabaseSync`) instead — no native build, same prepare/exec surface. `argon2`
@@ -209,11 +216,14 @@ merge minimal. `node:test` suite `time-helpers.test.js` added (7/7).
   it simple for now, perfection touches graceful shutdown.
 
 ### 7. Tidy up .env handling (user wish, fold into/around the settings workflow)
-- [ ] Add `.env.example` (DOES go into git, with dummy values). The real `.env` stays gitignored
-      (the `!.env.example` exception already exists in .gitignore). (Part of step 1 above.)
-- [ ] Review the frontend port for production: the current `${PORT}:80` in compose + nginx on 80
-      internally is conventional, but check: missing default if PORT is unset, no TLS/HTTPS, a
-      reverse proxy in front. Tidy up where needed.
+- [x] Add `.env.example` (DOES go into git, with dummy values). The real `.env` stays gitignored
+      (the `!.env.example` exception already exists in .gitignore). DONE in FEAT-005 (step 1):
+      committed `.env.example` with `PORT`, `SESSION_SECRET`, `COOKIE_SECURE` + a commented,
+      documented `# APP_PORT=3000`.
+- [~] Review the frontend port for production: the missing-default part is DONE — compose now uses
+      `${PORT:-9703}:80` so an unset PORT no longer breaks compose. TLS/HTTPS and a reverse proxy
+      in front are still out of scope (deferred to step 5); `COOKIE_SECURE` is already plumbed
+      through so enabling the Secure cookie flag under TLS is a config change, not a code change.
 
 ### 8. Hour selector based on existing hours + recordings in the DB for analysis (user wish)
 Two parts, independent:
