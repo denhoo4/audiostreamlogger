@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const fs = require('fs');
 const path = require('path');
+const { buildBrowseTree } = require('../lib/settings-transform');
 
 router.get('/settings', (req, res) => {
     const filePath = path.join(__dirname, '../settings.json');
@@ -40,41 +41,7 @@ router.get('/settings2', async (req, res) => {
         });
 
         await Promise.all(promises);
-        transformedJson = {};
-        settingsData.forEach((item) => {
-            const key = item.name;
-            transformedJson[key] = { ...item };
-            delete transformedJson[key].name;
-        });
-        function transformData(originalData) {
-            const transformedData = {};
-
-            for (const station in originalData) {
-                const stationData = originalData[station].logs;
-                transformedData[station] = {};
-
-                for (const year in stationData) {
-                    transformedData[station][year] = {};
-
-                    for (const month in stationData[year]) {
-                        transformedData[station][year][month] = {};
-                        const days = Object.keys(stationData[year][month]);
-
-                        for (const day of days) {
-                            transformedData[station][year][month][day] = stationData[year][month][day];
-                        }
-                    }
-                }
-            }
-            return transformedData;
-        }
-        transformedJson = transformData(transformedJson);
-        const transformedData = {};
-
-        for (const key in transformedJson) {
-            const newKey = key.replace(/_/g, ' ');
-            transformedData[newKey] = transformedJson[key];
-        }
+        const transformedData = buildBrowseTree(settingsData);
         res.json(transformedData);
     } catch (error) {
         console.error('Error:', error);
