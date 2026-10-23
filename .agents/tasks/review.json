@@ -1,0 +1,30 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "label": "Brief vs. reality on the selector endpoint",
+      "severity": "non-blocking",
+      "confidence": "confirmed",
+      "detail": "The task brief states the selector consumes /api/settings2 (nested station->year->month->day->hours), but the real legacy bundle fetches /api/settings with value=folder and text=name.replace(/_/g,' '). The new app correctly matches the real old app, so no code change is needed; the brief's premise is wrong and should be corrected in follow-up."
+    },
+    {
+      "label": "Optional parity extras omitted",
+      "severity": "non-blocking",
+      "confidence": "confirmed",
+      "detail": "Right-click-to-pause, double-click-to-play, and mouse-wheel zoom exist in the old bundle (one app-level wheel listener confirmed) but are not implemented. The plan explicitly marked these optional and not required for parity sign-off. Add later if wanted."
+    },
+    {
+      "label": "Download-selection error handling softer than legacy",
+      "severity": "non-blocking",
+      "confidence": "confirmed",
+      "detail": "The old app re-threw on a failed /util/selection-export; the new handler catches, logs to console.error, and silently hides the wait message, leaving no user-visible error. Consider surfacing a user-facing error."
+    },
+    {
+      "label": "StrictMode double-mounts the wavesurfer effect in dev",
+      "severity": "non-blocking",
+      "confidence": "likely",
+      "detail": "main.tsx wraps the app in <StrictMode>, double-invoking the create/destroy effect in development only. Cleanup calls ws.destroy() so no leak results, and StrictMode is stripped in production builds. Noted so it isn't mistaken for a leak."
+    }
+  ],
+  "reviewDoc": "/home/hoogden/Desktop/GIT/audiostreamlogger/.worktrees/frontend-react/.agents/tasks/review.md"
+}
