@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. .env untracked on main. NOW IN PROGRESS: `job-queue` branch — requirements + technical design authored; implementation FEAT-001 (schema + seed + api data-access), FEAT-002 (generic `worker` service + `Dockerfile.worker`), FEAT-003 (DB-driven scheduler in the api), FEAT-004 (compose wiring: cleaner/peakfilegenerator removed, worker added), FEAT-005 (settings.json removed entirely — recorder reads recorder_minute from the DB with best-effort hot-reschedule; old sources + Dockerfiles deleted) and FEAT-006 (SSE live job view + job-control/scheduler/log_retention endpoints behind requireAuth, output retention wiring, nginx SSE un-buffering, admin UI SchedulerConfig + JobViewer) all DONE + tested (see item 10). All six job-queue FEATs are now implemented on this branch; the full cold-data docker compose convergence smoke remains. settings.json is now GONE on this branch. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13.)
+Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. .env untracked on main. NOW IN PROGRESS: `job-queue` branch — requirements + technical design authored; implementation FEAT-001 (schema + seed + api data-access), FEAT-002 (generic `worker` service + `Dockerfile.worker`), FEAT-003 (DB-driven scheduler in the api), FEAT-004 (compose wiring: cleaner/peakfilegenerator removed, worker added), FEAT-005 (settings.json removed entirely — recorder reads recorder_minute from the DB with best-effort hot-reschedule; old sources + Dockerfiles deleted) and FEAT-006 (SSE live job view + job-control/scheduler/log_retention endpoints behind requireAuth, output retention wiring, nginx SSE un-buffering, admin UI SchedulerConfig + JobViewer) all DONE + tested (see item 10). All six job-queue FEATs are implemented AND the full cross-FEAT integration verification + cold-data docker compose convergence smoke PASSED on this branch (iteration 1, no code fixes needed — see `.agents/tasks/job-queue-2026-10-23/verification.md` and item 10): all four images build, worker has ffmpeg+audiowaveform, all node/vitest suites green, and a cold-data smoke on an alternate port (9793, `-p asl-jobqueue`) exercised healthy boot with no settings.json, admin login through nginx, schedule PUT, a manual cleaner job pending→running→done, overlapping busy-skip (second job "skipped, busy", never ran), SSE snapshot+job events through nginx (unauth→401), recorder record + DB-driven catch-up, public /api/settings + /api/settings2 (no `test` field) still 200, and a worker heartbeat that stayed fresh (0 restarts) during jobs. settings.json is now GONE on this branch. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13.)
 
 ---
 
@@ -450,9 +450,26 @@ IMPLEMENTATION PROGRESS (2026-10-23):
       JobViewer.test.tsx` (3 cases — snapshot render + neutral skipped badge, job-event merge,
       close-on-unmount). Verified in node:26-bookworm: `cd src/api && node --test` → 53 pass / 0 fail;
       `cd src/frontend && npm install && npm run build` clean + `npm test` → 9 pass / 0 fail.
-      Committed locally; not pushed. REMAINING for the branch: the full cold-data `docker compose`
-      convergence smoke (PORT=9793, `-p asl-jobqueue`) exercising the SSE-through-nginx authenticated
-      snapshot+job path and the overlapping busy-skip at runtime.
+      Committed locally; not pushed.
+- [x] CROSS-FEAT INTEGRATION VERIFICATION + COLD-DATA CONVERGENCE SMOKE DONE on branch `job-queue`
+      (iteration 1, no source fixes needed — the six FEAT seams integrated cleanly). Full evidence in
+      `.agents/tasks/job-queue-2026-10-23/verification.md`. In node:26-bookworm: `docker compose
+      build` built all four images (recorder/worker/api/frontend; cleaner/peakfilegenerator gone),
+      the worker image has `ffmpeg` (5.1.9) + `audiowaveform` (1.10.2) on PATH, and the suites are
+      green — api 53, worker 11, recorder 13 (`node --test`), frontend build clean + vitest 9. The
+      cold-data smoke ran on an ALTERNATE host port (PORT=9793, `-p asl-jobqueue`, isolated cold
+      `./data` under /tmp so the user's live stack on 9703 and the worktree `./data` were never
+      touched): all four services reached `healthy` with NO settings.json present; admin/admin login
+      through nginx; `PUT /api/jobs/schedules/cleaner` updated the schedule; a manual cleaner job ran
+      pending→running→done; two overlapping jobs → the oldest ran `done` and the second was `skipped`
+      with output exactly `skipped, busy` (started_at null, never ran); the SSE endpoint through
+      nginx delivered a `snapshot` event then `job` events on enqueue (unauth `/api/jobs/stream` →
+      401, as were unauth GET/POST jobs + PUT schedule); the recorder read `recorder_minute` from the
+      DB and, after a stream was added, its startup catch-up recorded the current hour from the DB;
+      public `GET /api/settings` (streams from the DB) and `GET /api/settings2` (no `test` field)
+      both stayed 200; and the worker heartbeat stayed fresh (age 0.3–4.1s vs the 30s threshold) with
+      0 restarts across the job runs. Torn down with `down` (NOT `-v`); root-owned smoke artifacts
+      cleaned up so `./data` and `.worktrees` stay clean.
 
 ### 11. Recorder: robust per-stream process management (DECIDED — Option B)
 Current: one recorder container loops over all streams and starts an ffmpeg process per stream
