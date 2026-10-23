@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (`recorder-catchup` fast-forward merged into `main` == c36d630; README rewritten as README.md; pushed to origin. `settings-db-core` workflow running.)
+Last updated: 2026-10-23 (`recorder-catchup` fast-forward merged into `main` == c36d630; README rewritten as README.md; pushed to origin. `settings-db-core` workflow running — design finalized: the iteration-3 review's 3 open findings (ISO 3166-1 `country` scope, Express-5 session-stack gate, FR-6 cleanup relocation) + 3 NITs closed in `design-final.md`; ISO 3166-1 `country` scope addition folded into the step-1 scope.)
 
 ---
 
@@ -131,9 +131,17 @@ Problem: `settings.json` currently mixes two kinds of config with different rhyt
 - Content/domain: the stream list (name, folder, url, country) — wants to manage easily.
 
 DECIDED choices (user, 2026-10-23):
+- Stream fields: KEEP ALL current settings.json fields on the stream record — country, name,
+  folder, url. Do NOT drop any, even though the frontend does not use `country` yet (it will).
+  The settings screen must allow adding/editing streams with all these fields.
+- Country field: a dropdown with ALL countries per the ISO standard (ISO 3166-1), not a free-text
+  field. DECIDED (user, 2026-10-23, Option 1): store the ISO 3166-1 alpha-2 code (e.g. "NL") and
+  show the full country name in the dropdown. NOTE: existing data has the full name
+  ("country":"Netherlands"), so moving to codes is a small one-time migration of that value.
 - Cron + retention ALSO via the settings screen (NOT env-only). So this config goes into the DB,
   and the workers must be able to reload the values without a restart (recorder reschedules its
-  cron on change). Deliberately chosen complexity.
+  cron on change). Deliberately chosen complexity. (NOTE: superseded for cleaner/peakfilegenerator
+  by the job-queue/worker consolidation — see item 10 — but retention stays a DB-managed setting.)
 - Session lifetime: conventional default (e.g. 7 days, httpOnly cookie).
 - Write-path validation: YES — folder allowlist (^[a-z0-9_-]+$) + path.resolve containment, since
   folder becomes user input via the screen.
@@ -143,7 +151,9 @@ DECIDED choices (user, 2026-10-23):
   Server-Sent Events). Conventional, not-too-verbose logging; tune later.
 - Push policy: I MAY push to origin/main after every successful merge (user approved).
 - DB: SQLite on a persistent volume (./data/app.db bind-mount, survives rebuild). Postgres
-  deliberately NOT (too much overhead for 1 admin + a handful of streams).
+  deliberately NOT (too much overhead for 1 admin + a handful of streams). Journal mode =
+  `DELETE` (rollback journal), NOT WAL — so the read-only worker containers can open the `:ro`
+  bind-mounted file without needing write access to a WAL `-shm` sidecar (design decision, settings-db-core).
 - Hashing: Argon2id (npm `argon2`). Post-quantum deliberately NOT — PQC is about asymmetric crypto
   (RSA/ECC/Shor); password hashing is hash-based, Grover only halves the bit strength. Argon2id is
   the OWASP recommendation 2026. Post-quantum hashing is academic/overkill here.
@@ -168,6 +178,12 @@ EXECUTION (broken into sequential, mergeable steps to keep recorder.js/compose c
   stream CRUD + basic settings screen + write-path validation + API cleanup + .env.example.
   Streams move to the DB (workers read from the DB too). Cron/retention config STAYS in
   settings.json for this step. (branch settings-db-core, workflow wf_57ab8ef97967fddf)
+  SCOPE ADDITION (user, 2026-10-23): keep all stream fields (country, name, folder, url) on the
+  record and in the add/edit form — do NOT drop `country` even though the player doesn't use it
+  yet. `country` is an ISO 3166-1 dropdown of all countries; store the alpha-2 code (e.g. "NL") in
+  `streams.country`, show the full name in the UI. Seed/migrated stream data stores the code, not
+  the name ("Netherlands" -> "NL"). Folder validation (^[a-z0-9_-]+$) and other field validation
+  unchanged.
 - [ ] step 2: cron + retention into the DB + settings-screen UI; workers reload without restart.
   This is where settings.json is fully removed.
 - [ ] step 3: realtime log viewer in admin (SSE) + conventional logging in the services.
@@ -215,6 +231,88 @@ Larger feature (AFTER the DB exists; separate later workflow):
       average duration) + an analysis view in the frontend.
 - Touches all layers (recorder/cleaner/peakfilegenerator/api/frontend); natural next step once the
   SQLite DB exists. Deliberately NOT in the first settings-DB workflow (already large).
+
+### 10. Job queue for on-demand + scheduled cleaner/peakfilegenerator runs (DECIDED — Option A)
+User wants to trigger the cleaner and peakfilegenerator from the browser, and to schedule them.
+Chosen approach (Option A, brainstormed 2026-10-23): a lightweight `jobs` table in the SQLite DB
+(NOT a real message queue like Redis/BullMQ — overkill for this project, same reasoning as SQLite
+over Postgres). The api writes job rows; the workers poll the table and execute.
+
+DECIDED:
+- A `jobs` table in SQLite: type (cleaner | peakfilegenerator | ...), status (pending/running/
+  done/failed), params (optional), created/started/finished timestamps, output/log reference.
+- MANUAL trigger from the admin screen ("run cleaner now" / "generate peak files now").
+- SCHEDULER configurable in the browser: per job type an hourly / daily / weekly schedule. The
+  schedule config lives in the DB; a light scheduler (in the api or a worker) reads the schedules
+  and enqueues a job at the right time.
+- Workers poll the `jobs` table (every few seconds) and execute pending jobs.
+- PROGRESS visible in the UI (job status + a slice of output) — ties into the realtime log viewer
+  (settings-db step 3).
+- GLOBAL single-job limit: at most ONE job running at a time across ALL types.
+
+DECIDED (user, 2026-10-23):
+- Busy behavior: SKIP. If a scheduled/manual job wants to start while another is running, skip it
+  and log "skipped, busy" (do NOT queue it). Simple; periodic jobs come around again anyway.
+- This job scheduler REPLACES the current per-worker cron minutes entirely. Architecture shift:
+  the separate `cleaner` and `peakfilegenerator` CONTAINERS go away; instead ONE generic `worker`
+  service polls the `jobs` table and runs both job types (scheduled + manual). The cron-minute
+  config and those two cron containers are removed.
+  - ASSUMPTION (confirm): the `recorder` stays its OWN service — continuous/hourly recording is not
+    an on-demand batch job, so it does not fold into the worker. Only cleaner + peakfilegenerator
+    become worker job types.
+  - CONSEQUENCE: this SUPERSEDES the planned settings-db "step 2" (cron/retention -> DB + screen).
+    No point moving cron minutes into a DB setting and then deleting the containers. So the
+    cron/retention migration and the worker/job-queue consolidation become ONE step, after the DB
+    foundation (settings-db-core). Retention (log_retention) still becomes a DB-managed setting the
+    cleaner job reads.
+
+OPEN decisions:
+- [ ] How much job output/log to retain and show.
+
+Order: LATER feature — depends on the SQLite DB + workers-read-DB (settings-db-core) and couples
+with the realtime log viewer and the `recordings` table (item 8). Replaces the old "step 2". Do
+NOT fold into settings-db-core (the running step 1).
+
+### 11. Recorder: robust per-stream process management (DECIDED — Option B)
+Current: one recorder container loops over all streams and starts an ffmpeg process per stream
+inside that single container; all streams share one fate and failures are logged-and-swallowed.
+User confirmed the recorder stays ONE container (continuous recording, not an on-demand job — see
+item 10), but the internal process management should be more robust.
+
+DECIDED (Option B — one container, robust internal per-stream supervision):
+- [ ] Supervise each stream's ffmpeg process independently: if one stream's process dies, restart
+      only that stream (with retry/reconnect + backoff), leaving the other streams untouched.
+- [ ] A stream that is briefly down should reconnect rather than silently leaving a gap; emit a
+      clear per-stream error/gap log line (ties into the LOW "ffmpeg errors swallowed" debt).
+- [ ] Combine with graceful shutdown (settings-db graceful-shutdown step): on SIGTERM/SIGINT stop
+      each stream's ffmpeg cleanly.
+Deliberately NOT container-per-stream (Option C) — dynamically creating/removing containers per
+stream is overkill for this project (same "keep it manageable" reasoning as SQLite over Postgres).
+Order: later; pairs naturally with the graceful-shutdown work and the recordings-table/gap analysis.
+
+### 12. Editable branding (page title + icon/favicon) from the settings screen (user wish)
+Currently the page title ("Dé radiologger") is hardcoded in src/frontend/index.html and the
+favicon is a static src/frontend/... asset. User wants to change both from the admin/settings
+screen (white-labeling).
+
+Title (simple, text):
+- [ ] Store the title as an app-config setting in the DB (a small app_settings/config table, or a
+      key in whatever config store the settings work introduces).
+- [ ] Expose via the API (public GET so the frontend can read it; write behind auth).
+- [ ] Frontend reads the title and sets document.title (and any visible header) at runtime instead
+      of the hardcoded value.
+- [ ] Edit field in the settings screen.
+
+Icon / favicon (a bit more — it's an uploaded BINARY file, not a text setting):
+- [ ] Upload the icon from the admin screen (auth-protected upload endpoint).
+- [ ] Store/serve it (decide: on the ./data or audio volume as a file + a DB reference, or a blob
+      in the DB — a file on the volume is simpler and nginx can serve it). Validate type/size.
+- [ ] Frontend/nginx serves the current favicon dynamically instead of the static asset
+      (update the <link rel="icon"> / document head at runtime, or serve a fixed path whose
+      contents are the uploaded file).
+
+Order: small-to-medium; fold into the settings/admin-screen + DB-config work. The title is trivial;
+the icon upload needs a small file-upload + storage/validation story.
 
 ### 9. A real testing strategy (user wish)
 Current state: there IS some testing already, but thin and opportunistic (only pure helpers that
