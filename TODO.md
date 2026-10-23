@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (`recorder-catchup` fast-forward merged into `main` == c36d630; README rewritten as README.md; pushed to origin. `settings-db-core` workflow running.)
+Last updated: 2026-10-23 (`recorder-catchup` fast-forward merged into `main` == c36d630; README rewritten as README.md; pushed to origin. `settings-db-core` workflow running; DB foundation landed on branch `settings-db-core` using Node's built-in `node:sqlite` after `better-sqlite3` failed to build on Node 26.)
 
 ---
 
@@ -168,6 +168,12 @@ EXECUTION (broken into sequential, mergeable steps to keep recorder.js/compose c
   stream CRUD + basic settings screen + write-path validation + API cleanup + .env.example.
   Streams move to the DB (workers read from the DB too). Cron/retention config STAYS in
   settings.json for this step. (branch settings-db-core, workflow wf_57ab8ef97967fddf)
+  - NOTE (DB foundation landed): `better-sqlite3` does NOT compile on node:26-bookworm (its
+    native addon uses V8 APIs removed in Node 26), so the api DB handle uses Node's built-in
+    `node:sqlite` (`DatabaseSync`) instead — no native build, same prepare/exec surface. `argon2`
+    still compiles and is used for the admin hash. Consequence: the SQLite-backed
+    `express-session` store choice is reopened for step 2's auth wiring — either a node:sqlite
+    session store (keeps revocable server-side logout) or stateless signed cookies (loses it).
 - [ ] step 2: cron + retention into the DB + settings-screen UI; workers reload without restart.
   This is where settings.json is fully removed.
 - [ ] step 3: realtime log viewer in admin (SSE) + conventional logging in the services.

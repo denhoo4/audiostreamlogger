@@ -4,8 +4,11 @@ FROM node:26-bookworm
 # Create and change to the app directory
 WORKDIR /usr/src/app
 
-# Install ffmpeg (fluent-ffmpeg in routes/util.js shells out to it)
-RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+# Install ffmpeg (fluent-ffmpeg in routes/util.js shells out to it) plus the
+# build toolchain (python3 make g++) needed to compile the better-sqlite3 and
+# argon2 native addons during `npm install`.
+RUN apt-get update && apt-get install -y ffmpeg python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy package.json and install Node.js dependencies
 COPY src/api/package*.json ./
