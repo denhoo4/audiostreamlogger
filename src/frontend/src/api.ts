@@ -38,6 +38,35 @@ export interface AuthState {
   username?: string;
 }
 
+/** A job row as returned by GET /api/jobs and the SSE stream (requireAuth). */
+export interface JobRecord {
+  id: number;
+  type: "cleaner" | "peakfilegenerator";
+  trigger_source: "manual" | "schedule";
+  status: "pending" | "running" | "done" | "failed" | "skipped";
+  output: string;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+/** A schedule row as returned by GET /api/schedules (requireAuth). */
+export interface ScheduleRecord {
+  type: "cleaner" | "peakfilegenerator";
+  enabled: 0 | 1;
+  frequency: "hourly" | "daily" | "weekly";
+  minute: number;
+  hour: number;
+  day_of_week: number;
+  last_run_at: string | null;
+}
+
+/** Writable schedule fields for PUT /api/schedules/:type. */
+export type ScheduleInput = Pick<
+  ScheduleRecord,
+  "enabled" | "frequency" | "minute" | "hour" | "day_of_week"
+>;
+
 /**
  * An api error carrying the backend's {error, field?} body so forms can show
  * the server-side validation message (400) or conflict message (409).
@@ -273,4 +302,122 @@ export async function deleteStream(id: number): Promise<void> {
   if (!res.ok) {
     throw await toApiError(res);
   }
+}
+
+// --- Job-queue admin client (/api/jobs + /api/schedules + /api/config) ----
+// All behind requireAuth; same-origin credentials carry the session cookie.
+
+/** GET /api/jobs?limit= -> recent jobs, newest first (requireAuth). */
+export async function listJobs(limit = 50): Promise<JobRecord[]> {
+  const res = await fetch(
+    `${window.location.origin}/api/jobs?limit=${limit}`,
+    { credentials: "same-origin" },
+  );
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as JobRecord[];
+}
+
+/** POST /api/jobs -> "Run now"; enqueues a manual job and returns the row. */
+export async function runJobNow(
+  type: JobRecord["type"],
+): Promise<JobRecord> {
+  const res = await fetch(`${window.location.origin}/api/jobs`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type }),
+  });
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as JobRecord;
+}
+
+/** GET /api/jobs/schedules -> all schedule rows (requireAuth). */
+export async function listSchedules(): Promise<ScheduleRecord[]> {
+  const res = await fetch(`${window.location.origin}/api/jobs/schedules`, {
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as ScheduleRecord[];
+}
+
+/** PUT /api/jobs/schedules/:type -> update a schedule; returns the row. */
+export async function updateSchedule(
+  type: ScheduleRecord["type"],
+  body: ScheduleInput,
+): Promise<ScheduleRecord> {
+  const res = await fetch(
+    `${window.location.origin}/api/jobs/schedules/${type}`,
+    {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as ScheduleRecord;
+}
+
+/** GET /api/jobs/config/log_retention -> current retention in hours. */
+export async function getLogRetention(): Promise<{ hours: number | null }> {
+  const res = await fetch(
+    `${window.location.origin}/api/jobs/config/log_retention`,
+    { credentials: "same-origin" },
+  );
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as { hours: number | null };
+}
+
+/** PUT /api/jobs/config/log_retention {hours} -> set retention in hours. */
+export async function setLogRetention(
+  hours: number,
+): Promise<{ hours: number }> {
+  const res = await fetch(
+    `${window.location.origin}/api/jobs/config/log_retention`,
+    {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hours }),
+    },
+  );
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as { hours: number };
+}
+
+/**
+ * Open the live job SSE stream (GET /api/jobs/stream). The stream is
+ * same-origin, so the httpOnly session cookie is sent automatically and
+ * requireAuth authenticates it; withCredentials is set as harmless
+ * belt-and-suspenders only (a no-op same-origin). `onSnapshot` fires once on
+ * connect with the recent-jobs list; `onJob` fires for each changed row.
+ * Returns the EventSource so the caller can close() it on unmount.
+ */
+export function openJobStream(
+  onJob: (job: JobRecord) => void,
+  onSnapshot: (jobs: JobRecord[]) => void,
+): EventSource {
+  const source = new EventSource(
+    `${window.location.origin}/api/jobs/stream`,
+    { withCredentials: true },
+  );
+  source.addEventListener("snapshot", (e) => {
+    onSnapshot(JSON.parse((e as MessageEvent).data) as JobRecord[]);
+  });
+  source.addEventListener("job", (e) => {
+    onJob(JSON.parse((e as MessageEvent).data) as JobRecord);
+  });
+  return source;
 }

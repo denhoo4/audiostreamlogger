@@ -173,6 +173,13 @@ function startScheduler(db) {
                 if (due) {
                     enqueueJob(schedule.type, 'schedule');
                     markScheduleRun(schedule.type, dueInstant);
+                    // Prune right after the scheduled enqueue (design §6.3) so
+                    // output never grows unbounded between low-frequency ticks.
+                    pruneJobOutput(
+                        parseOutputRetentionCount(
+                            getConfig('output_retention_count')
+                        )
+                    );
                     console.log(
                         `scheduler: enqueued ${schedule.type} for due instant ${dueInstant}`
                     );

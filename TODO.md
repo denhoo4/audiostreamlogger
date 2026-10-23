@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. .env untracked on main. NOW IN PROGRESS: `job-queue` branch — requirements + technical design authored; implementation FEAT-001 (schema + seed + api data-access), FEAT-002 (generic `worker` service + `Dockerfile.worker`), FEAT-003 (DB-driven scheduler in the api), FEAT-004 (compose wiring: cleaner/peakfilegenerator removed, worker added) and FEAT-005 (settings.json removed entirely — recorder reads recorder_minute from the DB with best-effort hot-reschedule; old sources + Dockerfiles deleted) all DONE + tested (see item 10). settings.json is now GONE on this branch. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13.)
+Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. .env untracked on main. NOW IN PROGRESS: `job-queue` branch — requirements + technical design authored; implementation FEAT-001 (schema + seed + api data-access), FEAT-002 (generic `worker` service + `Dockerfile.worker`), FEAT-003 (DB-driven scheduler in the api), FEAT-004 (compose wiring: cleaner/peakfilegenerator removed, worker added), FEAT-005 (settings.json removed entirely — recorder reads recorder_minute from the DB with best-effort hot-reschedule; old sources + Dockerfiles deleted) and FEAT-006 (SSE live job view + job-control/scheduler/log_retention endpoints behind requireAuth, output retention wiring, nginx SSE un-buffering, admin UI SchedulerConfig + JobViewer) all DONE + tested (see item 10). All six job-queue FEATs are now implemented on this branch; the full cold-data docker compose convergence smoke remains. settings.json is now GONE on this branch. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13.)
 
 ---
 
@@ -419,6 +419,40 @@ IMPLEMENTATION PROGRESS (2026-10-23):
       covers `readRecorderMinute` (stored value, 0/59 bounds, missing row, out-of-range, non-integer,
       not-ready → 0); `cd src/recorder && node --test` → 13 pass / 0 fail. `docker compose config`
       validates; service set is recorder/worker/api/frontend. Committed locally; not pushed.
+- [x] FEAT-006 (SSE live job view + log viewer + output retention + admin UI) DONE on branch
+      `job-queue`. New `src/api/routes/jobs.js`, mounted at `/api/jobs` in `index.js`, ALL behind
+      `requireAuth` (AC-7; public `/api/settings` + `/api/settings2` untouched, AC-10):
+      `GET /api/jobs?limit=50` (int 1..200, default 50, out-of-range → 400 `{field:'limit'}`);
+      `POST /api/jobs {type}` → `enqueueJob(type,'manual')` 201 (the Run-now trigger; bad type → 400
+      `{field:'type'}`); `GET /api/jobs/schedules` → `listSchedules()`; `PUT /api/jobs/schedules/:type`
+      → `updateSchedule` (unknown type 404; per-field validation → 400 `{error,field}`);
+      `GET`/`PUT /api/jobs/config/log_retention {hours}` reusing `validateRetentionHours` (1..8760,
+      invalid → 400 `{field:'hours'}`); DB errors → 500. Plus `GET /api/jobs/stream` SSE behind
+      `requireAuth`: `text/event-stream` + `X-Accel-Buffering: no`, a per-connection ~1s read-poll
+      diffing against the last snapshot, emitting `snapshot` on connect, `job` on any changed row,
+      `ping` every 15s, torn down (both timers cleared + `res.end()`) on `req` close (NFR-5); the poll
+      is read-only and never holds the write lock. `src/frontend/nginx.conf`: `proxy_buffering off` +
+      `proxy_read_timeout 1h` added to the EXISTING `/api/` block (no nested location). Output
+      retention wired via `pruneJobOutput` after every manual enqueue (route) AND every scheduled
+      enqueue (`scheduler/index.js`), reading `output_retention_count` through the positive-int
+      fallback-100 parse (NIT-5); a pure `rowsToPrune(ids,n)` helper added to `services/jobs.js` with
+      the AC-12 assertion (a running job survives a prune even with >N newer rows). Frontend: `api.ts`
+      gains `JobRecord`/`ScheduleRecord` interfaces + typed clients `listJobs`/`runJobNow`/
+      `listSchedules`/`updateSchedule`/`getLogRetention`/`setLogRetention`/`openJobStream` (all
+      `credentials:'same-origin'`, surfacing `ApiError`); new `SchedulerConfig.tsx` (per type: enable
+      toggle, frequency select with conditional anchors — minute hourly / hour+minute daily /
+      day-of-week+hour+minute weekly — Save + Run-now, plus a log_retention input) and `JobViewer.tsx`
+      (opens the `EventSource`, renders the recent-jobs list with status badge + trigger + timing +
+      output, a NEUTRAL badge for `skipped, busy`, `close()` on unmount); both rendered in
+      `SettingsPage.tsx` between `<StreamTable/>` and `<ChangePasswordForm/>`; matching `.job-*`
+      styles added to `App.css`. Tests: `src/api/test/jobs-routes.test.js` (13 cases — unauth 401,
+      validation 400s, enqueue-drives-a-row, AC-12 prune) and `src/frontend/src/settings/
+      JobViewer.test.tsx` (3 cases — snapshot render + neutral skipped badge, job-event merge,
+      close-on-unmount). Verified in node:26-bookworm: `cd src/api && node --test` → 53 pass / 0 fail;
+      `cd src/frontend && npm install && npm run build` clean + `npm test` → 9 pass / 0 fail.
+      Committed locally; not pushed. REMAINING for the branch: the full cold-data `docker compose`
+      convergence smoke (PORT=9793, `-p asl-jobqueue`) exercising the SSE-through-nginx authenticated
+      snapshot+job path and the overlapping busy-skip at runtime.
 
 ### 11. Recorder: robust per-stream process management (DECIDED — Option B)
 Current: one recorder container loops over all streams and starts an ffmpeg process per stream

@@ -8,22 +8,26 @@ The services are managed with Docker Compose.
 
 ## Architecture
 
-The application consists of five services (source under `src/`):
+The application consists of four services (source under `src/`):
 
 | Service | Directory | Role |
 | --- | --- | --- |
-| `recorder` | `src/recorder/` | Records each stream every hour (ffmpeg). On startup it catches up the remaining part of the current hour if no recording exists yet. |
-| `cleaner` | `src/cleaner/` | Deletes recordings older than the configured retention window. |
-| `peakfilegenerator` | `src/peakfilegenerator/` | Generates waveform peak files (`audiowaveform`) from the mp3s, for fast rendering in the frontend. |
-| `api` | `src/api/` | Express API: serves the stream list and the recordings browse tree, handles cutting/downloading fragments, and powers the login-gated admin screen (authentication, stream CRUD). Runs internally on port 3000, not public. |
+| `recorder` | `src/recorder/` | Records each stream every hour (ffmpeg). On startup it catches up the remaining part of the current hour if no recording exists yet. Reads its run minute from the database. |
+| `worker` | `src/worker/` | Generic job runner. Polls the `jobs` table and executes one job at a time (cleaner = delete recordings past the retention window; peakfilegenerator = generate `audiowaveform` peak files). Replaces the old `cleaner` + `peakfilegenerator` containers. |
+| `api` | `src/api/` | Express API: serves the stream list and the recordings browse tree, handles cutting/downloading fragments, powers the login-gated admin screen (authentication, stream CRUD, job scheduling + Run-now + a live job feed), and hosts the DB-driven scheduler that enqueues jobs. Runs internally on port 3000, not public. |
 | `frontend` | `src/frontend/` | React + Vite single-page app, served by nginx. nginx also serves the audio and reverse-proxies `/api`, `/util`, and `/auth` to the `api` service (same-origin, so no CORS needed). |
 
-The `recorder`, `cleaner`, and `peakfilegenerator` are cron-based workers that run at a configured
-minute of each hour. Audio is shared via a volume (`./audio`).
+The `recorder` records at a configured minute of each hour. The `cleaner` and `peakfilegenerator`
+are no longer separate containers: they are job types run by the `worker`, triggered either on a
+per-type schedule (hourly/daily/weekly, configured in the admin screen) or on demand via "Run now".
+At most one job runs at a time across all types; a job that would overlap a running one is skipped
+("skipped, busy"). Audio is shared via a volume (`./audio`).
 
-The stream list lives in a SQLite database at `./data/app.db` (bind-mounted into the containers,
-so it survives rebuilds). The `api` mounts `./data` read-write; the workers mount it read-only and
-read the streams from the DB. The database is created and seeded automatically on first start.
+All configuration — the stream list, the per-type schedules, the run minutes, and the log-retention
+window — lives in a SQLite database at `./data/app.db` (bind-mounted into the containers, so it
+survives rebuilds). The `api` and `worker` mount `./data` read-write; the `recorder` mounts it
+read-only. The database is created and seeded automatically on first start. There is no
+`settings.json` — it has been removed entirely.
 
 ## Requirements
 
@@ -46,20 +50,17 @@ read the streams from the DB. The database is created and seeded automatically o
    # adjust PORT if desired
    ```
 
-3. Provide a `settings.json` in the root (see "Configuration" below). It now only holds the cron
-   minutes and the retention window; the stream list lives in the database.
-
-4. Build and run the application:
+3. Build and run the application:
 
    ```sh
    docker compose up --build
    ```
 
-5. Open the web interface at `http://localhost:<PORT>` (default `http://localhost:9703`).
+4. Open the web interface at `http://localhost:<PORT>` (default `http://localhost:9703`).
 
-6. Open `/settings` and sign in to manage streams. On first start the database is seeded with a
-   single admin account (username `admin`, password `admin`). Change the password from the admin
-   screen right away.
+5. Open `/settings` and sign in to manage streams, schedules, and retention (see "Configuration"
+   below). On first start the database is seeded with a single admin account (username `admin`,
+   password `admin`). Change the password from the admin screen right away.
 
 ## Stopping
 
@@ -102,45 +103,31 @@ comes up if the variable is unset.
 
 ### Database (`./data`)
 
-Streams are stored in a SQLite database at `./data/app.db`. The directory is bind-mounted into the
-containers (`api` read-write, the workers read-only) so the database survives rebuilds. The file is
-created and seeded automatically on first start and is not committed to git (only `data/.gitkeep`
-is tracked).
+All configuration is stored in a SQLite database at `./data/app.db`: the stream list, the per-type
+job schedules, the recorder run minute, and the log-retention window. The directory is bind-mounted
+into the containers (`api` and `worker` read-write, `recorder` read-only) so the database survives
+rebuilds. The file is created and seeded automatically on first start and is not committed to git
+(only `data/.gitkeep` is tracked). There is no `settings.json` any more — all of its former contents
+moved into the database and are managed from the admin screen.
 
-### `settings.json`
+### Configuration (admin screen)
 
-The application reads the cron minutes and the retention window from `settings.json` in the root.
-The stream list is no longer stored here — it lives in the database and is managed from the admin
-screen.
+Everything that used to live in `settings.json` is now edited in the login-gated `/settings` screen
+and stored in the database:
 
-`settings.json` is not in git (it is mounted into the containers as a volume).
+- **Streams** — each stream has a `country`, `name`, `folder`, and `url`; `folder` is the
+  subdirectory under `audio/` where that station's recordings go, and recording files are named
+  `<folder>/<folder>-YYYY-MM-DD-HH.mp3`.
+- **Schedules** — per job type (`cleaner`, `peakfilegenerator`) an enable toggle and an
+  hourly/daily/weekly schedule with the matching anchor (minute; hour+minute; day-of-week+hour+minute).
+  A "Run now" button enqueues a one-off manual job.
+- **Log retention** — the retention window for recordings, in **hours** (e.g. `168` for seven days),
+  read by the cleaner job.
+- The recorder run minute is seeded in the database (`recorder_minute`, default `0`) and re-read by
+  the recorder without a restart.
 
-Example:
-
-```json
-{
-  "cleaner": {
-    "log_retention": 168,
-    "cleaner_minute": 10
-  },
-  "peakfilegenerator": {
-    "peakfile_minute": 5
-  },
-  "recorder": {
-    "recorder_minute": 0
-  }
-}
-```
-
-Fields:
-
-- `recorder.recorder_minute`, `peakfilegenerator.peakfile_minute`, `cleaner.cleaner_minute`:
-  the minute of the hour (0–59) at which the respective worker runs.
-- `cleaner.log_retention`: retention window for recordings in **hours** (e.g. `168` for seven days).
-
-Streams are managed in the admin screen and stored in the database, not in `settings.json`. Each
-stream has a `country`, `name`, `folder`, and `url`; `folder` is the subdirectory under `audio/`
-where that station's recordings go, and recording files are named `<folder>/<folder>-YYYY-MM-DD-HH.mp3`.
+The admin screen also shows a live job feed (status, trigger, timing, and captured output) that
+updates in real time over Server-Sent Events.
 
 ## Recording layout
 

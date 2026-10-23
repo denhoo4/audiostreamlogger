@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { getAuthMe, postLogout } from "../api";
 import LoginForm from "./LoginForm";
 import StreamTable from "./StreamTable";
+import SchedulerConfig from "./SchedulerConfig";
+import JobViewer from "./JobViewer";
 import ChangePasswordForm from "./ChangePasswordForm";
 
 /**
@@ -72,6 +74,8 @@ export default function SettingsPage() {
         </div>
       </div>
       <StreamTable />
+      <SchedulerConfig />
+      <JobViewer />
       <ChangePasswordForm />
     </main>
   );

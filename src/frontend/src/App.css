@@ -82,3 +82,75 @@
   color: #0a7a0a;
   margin: 4px 0;
 }
+
+/* Live job viewer (JobViewer.tsx) */
+.job-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.job-item {
+  border: 1px solid #cccccc;
+  padding: 8px;
+}
+
+.job-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.job-trigger,
+.job-type {
+  color: #555555;
+}
+
+.job-times {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: #555555;
+  font-size: 0.85em;
+  margin-top: 4px;
+}
+
+.job-output {
+  background-color: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  padding: 6px;
+  margin-top: 6px;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 0.85em;
+}
+
+.job-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 0.8em;
+  text-transform: uppercase;
+  color: #ffffff;
+}
+
+.job-badge-done {
+  background-color: #0a7a0a;
+}
+
+.job-badge-running {
+  background-color: #0a5a7a;
+}
+
+.job-badge-error {
+  background-color: #b00020;
+}
+
+/* Neutral: pending + skipped (incl. "skipped, busy") — not an error. */
+.job-badge-neutral {
+  background-color: #888888;
+}
