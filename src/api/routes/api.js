@@ -51,7 +51,18 @@ router.get('/settings2', async (req, res) => {
 
 async function folderContent(folderPath) {
     try {
-      const files = await fs.promises.readdir(folderPath);
+      let files;
+      try {
+        files = await fs.promises.readdir(folderPath);
+      } catch (err) {
+        // A stream folder only exists once the recorder has written its first
+        // file. Until then (e.g. a freshly deployed stack) treat the station as
+        // having no logs rather than failing the whole /settings2 response.
+        if (err.code === 'ENOENT') {
+          return {};
+        }
+        throw err;
+      }
   
       const dateMap = new Map();
   
