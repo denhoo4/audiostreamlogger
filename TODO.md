@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. .env untracked on main. NOW IN PROGRESS: `job-queue` branch — requirements + technical design authored; implementation FEAT-001 (schema + seed + api data-access), FEAT-002 (generic `worker` service + `Dockerfile.worker`), FEAT-003 (DB-driven scheduler in the api), FEAT-004 (compose wiring: cleaner/peakfilegenerator removed, worker added), FEAT-005 (settings.json removed entirely — recorder reads recorder_minute from the DB with best-effort hot-reschedule; old sources + Dockerfiles deleted) and FEAT-006 (SSE live job view + job-control/scheduler/log_retention endpoints behind requireAuth, output retention wiring, nginx SSE un-buffering, admin UI SchedulerConfig + JobViewer) all DONE + tested (see item 10). All six job-queue FEATs are implemented AND the full cross-FEAT integration verification + cold-data docker compose convergence smoke PASSED on this branch (iteration 1, no code fixes needed — see `.agents/tasks/job-queue-2026-10-23/verification.md` and item 10): all four images build, worker has ffmpeg+audiowaveform, all node/vitest suites green, and a cold-data smoke on an alternate port (9793, `-p asl-jobqueue`) exercised healthy boot with no settings.json, admin login through nginx, schedule PUT, a manual cleaner job pending→running→done, overlapping busy-skip (second job "skipped, busy", never ran), SSE snapshot+job events through nginx (unauth→401), recorder record + DB-driven catch-up, public /api/settings + /api/settings2 (no `test` field) still 200, and a worker heartbeat that stayed fresh (0 restarts) during jobs. settings.json is now GONE on this branch. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13.)
+Last updated: 2026-10-23 (`job-queue` branch COMPLETE + APPROVED, fast-forward merged into main AND pushed to origin/main: the generic `worker` service replaces the old `cleaner` + `peakfilegenerator` containers, `settings.json` is removed entirely, a DB-driven scheduler in the api enqueues per-type hourly/daily/weekly jobs with a global single-job busy=SKIP lock, and an SSE live job view + Run-now admin UI land. All six FEATs (FEAT-001…006) implemented + tested and the full cross-FEAT integration verification + cold-data docker compose convergence smoke PASSED iteration 1 with no code fixes — see `.agents/tasks/job-queue-2026-10-23/verification.md` and item 10. `main` == `job-queue` == 428a385, pushed to origin/main. AUTO-ADVANCE: the next chunk on the list is CHUNK A — see "Next up (CHUNK A)" below. Earlier on main: settings-db-core step 1 (SQLite DB via node:sqlite after better-sqlite3 failed on Node 26 + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring). .env untracked on main. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13.)
 
 ---
 
@@ -260,7 +260,24 @@ Larger feature (AFTER the DB exists; separate later workflow):
 - Touches all layers (recorder/cleaner/peakfilegenerator/api/frontend); natural next step once the
   SQLite DB exists. Deliberately NOT in the first settings-DB workflow (already large).
 
-### 10. Job queue for on-demand + scheduled cleaner/peakfilegenerator runs (DECIDED — Option A)
+### 10. Job queue for on-demand + scheduled cleaner/peakfilegenerator runs — MERGED INTO `main` + PUSHED (Option A)
+Status: done, APPROVED (no findings — `.agents/tasks/job-queue-2026-10-23/review.json`),
+fast-forward merged into `main` and pushed to origin/main (`main` == `job-queue` == 428a385,
+over the previous tip 0bb6345). Commits on main: d17cb77, 5b34849, a7a8383, 87fc818, 576e33e,
+4db6db1, 428a385. All six FEATs are checked off in the implementation-progress list below, and the
+cross-FEAT integration + cold-data convergence smoke passed iteration 1 with no code fixes
+(`.agents/tasks/job-queue-2026-10-23/verification.md`). The generic `worker` now replaces the
+`cleaner` + `peakfilegenerator` containers, `settings.json` is gone, the DB-driven scheduler +
+SSE live job view are live, and README.md reflects the four-service architecture.
+
+AUTO-ADVANCE (CHUNK A): per the user's standing instruction to automatically start the next task
+after a workflow finishes ("Kun je na deze workflow automatisch de volgende taak op de lijst
+starten?"), this merge hands off to the next chunk on the restructured list, CHUNK A. The workflow
+drives which concrete item CHUNK A maps to; the remaining open work it draws from lives in the
+items below — settings-db steps 4–5 (graceful shutdown; small hour-selector/production-port items),
+item 8's quick-win hour selector, and item 11's per-stream recorder supervision. This note only
+records that the auto-advance is expected; it does not re-scope those items.
+
 User wants to trigger the cleaner and peakfilegenerator from the browser, and to schedule them.
 Chosen approach (Option A, brainstormed 2026-10-23): a lightweight `jobs` table in the SQLite DB
 (NOT a real message queue like Redis/BullMQ — overkill for this project, same reasoning as SQLite
@@ -304,7 +321,7 @@ Order: LATER feature — depends on the SQLite DB + workers-read-DB (settings-db
 with the realtime log viewer and the `recordings` table (item 8). Replaces the old "step 2". Do
 NOT fold into settings-db-core (the running step 1).
 
-IN PROGRESS: branch `job-queue` / worktree `.worktrees/job-queue` (started 2026-10-23). Requirements
+MERGED: branch `job-queue` / worktree `.worktrees/job-queue` (started 2026-10-23, merged 2026-10-23). Requirements
 (`.agents/tasks/job-queue-2026-10-23/requirements.md`) and the technical design
 (`.agents/tasks/job-queue-2026-10-23/design.md`) are authored (no production code yet). Design
 decomposes the work into six dependency-ordered FEATs mirroring requirements §1–6:
