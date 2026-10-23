@@ -244,6 +244,57 @@ export function faviconUrl(): string {
   return `${window.location.origin}/api/branding/favicon`;
 }
 
+// --- Backup/export + import client (/api/backup) -------------------------
+// All behind requireAuth; the same-origin session cookie travels with each
+// request. Downloads come back as Blobs so the fetch carries the cookie (a bare
+// <a href> would too, but the Blob approach matches App.tsx's export pattern and
+// lets us surface ApiError on a 401/500).
+
+/** Result summary returned by POST /api/backup/import. */
+export interface ImportResult {
+  imported: number;
+  updated: number;
+  skipped: { folder: string | null; reason: string }[];
+  config_applied: string[];
+  config_skipped?: { key: string; reason: string }[];
+}
+
+/** GET /api/backup/export -> the JSON backup as a Blob (requireAuth). */
+export async function exportBackup(): Promise<Blob> {
+  const res = await fetch(`${window.location.origin}/api/backup/export`, {
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return await res.blob();
+}
+
+/** GET /api/backup/db -> the raw SQLite file as a Blob (requireAuth). */
+export async function downloadDb(): Promise<Blob> {
+  const res = await fetch(`${window.location.origin}/api/backup/db`, {
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return await res.blob();
+}
+
+/** POST /api/backup/import -> upsert streams + apply safe config (requireAuth). */
+export async function importBackup(json: unknown): Promise<ImportResult> {
+  const res = await fetch(`${window.location.origin}/api/backup/import`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(json),
+  });
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as ImportResult;
+}
+
 // --- Authenticated admin client (/auth + /api/streams) -------------------
 // All of these send credentials so the httpOnly session cookie travels with
 // the same-origin request; writes and the admin list are gated by requireAuth

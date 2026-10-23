@@ -32,6 +32,15 @@ function getStream(id) {
         .get(id);
 }
 
+/** Fetch a single stream by its unique folder, or undefined (backup import). */
+function getStreamByFolder(folder) {
+    return db
+        .prepare(
+            'SELECT id, country, name, folder, url, created_at, updated_at FROM streams WHERE folder = ?'
+        )
+        .get(folder);
+}
+
 /**
  * Insert a new stream. Pre-checks for a duplicate folder and throws
  * DuplicateFolderError if one exists. Returns the created row.
@@ -88,6 +97,7 @@ function deleteStream(id) {
 module.exports = {
     listStreams,
     getStream,
+    getStreamByFolder,
     createStream,
     updateStream,
     deleteStream,

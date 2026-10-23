@@ -76,7 +76,11 @@ The `/settings` route is a login-gated admin screen (same-origin session cookie,
 `api` under `/auth` and `/api`). From there you can:
 
 - sign in and change the admin password;
-- add, edit, and remove streams (country is picked from an ISO 3166-1 list).
+- add, edit, and remove streams (country is picked from an ISO 3166-1 list);
+- set the page title and upload a favicon (branding);
+- see the worker's liveness (alive/stale, last-seen age, current job);
+- export a JSON backup (streams + safe config) or the raw database, and import a backup back
+  (streams are upserted by folder; only an allowlist of config keys is applied).
 
 On a fresh database a single admin user is seeded as `admin` / `admin`. Change the password after
 the first login.

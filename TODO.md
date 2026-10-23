@@ -349,9 +349,10 @@ Quick win (frontend; can fold into the settings workflow or stand alone, NO DB n
       station -> year -> month -> day -> hours[]). Wire the selector to that instead of hardcoded.
       DONE on `admin-config` (FEAT-002): `App.tsx` fetches `getSettings2()` and derives the
       `#hourSelector` options via pure `player-hours.ts` helpers
-      (`displayNameForFolder` + `existingHoursFor`, vitest-covered); the hardcoded HOURS constant
-      is gone and it still works for anonymous users (/settings2 is public). The day picker was
-      left unconstrained for now (noted as optional in the step).
+      (`displayNameForFolder` + `existingHoursFor`, vitest-covered) while keeping the leading 'Uur'
+      placeholder; the hardcoded HOURS constant is gone and it still works for anonymous users
+      (/settings2 is public). The day picker was left unconstrained for now (noted as optional in
+      the step).
 
 Larger feature (AFTER the DB exists; separate later workflow):
 - [ ] `recordings` table in the DB: per recording stream/date/hour + duration + file size + status
@@ -708,6 +709,30 @@ displaying. User now wants `_` to stay `_` everywhere — no display-time substi
   ADD cursor-x anchoring (the user's explicit ask) via the v7 scroll math; extract a pure
   `nextZoom(current, deltaY)` helper so the step/clamp is unit-testable. Change confined to
   `useWavesurfer.ts`.
+
+### 14. DB backup/export + import from the admin screen (user wish, item 10 "S2")
+Status: IMPLEMENTED on branch `admin-config` (CHUNK A, FEAT-003; not yet merged). Verified: api 69
+`node:test` green in node:26-bookworm (incl. 9 new backup tests), frontend `npm run build` + 14
+vitest green, `docker compose build api frontend` green.
+- [x] Export a JSON backup (authed `GET /api/backup/export`): `{version:1, exported_at, streams,
+      app_config}` as a downloadable attachment. Only an allowlist of safe app_config keys is
+      exported (`app_title`, `log_retention`, `recorder_minute`, `output_retention_count`);
+      favicon/worker-status/secret keys are dropped.
+- [x] Download the raw SQLite file (authed `GET /api/backup/db`) as an `app.db` octet-stream
+      attachment (404 when missing) — the cheap full-backup option.
+- [x] Import a previously exported JSON (authed `POST /api/backup/import`, route-local
+      `express.json({limit:'5mb'})`): each stream is validated with the SAME `validateStream` used
+      by stream CRUD and upserted BY FOLDER (create or update); only allowlisted app_config keys are
+      applied (reusing per-key `setConfig` validation). Returns `{imported, updated, skipped,
+      config_applied, config_skipped}`. NEVER touches users/sessions/jobs/schedules.
+- [x] Pure, unit-tested logic in `src/api/lib/backup.js` (`buildBackup` / `pickSafeConfig` /
+      `validateBackup` + `SAFE_CONFIG_KEYS`) with node:test coverage of the version check, per-stream
+      validation, the config allowlist, and a temp-DB import upsert-by-folder integration test.
+- [x] Admin UI `src/frontend/src/settings/BackupSettings.tsx` (mounted in SettingsPage): Download
+      backup (JSON) / Download raw database buttons + an Import file picker that reads the file as
+      JSON, calls the import endpoint, and renders an imported/updated/skipped summary.
+- Note: `SAFE_CONFIG_KEYS` in `src/api/lib/backup.js` is the single source of truth for which
+  app_config keys round-trip through a backup — extend it there if a new portable key is added.
 
 ### 9. A real testing strategy (user wish)
 Current state: there IS some testing already, but thin and opportunistic (only pure helpers that
