@@ -3,6 +3,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const cron = require('node-cron');
 const { secondsUntilNextHour, currentHourStamp } = require('./time-helpers');
+const { readStreams } = require('./streams-db');
 
 // Heartbeat file touched at boot and on every tick; the compose healthcheck
 // checks its freshness to detect a worker that has silently stopped ticking.
@@ -67,8 +68,7 @@ function recordStream(name, folder, url, durationSeconds = 3600) {
 
 // Function to read settings and start recording
 function startRecording() {
-    const json = JSON.parse(fs.readFileSync(path.join(__dirname, '/settings.json'), 'utf8'));
-    const streams = json.streams;
+    const streams = readStreams();
     streams.forEach(item => {
         recordStream(item.name, item.folder, item.url);
     });
@@ -97,11 +97,19 @@ writeHeartbeat();
 // throws, the hourly schedule is live. For each configured stream, if no
 // recording file exists for the CURRENT hour yet, start a recording for the
 // remainder of this hour; the normal cron tick takes over at the next hour.
-// Streams are read exactly the way startRecording() reads them today — this is
-// deliberately NOT a new settings source, to stay merge-compatible with the
-// parallel settings-db work on this file.
-try {
-    const catchupStreams = JSON.parse(fs.readFileSync(path.join(__dirname, '/settings.json'), 'utf8')).streams;
+// Streams are read from the shared SQLite DB (read-only) via readStreams().
+// Because the recorder can boot before the api has created/seeded the DB, the
+// read is wrapped in a bounded retry (~10s worst case) so a not-instantly-ready
+// DB does not make catch-up silently record nothing for the current hour. The
+// bound MUST NOT be short-circuited on the first empty read (that reintroduces
+// the AC-13 race); a legitimately empty DB just exits after the bound.
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+(async () => {
+    let catchupStreams = readStreams();
+    for (let i = 0; i < 10 && catchupStreams.length === 0; i++) {
+        await sleep(1000);
+        catchupStreams = readStreams();
+    }
     const stamp = currentHourStamp();
     const remaining = secondsUntilNextHour();
     catchupStreams.forEach(item => {
@@ -118,9 +126,9 @@ try {
             console.error(`recorder: catch-up error for ${item.folder}:`, err);
         }
     });
-} catch (err) {
+})().catch((err) => {
     // The whole catch-up is best-effort; the cron schedule is already live.
     console.error('recorder: startup catch-up failed:', err);
-}
+});
 
 console.log(`Recorder is OK! The recorder process will run every hour at xx:`+recorder_minute.toString().padStart(2, '0')+`.`);
