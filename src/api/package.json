@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.1.0",
   "main": "index.js",
+  "scripts": {
+    "test": "node --test"
+  },
   "dependencies": {
     "express": "^5.1.0",
     "fluent-ffmpeg": "^2.1.3"

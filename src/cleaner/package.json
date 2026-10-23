@@ -4,7 +4,8 @@
     "description": "A Node.js script to delete old audio files.",
     "main": "deletefiles.js",
     "scripts": {
-        "start": "node deletefiles.js"
+        "start": "node deletefiles.js",
+        "test": "node --test"
     },
     "author": "Your Name",
     "license": "MIT",

@@ -4,7 +4,8 @@
     "description": "A Node.js script to generate peak files for audio files.",
     "main": "peakfilegenerator.js",
     "scripts": {
-        "start": "node peakfilegenerator.js"
+        "start": "node peakfilegenerator.js",
+        "test": "node --test"
     },
     "author": "Your Name",
     "license": "MIT",
