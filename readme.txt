@@ -12,9 +12,18 @@ Project Structure
 	•	recorder: Service to record audio files.
 	•	cleaner: Service to clean up audio files.
 	•	peakfilegenerator: Service to generate peak files from audio files.
-	•	frontend: Service to provide a web interface to interact with audio files.
+	•	api: Node + Express service exposing /api and /util. Internal only (port 3000,
+		not published); reached by the frontend's nginx reverse proxy. Lives in api/.
+	•	frontend: nginx serving the React (Vite) SPA from frontend-react/, built via a
+		multi-stage Docker build. Serves /audio directly and reverse-proxies /api + /util
+		to the api service, so the browser sees a single origin (no CORS). Published on ${PORT}.
 	•	audio: Directory to store audio files.
 	•	settings.json: Configuration file for the application.
+
+	Architecture note: the API layer used to live inside the frontend container. It has
+	been split into its own api service. The legacy webpack UI (frontend/index.js +
+	frontend/web/) has been replaced by the React app in frontend-react/; frontend/ now
+	only holds the nginx config. The frontend's nginx proxies /api and /util to api:3000.
 
 Getting Started
 

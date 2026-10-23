@@ -27,7 +27,7 @@ router.get('/settings2', async (req, res) => {
 
     try {
         const fileContent = await fs.promises.readFile(filePath, 'utf-8');
-        const settingsData = JSON.parse(fileContent);
+        const settingsData = JSON.parse(fileContent).streams;
 
         const promises = settingsData.map(async (station) => {
             const folder = station["folder"];

@@ -1,0 +1,22 @@
+# Use the official Node.js image
+FROM node:26-bookworm
+
+# Create and change to the app directory
+WORKDIR /usr/src/app
+
+# Install ffmpeg (fluent-ffmpeg in routes/util.js shells out to it)
+RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
+
+# Copy package.json and install Node.js dependencies
+COPY api/package*.json ./
+
+RUN npm install
+
+# Copy the API application code
+COPY api/ .
+
+# Internal-only port; nginx reverse-proxies to it. Not published to the host.
+EXPOSE 3000
+
+# Command to run the API service
+CMD ["node", "index.js"]

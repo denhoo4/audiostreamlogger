@@ -29,18 +29,32 @@ services:
     environment:
       - TZ=Europe/Amsterdam
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    volumes:
+      - ./audio:/usr/src/app/audio
+      - ./settings.json:/usr/src/app/settings.json:ro
+    environment:
+      - TZ=Europe/Amsterdam
+    # Internal only: reached by nginx via http://api:3000. Not published.
+    networks:
+      - web-network
+
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+    depends_on:
+      - api
     volumes:
-      - ./audio:/usr/src/app/audio
-      - ./settings.json:/usr/src/app/settings.json
+      # nginx serves recorded audio straight from the shared volume (read-only).
+      - ./audio:/usr/src/app/audio:ro
     ports:
       - "${PORT}:80"
     environment:
       - TZ=Europe/Amsterdam
-      - PORT=${PORT}
     networks:
       - web-network
 

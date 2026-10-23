@@ -1,0 +1,10 @@
+{
+  "name": "audiostreamlogger-api",
+  "private": true,
+  "version": "0.1.0",
+  "main": "index.js",
+  "dependencies": {
+    "express": "^5.1.0",
+    "fluent-ffmpeg": "^2.1.3"
+  }
+}
