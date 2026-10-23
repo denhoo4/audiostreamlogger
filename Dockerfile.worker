@@ -1,0 +1,31 @@
+# Use the official Node.js 26 image on Debian 12 (bookworm)
+FROM node:26-bookworm
+
+# Install ffmpeg plus audiowaveform from the BBC bookworm/amd64 .deb.
+# The single worker image runs both job types (cleaner + peakfilegenerator), so
+# it carries both binaries. Installing the .deb by path lets apt resolve and
+# pull its runtime dependencies.
+RUN apt-get update && \
+    apt-get install -y curl ffmpeg && \
+    curl -fsSL -o /tmp/aw.deb https://github.com/bbc/audiowaveform/releases/download/1.10.2/audiowaveform_1.10.2-1-12_amd64.deb && \
+    apt-get install -y /tmp/aw.deb && \
+    rm -f /tmp/aw.deb && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create and change to the app directory
+WORKDIR /usr/src/app
+
+# Copy package.json (and lockfile if present) from the worker directory
+COPY src/worker/package*.json ./
+
+# Install Node.js dependencies (no runtime deps beyond Node built-ins)
+RUN npm install
+
+# Copy the worker source
+COPY src/worker/ ./
+
+# Ensure the audio directory exists
+RUN mkdir -p /usr/src/app/audio
+
+# Command to run the worker
+CMD ["node", "worker.js"]

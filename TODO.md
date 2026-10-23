@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. settings.json still holds cron/retention. .env untracked on main. NOW IN PROGRESS: `job-queue` branch — requirements + technical design authored and implementation underway (FEAT-001 schema + seed + api data-access layer done + tested; see item 10) for the job-queue/worker consolidation that removes the cleaner + peakfilegenerator containers and deletes settings.json. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13.)
+Last updated: 2026-10-23 (settings-db-core step 1 COMPLETE + APPROVED, merged into main: SQLite DB (node:sqlite after better-sqlite3 failed on Node 26) + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring. settings.json still holds cron/retention. .env untracked on main. NOW IN PROGRESS: `job-queue` branch — requirements + technical design authored and implementation underway (FEAT-001 schema + seed + api data-access layer and FEAT-002 generic `worker` service + `Dockerfile.worker` done + tested; see item 10) for the job-queue/worker consolidation that removes the cleaner + peakfilegenerator containers and deletes settings.json. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13.)
 
 ---
 
@@ -355,6 +355,32 @@ IMPLEMENTATION PROGRESS (2026-10-23):
       && node --test` -> 23 pass / 0 fail in node:26-bookworm (host has no node; ran via the locked
       image). Committed locally; not pushed. Later FEATs: read `output_retention_count` through
       `parseOutputRetentionCount` before `pruneJobOutput(n)`.
+- [x] FEAT-002 (generic `worker` service + `Dockerfile.worker`) DONE on branch `job-queue`. New
+      `src/worker/`: `db.js` opens the worker's OWN RW `node:sqlite` handle setting ONLY
+      `busy_timeout` + `foreign_keys` and NEVER `journal_mode` (the api owns it), with the open +
+      PRAGMAs inside a bounded `SQLITE_BUSY` retry (`withBusyRetry`, Atomics.wait `sleepSync`) so a
+      not-yet-ready DB at boot and a contended write are both tolerated (MEDIUM-1). `claim.js`: pure
+      `planTick({pending})` ([]→idle, [A]→claim A, [A,B,C]→claim A + skip B,C) + the effectful
+      skip-then-claim `applyPlan` (skips written first so a lost claim can't re-run the extras).
+      Ported pure helpers `settings-utils.js` (`validateRetentionHours`) + `filename-utils.js`
+      (`extractFileDateTime`); `handlers/paths.js` exports `AUDIO_DIR` (env override, no `__dirname`
+      form). `handlers/cleaner.js` reads `log_retention` from `app_config` via the RW handle,
+      validates, THROWS on out-of-bounds → failed (no `process.exit`), recomputes the threshold per
+      run, deletes with SYNCHRONOUS fs; per-file error logged, top-level unreadable dir throws
+      (MEDIUM-2). `handlers/peakfilegenerator.js` reads `streams` folders from the DB and keeps the
+      faithful two-level walk + skip-on-null + current-hour skip + per-file `audiowaveform`
+      best-effort (MEDIUM-3). `worker.js`: independent `setInterval` heartbeat (5s, decoupled from
+      the tick), non-overlapping 3s poll loop, boot stale-`running` reclaim, `SQLITE_BUSY`-retried
+      terminal writes, and `capOutput` (64 KiB UTF-8-safe tail, drops a split leading multi-byte
+      sequence). `Dockerfile.worker` = node:26-bookworm + ffmpeg + BBC audiowaveform 1.10.2.
+      Tests (`src/worker/test/`): `planTick`, `validateRetentionHours`, `extractFileDateTime`,
+      byte-exact + multi-byte-safe `capOutput`. `cd src/worker && node --test` → 11 pass / 0 fail
+      (via the locked node:26-bookworm image; host has no node). `docker build -f Dockerfile.worker`
+      succeeds and both `ffmpeg` (5.1.9) + `audiowaveform` (1.10.2) resolve on PATH. NOTE: the
+      design's scalar `decideClaim` was superseded by `planTick` (plan-the-whole-pending-set, design
+      §2.4). The worker is NOT yet wired into `docker-compose.yml` (FEAT-004); when it is, its
+      `./data` mount MUST be read-write (the recorder stays `:ro`), else the first claim throws
+      `SQLITE_READONLY`. Committed locally; not pushed.
 
 ### 11. Recorder: robust per-stream process management (DECIDED — Option B)
 Current: one recorder container loops over all streams and starts an ffmpeg process per stream
