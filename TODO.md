@@ -7,7 +7,7 @@ Last updated: 2026-10-23 (`job-queue` branch COMPLETE + APPROVED, fast-forward m
 
 ## Branches
 
-### `admin-config` — ALL 3 FEATs DONE + INTEGRATION VERIFIED (CHUNK A: awaiting review gate + merge)
+### `admin-config` — MERGED + PUSHED (CHUNK A: all 3 FEATs DONE + INTEGRATION VERIFIED + review APPROVED, rebased onto main tip and fast-forward merged into main AND pushed to origin/main)
 Status: isolated git worktree branched off `main` (base commit 9e31b3a) at
 `.worktrees/admin-config` on branch `admin-config`. Implementation plan authored at
 `.agents/tasks/admin-config-2026-10-23/plan.md` and the work decomposed into three
@@ -53,8 +53,17 @@ frontend` built all three images (all in node:26-bookworm; host has no node). In
 are clean: `validateConfig` carries one branch per key (branding + worker_* with no duplication),
 `/api/branding` + `/api/backup` + `/api/jobs` each mounted once in `index.js`, the three features'
 `api.ts` additions type-check together, SettingsPage mounts each admin section once, and nginx
-`location /api/` already covers every new path. Awaiting the review gate (`review.json` verdict) +
-the merge step.
+`location /api/` already covers every new path.
+REVIEW + MERGE (2026-10-23): semantic review APPROVED — gate
+`.agents/tasks/admin-config-2026-10-23/review.json` `verdict=APPROVED`, no blocking findings (two
+non-blocking NITs: no warning logged when a recorded `favicon_path` is missing on disk — the serve
+route still fail-safes to the bundled default; and a mixed-validity backup import is not
+all-or-nothing for `app_config` since each allowlisted key is applied/skipped individually — both
+acceptable as-is). The fast checks were re-run green on the branch after rebase (api 69 / worker 15
+node:test, frontend `npm run build` + 14 vitest, all in node:26-bookworm). The branch was rebased
+onto the current `main` tip (0a3a386, which already carries `recorder-resilience`) — the only
+rebase conflicts were in this living TODO doc and were resolved by hand — then `main` was
+fast-forwarded to `admin-config` and pushed to origin/main.
 
 ### `recorder-resilience` — MERGED + PUSHED (CHUNK B: coded + tested + committed + semantic review APPROVED, fast-forward merged into main AND pushed to origin/main)
 Status: isolated git worktree branched off `main` at `.worktrees/recorder-resilience` on branch
