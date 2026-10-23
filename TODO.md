@@ -1,11 +1,32 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (`job-queue` branch COMPLETE + APPROVED, fast-forward merged into main AND pushed to origin/main: the generic `worker` service replaces the old `cleaner` + `peakfilegenerator` containers, `settings.json` is removed entirely, a DB-driven scheduler in the api enqueues per-type hourly/daily/weekly jobs with a global single-job busy=SKIP lock, and an SSE live job view + Run-now admin UI land. All six FEATs (FEAT-001…006) implemented + tested and the full cross-FEAT integration verification + cold-data docker compose convergence smoke PASSED iteration 1 with no code fixes — see `.agents/tasks/job-queue-2026-10-23/verification.md` and item 10. `main` == `job-queue` == 428a385, pushed to origin/main. Earlier on main: settings-db-core step 1 (SQLite DB via node:sqlite after better-sqlite3 failed on Node 26 + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring). .env untracked on main. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13. `admin-config` branch (CHUNK A) — DONE: APPROVED by the review gate, rebased onto the current main tip and fast-forward MERGED into main AND PUSHED to origin/main. Chunk A delivers five admin-screen / DB-config features: editable page title + editable favicon upload, worker status in the admin screen + a player hour-selector limited to hours that actually exist, and DB backup/export + import. Also folded in: the underscore-to-space name-display workaround is removed (stream/station names shown VERBATIM everywhere incl. /settings2 keys). Verified green in node:26-bookworm (host has no node): api 69 / worker 15 node:test, frontend `npm run build` + 14 vitest. See the `admin-config` branch section below. ALSO: `recorder-resilience` branch (CHUNK B) — ran in PARALLEL with admin-config, strictly confined to `src/recorder/` so the two do not collide; now IMPLEMENTED + TESTED + COMMITTED, semantic review APPROVED, and fast-forward MERGED into main AND PUSHED to origin/main (main == recorder-resilience == b293435; branch also pushed to origin with upstream tracking): per-stream ffmpeg supervision with capped backoff, recorder-scope graceful shutdown (SIGTERM/SIGINT), greppable per-stream error/gap logging, and a scope-added periodic poll that auto-starts a newly-added stream for the rest of the current hour (recorder-only Option A), see item 11 and the `recorder-resilience` branch section below. ALSO IN PROGRESS: `recordings-analysis` branch (CHUNK C) — FEAT-001 (api foundation) DONE: a `recordings` table + indexes, the pure filename parser + analysis helpers + upsert data-access, the requireAuth `GET /api/analysis/summary` + `/api/analysis/gaps` router, and a one-time startup backfill reconcile, all in `src/api` with three new node:test files green (api 83 node:test in node:26-bookworm); `/api/settings2` unchanged; recorder/worker/frontend/compose untouched (FEAT-002..004). FEAT-002 (recorder writes rows + compose `:ro`→rw flip) DONE. FEAT-003 (worker fills duration/size via ffprobe + cleaner removes the recordings row; `parseRecordingParts` + `src/worker/recordings-db.js`) DONE: `cd src/worker && node --test` green (32 tests) in node:26-bookworm, api/recorder/frontend untouched. FEAT-004 (frontend analysis view) DONE: typed `getAnalysisSummary`/`getAnalysisGaps` clients + response interfaces in `src/frontend/src/api.ts`, a new `RecordingsAnalysis.tsx` admin section (per-stream table + gaps/coverage panel) rendered in `SettingsPage.tsx`, and a vitest component test; `cd src/frontend && npm install && npm run build` + `npm test` green (16 tests) in node:26-bookworm, no backend/public-player code touched. All four CHUNK C FEATs (FEAT-001..004) are now implemented + tested on `recordings-analysis`, and the cross-FEAT integration verification PASSED iteration 1 (api 83 / worker 32 / recorder 35 node:test, frontend build + 16 vitest, `docker compose config` parses with the recorder data mount read-write) with ONE test-only fix — the backfill test now seeds the temp-DB require.cache injection so it loads in the toolchain. See the "Larger feature" item 9.) CHUNK C NOW FINALIZED: semantic review APPROVED (two LOW, non-blocking findings), a final green re-check in node:26-bookworm reproduced api 83 / worker 32 / recorder 35 node:test + frontend build/16 vitest + `docker compose config`, and `recordings-analysis` was fast-forward MERGED into `main` (main == recordings-analysis == 835d515). NOT pushed (release handled separately). The recorder `./data` mount is now read-write, and the admin screen gained a recordings-analysis section (per-stream table + gap/coverage panel) backed by the `recordings` table + `GET /api/analysis/summary`/`/gaps`.
+Last updated: 2026-10-23 (`job-queue` branch COMPLETE + APPROVED, fast-forward merged into main AND pushed to origin/main: the generic `worker` service replaces the old `cleaner` + `peakfilegenerator` containers, `settings.json` is removed entirely, a DB-driven scheduler in the api enqueues per-type hourly/daily/weekly jobs with a global single-job busy=SKIP lock, and an SSE live job view + Run-now admin UI land. All six FEATs (FEAT-001…006) implemented + tested and the full cross-FEAT integration verification + cold-data docker compose convergence smoke PASSED iteration 1 with no code fixes — see `.agents/tasks/job-queue-2026-10-23/verification.md` and item 10. `main` == `job-queue` == 428a385, pushed to origin/main. Earlier on main: settings-db-core step 1 (SQLite DB via node:sqlite after better-sqlite3 failed on Node 26 + Argon2id admin/admin + hand-rolled node:sqlite session store + stream CRUD + login-gated /settings screen + ISO 3166-1 country dropdown + write-path validation + API cleanup + infra/docs wiring). .env untracked on main. ALSO IN PROGRESS: `wavesurfer-zoom` branch — plan authored for mouse-wheel scroll-to-zoom on the waveform, see item 13. `admin-config` branch (CHUNK A) — DONE: APPROVED by the review gate, rebased onto the current main tip and fast-forward MERGED into main AND PUSHED to origin/main. Chunk A delivers five admin-screen / DB-config features: editable page title + editable favicon upload, worker status in the admin screen + a player hour-selector limited to hours that actually exist, and DB backup/export + import. Also folded in: the underscore-to-space name-display workaround is removed (stream/station names shown VERBATIM everywhere incl. /settings2 keys). Verified green in node:26-bookworm (host has no node): api 69 / worker 15 node:test, frontend `npm run build` + 14 vitest. See the `admin-config` branch section below. ALSO: `recorder-resilience` branch (CHUNK B) — ran in PARALLEL with admin-config, strictly confined to `src/recorder/` so the two do not collide; now IMPLEMENTED + TESTED + COMMITTED, semantic review APPROVED, and fast-forward MERGED into main AND PUSHED to origin/main (main == recorder-resilience == b293435; branch also pushed to origin with upstream tracking): per-stream ffmpeg supervision with capped backoff, recorder-scope graceful shutdown (SIGTERM/SIGINT), greppable per-stream error/gap logging, and a scope-added periodic poll that auto-starts a newly-added stream for the rest of the current hour (recorder-only Option A), see item 11 and the `recorder-resilience` branch section below. ALSO IN PROGRESS: `recordings-analysis` branch (CHUNK C) — FEAT-001 (api foundation) DONE: a `recordings` table + indexes, the pure filename parser + analysis helpers + upsert data-access, the requireAuth `GET /api/analysis/summary` + `/api/analysis/gaps` router, and a one-time startup backfill reconcile, all in `src/api` with three new node:test files green (api 83 node:test in node:26-bookworm); `/api/settings2` unchanged; recorder/worker/frontend/compose untouched (FEAT-002..004). FEAT-002 (recorder writes rows + compose `:ro`→rw flip) DONE. FEAT-003 (worker fills duration/size via ffprobe + cleaner removes the recordings row; `parseRecordingParts` + `src/worker/recordings-db.js`) DONE: `cd src/worker && node --test` green (32 tests) in node:26-bookworm, api/recorder/frontend untouched. FEAT-004 (frontend analysis view) DONE: typed `getAnalysisSummary`/`getAnalysisGaps` clients + response interfaces in `src/frontend/src/api.ts`, a new `RecordingsAnalysis.tsx` admin section (per-stream table + gaps/coverage panel) rendered in `SettingsPage.tsx`, and a vitest component test; `cd src/frontend && npm install && npm run build` + `npm test` green (16 tests) in node:26-bookworm, no backend/public-player code touched. All four CHUNK C FEATs (FEAT-001..004) are now implemented + tested on `recordings-analysis`, and the cross-FEAT integration verification PASSED iteration 1 (api 83 / worker 32 / recorder 35 node:test, frontend build + 16 vitest, `docker compose config` parses with the recorder data mount read-write) with ONE test-only fix — the backfill test now seeds the temp-DB require.cache injection so it loads in the toolchain. See the "Larger feature" item 9.) CHUNK C NOW FINALIZED: semantic review APPROVED (two LOW, non-blocking findings), a final green re-check in node:26-bookworm reproduced api 83 / worker 32 / recorder 35 node:test + frontend build/16 vitest + `docker compose config`, and `recordings-analysis` was fast-forward MERGED into `main` (main == recordings-analysis == 835d515). NOT pushed (release handled separately). The recorder `./data` mount is now read-write, and the admin screen gained a recordings-analysis section (per-stream table + gap/coverage panel) backed by the `recordings` table + `GET /api/analysis/summary`/`/gaps`. ALSO IN PROGRESS: `code-quality` branch (CHUNK D) — worker/API code-quality sweep coded + verified (awaiting review): worker peak-handler `execSync`→`execFileSync` with array args (pure `exec-args.js`, unit-tested), a dependency-free per-service `log` helper (ISO timestamp + level, unit-tested), all four `package-lock.json` in sync (api + worker created) with every Dockerfile moved to `npm ci` (added the missing `COPY src/recorder/log.js`), real `package.json` metadata, and the configured app_title applied on `/settings` via a shared `useAppTitle` hook. Already-resolved items (global `express.json({limit})`, recorder gap logging from Chunk B) deliberately skipped. Verified in node:26-bookworm: api 83 / worker 37 / recorder 35 node:test, frontend build + 16 vitest, `npm ci` exit 0 per service, `docker compose build` for all four, and a cold-data smoke (alternate port/project) confirming healthy services + login + public settings endpoints + settings title + a runtime peakfilegenerator peak-file generation. See the `code-quality` branch section + `.worktrees/code-quality/.agents/tasks/verification.md`.)
 
 ---
 
 ## Branches
+
+### `code-quality` — IN PROGRESS (CHUNK D: worker/API code-quality sweep coded + verified, awaiting review)
+Isolated git worktree at `.worktrees/code-quality` on branch `code-quality`. Plan:
+`.agents/tasks/plan.md`; verification evidence: `.agents/tasks/verification.md`. Behavior-preserving
+sweep plus two small LOW fixes:
+- worker peakfilegenerator `execSync` (shell-interpolated paths) → `execFileSync` with array args via
+  a pure `exec-args.js` builder (unit-tested); no other worker `child_process` use exists.
+- a tiny dependency-free `log` helper (ISO timestamp + level) per service (`src/api/lib/log.js`,
+  `src/worker/log.js`, `src/recorder/log.js`, identical copies, unit-tested once) adopted at the
+  services' own log lines.
+- all four `package-lock.json` in sync (api + worker newly created) and every Dockerfile switched
+  from `npm install` to `npm ci` (added the missing `COPY src/recorder/log.js`).
+- real `package.json` metadata (recorder `author: "Your Name"` removed; description/license on
+  recorder/api/worker).
+- the configured app_title now applied on `/settings` too via a shared `useAppTitle` hook.
+Already-resolved items deliberately skipped (no no-op edits): the global `express.json({limit})`
+and the recorder gap/error logging (Chunk B). Verified in node:26-bookworm: api 83 / worker 37 /
+recorder 35 node:test, frontend build + 16 vitest, `npm ci` exit 0 per service, `docker compose
+build` for all four, and a cold-data smoke on an alternate port/project confirming healthy services,
+login, public settings endpoints, the settings title, and a peakfilegenerator job generating a real
+peak file at runtime. NOT yet reviewed/merged.
 
 ### `admin-config` — MERGED + PUSHED (CHUNK A: all 3 FEATs DONE + INTEGRATION VERIFIED + review APPROVED, rebased onto main tip and fast-forward merged into main AND pushed to origin/main)
 Status: isolated git worktree branched off `main` (base commit 9e31b3a) at
@@ -228,9 +249,11 @@ via fast-forward (commit 687eafd). Verification report: `.agents/tasks/api-split
       (bumping the image tag only covers OS+Node, not the npm deps).
 
 ### 4. Clean up stale lockfiles (non-blocking nit from the security review)
-- [ ] package-lock.json files still pin old versions. Harmless now because the Dockerfiles use
+- [x] package-lock.json files still pin old versions. Harmless now because the Dockerfiles use
       `npm install`, but it bites once you move to `npm ci`. Regenerate after the dependency bumps.
       Consider `npm ci` in the Dockerfiles afterwards for reproducible builds.
+      DONE on `code-quality` (CHUNK D): regenerated/created all four lockfiles and moved every
+      Dockerfile to `npm ci`; see the Technical-debt LOW item below for the full note and proof.
 
 ---
 
@@ -907,8 +930,13 @@ Then (MEDIUM):
 - [ ] `recorder.js` writes to `audio/${folder}` from settings without a containment check; becomes
       user input once the settings screen/DB exists. Fix: folder allowlist + path.resolve check.
       (Being addressed in the settings-db-core step via the write-path validation.)
-- [ ] Blocking sync I/O + `execSync` with shell-interpolated paths (peakfilegenerator). Fix:
+- [x] Blocking sync I/O + `execSync` with shell-interpolated paths (peakfilegenerator). Fix:
       `fs.promises` + `execFile`/`spawn` (also removes the quoting/injection risk).
+      DONE on `code-quality` (CHUNK D): `execSync` → `execFileSync` with array args for both
+      audiowaveform and ffprobe via a pure `src/worker/handlers/exec-args.js` builder (unit-tested);
+      the shell/quoting layer is gone so paths can never be interpolated into a shell. The per-file
+      walk + skip-on-null-date behavior is preserved. (Kept sync fs intentionally — the worker runs
+      one job at a time and relies on synchronous handler completion.)
 - [ ] No graceful shutdown (SIGTERM/SIGINT) in the workers or the Express server; recorder can
       leave a half file mid-ffmpeg. (Planned as settings-db step 4.)
 - [ ] `api.js` `/settings2`: implicit global `transformedJson` (no const/let) = shared mutable
@@ -918,22 +946,40 @@ Then (MEDIUM):
       every service exits. (Superseded by the DB migration — settings.json is going away entirely.)
 
 Lower (LOW):
-- [ ] Page title: the editable app title (Chunk A) is applied on the MAIN/player page via runtime
-      document.title, but the /settings admin screen's document.title does NOT update to the
-      configured title (still shows the default/static value). Fix: apply the app_config title to
-      document.title on the settings route too (shared effect/hook so both routes set it from the
-      same source). (Reported by user 2026-10-23; not urgent.)
-- [ ] `recorder.js`: ffmpeg errors are swallowed silently (only console.error), no retry/gap log.
-      NOTE: largely addressed by Chunk B (per-stream supervision + greppable gap/error logging);
-      re-check whether this LOW item is now fully covered and close it if so.
+- [x] Page title: the editable app title (Chunk A) is applied on the MAIN/player page via runtime
+      document.title, but the /settings admin screen's document.title did NOT update to the
+      configured title. Fix: apply the app_config title to document.title on the settings route too
+      (shared effect/hook so both routes set it from the same source). DONE on `code-quality`
+      (CHUNK D): extracted a shared `src/frontend/src/useAppTitle.ts` hook (calls
+      `getPublicConfig()`, same fallback) used by both `App.tsx` and `SettingsPage.tsx`.
+- [x] `recorder.js`: ffmpeg errors are swallowed silently (only console.error), no retry/gap log.
+      RESOLVED by Chunk B (per-stream supervision + capped backoff + greppable per-stream
+      error/restart/give-up lines). Re-checked in CHUNK D: fully covered, no code change needed
+      (the Chunk D logging-helper adoption only reroutes those same lines through `log.error` with
+      identical text, so the grep patterns still match).
 - [x] `index.js` mounted the same util router on both `/util` and `/logger` (duplicate route).
       RESOLVED in the api-split: `/logger` alias dropped in `api/index.js`.
-- [ ] `express.json()` without a `limit` on the util router (unbounded body).
-- [ ] Logging: only `console.log`, no levels, inconsistent timestamps/error messages.
-- [ ] Four near-identical Dockerfiles + worker `package.json`s (duplication, drift); `npm install`
-      instead of `npm ci`.
+- [x] `express.json()` without a `limit` on the util router (unbounded body). RESOLVED earlier: a
+      single global `express.json({limit:'100kb'})` in `api/index.js` covers every route (util.js no
+      longer mounts its own); the backup `/import` route keeps a deliberate `5mb` limit. Re-confirmed
+      in CHUNK D (no code change).
+- [x] Logging: only `console.log`, no levels, inconsistent timestamps/error messages. DONE on
+      `code-quality` (CHUNK D): a tiny dependency-free `log` helper (`info`/`warn`/`error`, each line
+      prefixed with an ISO-8601 timestamp + level token) added per service (`src/api/lib/log.js`,
+      `src/worker/log.js`, `src/recorder/log.js` — identical copies, unit-tested once) and adopted at
+      the services' own startup/operational log lines.
+- [x] Four near-identical Dockerfiles + worker `package.json`s (duplication, drift); `npm install`
+      instead of `npm ci`. DONE on `code-quality` (CHUNK D): generated the missing api + worker
+      `package-lock.json` (recorder/frontend already in sync) and switched all four Dockerfiles from
+      `npm install` to `npm ci`; proven with `npm ci` exit 0 per service + a full `docker compose
+      build` in node:26-bookworm. Dockerfiles left separate on purpose (they differ meaningfully) to
+      avoid over-engineering. (Also added the missing `COPY src/recorder/log.js` line.)
 - [x] `readme.txt` -> `README.md`; rewritten to reflect the current architecture (five services,
       src/ layout, docker compose v2, correct PORT 9703, actual settings.json shape). Retention
       example (168) is now consistent after `techdebt-high` widened the bound to 1..8760h.
-- [ ] Placeholder metadata (`author: "Your Name"`); frontend `package.json` lacks name/version/scripts.
+- [x] Placeholder metadata (`author: "Your Name"`); frontend `package.json` lacks name/version/scripts.
+      DONE on `code-quality` (CHUNK D): removed the recorder `author: "Your Name"` placeholder and
+      added `description`/`license` to recorder + api + worker `package.json`. The frontend
+      `package.json` already had name/version/scripts (that part was resolved earlier), so it was
+      left untouched.
 - [x] `.DS_Store` in the repo root; added to `.gitignore` and untracked.

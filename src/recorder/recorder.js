@@ -2,6 +2,7 @@ const fs = require('fs');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const cron = require('node-cron');
+const log = require('./log');
 const { secondsUntilNextHour, currentHourStamp } = require('./time-helpers');
 const { readStreams, readRecorderMinute } = require('./streams-db');
 const { backoffDelayMs, shouldRestartWithinHour, segmentOutputName } = require('./backoff-helpers');
@@ -18,7 +19,7 @@ let recordingsHandle = null;
 try {
     recordingsHandle = recordingsDb.openDb();
 } catch (err) {
-    console.error('recorder: recordings DB not ready at boot, recordings rows disabled until restart:', err.message);
+    log.error('recorder: recordings DB not ready at boot, recordings rows disabled until restart:', err.message);
 }
 
 // Best-effort recordings writers: each swallows a null handle and any error with
@@ -30,7 +31,7 @@ function recordStartRow(folder, stamp) {
     try {
         recordingsDb.upsertRecordingStart(recordingsHandle, { folder, stamp });
     } catch (err) {
-        console.error(`recorder: recordings start-row write failed for ${folder} ${stamp}:`, err.message);
+        log.error(`recorder: recordings start-row write failed for ${folder} ${stamp}:`, err.message);
     }
 }
 
@@ -41,7 +42,7 @@ function recordSegmentRow(folder, stamp, attempt) {
     try {
         recordingsDb.markSegment(recordingsHandle, { folder, stamp, attempt });
     } catch (err) {
-        console.error(`recorder: recordings segment-row write failed for ${folder} ${stamp} (attempt ${attempt}):`, err.message);
+        log.error(`recorder: recordings segment-row write failed for ${folder} ${stamp} (attempt ${attempt}):`, err.message);
     }
 }
 
@@ -52,7 +53,7 @@ function recordCompleteRow(folder, stamp, sizeBytes) {
     try {
         recordingsDb.markComplete(recordingsHandle, { folder, stamp, sizeBytes });
     } catch (err) {
-        console.error(`recorder: recordings complete-row write failed for ${folder} ${stamp}:`, err.message);
+        log.error(`recorder: recordings complete-row write failed for ${folder} ${stamp}:`, err.message);
     }
 }
 
@@ -63,7 +64,7 @@ function writeHeartbeat() {
     try {
         fs.writeFileSync(HEARTBEAT, new Date().toISOString());
     } catch (err) {
-        console.error('recorder: failed to write heartbeat:', err);
+        log.error('recorder: failed to write heartbeat:', err);
     }
 }
 
@@ -118,13 +119,13 @@ function recordStream(name, folder, url, durationSeconds = 3600, attempt = 0) {
         .audioBitrate('160k')
         .output(outputPath)
         .on('start', (commandLine) => {
-            console.log(`Started recording for ${name} in folder ${folder}.`);
+            log.info(`Started recording for ${name} in folder ${folder}.`);
         })
         .on('error', (err) => {
-            console.error(`Error: ${err.message}`);
+            log.error(`Error: ${err.message}`);
         })
         .on('end', () => {
-            console.log(`Recording finished for ${name} in folder ${folder}`);
+            log.info(`Recording finished for ${name} in folder ${folder}`);
         });
 
     command.run();
@@ -184,22 +185,22 @@ function superviseStream(item, attempt) {
 
         if (entry.intentionalStop) {
             // We killed it on purpose (shutdown) — not a failure, never restart.
-            console.log(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) stopped intentionally (${reason}); not restarting.`);
+            log.info(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) stopped intentionally (${reason}); not restarting.`);
             return;
         }
         if (shuttingDown) {
-            console.log(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) ended during shutdown (${reason}); not restarting.`);
+            log.info(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) ended during shutdown (${reason}); not restarting.`);
             return;
         }
 
         const remainingNow = secondsUntilNextHour();
         if (!shouldRestartWithinHour(remainingNow, RESTART_FLOOR_SECONDS)) {
-            console.error(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) failed (${reason}); giving up for this hour, only ${remainingNow}s left — next hourly run takes over.`);
+            log.error(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) failed (${reason}); giving up for this hour, only ${remainingNow}s left — next hourly run takes over.`);
             return;
         }
 
         const delay = backoffDelayMs(attempt, { baseMs: BACKOFF_BASE_MS, capMs: BACKOFF_CAP_MS });
-        console.error(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) failed (${reason}) on attempt ${attempt}; scheduling restart in ${delay}ms (${remainingNow}s left this hour).`);
+        log.error(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) failed (${reason}) on attempt ${attempt}; scheduling restart in ${delay}ms (${remainingNow}s left this hour).`);
         setTimeout(() => superviseStream(item, attempt + 1), delay).unref();
     };
 
@@ -218,7 +219,7 @@ function superviseStream(item, attempt) {
         settled = true;
         cleanup();
         if (entry.intentionalStop) {
-            console.log(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) finalized during shutdown.`);
+            log.info(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) finalized during shutdown.`);
             return;
         }
         if (shuttingDown) {
@@ -232,7 +233,7 @@ function superviseStream(item, attempt) {
         try {
             sizeBytes = fs.statSync(outputPath).size;
         } catch (err) {
-            console.error(`recorder: could not stat ${outputPath} for recordings size:`, err.message);
+            log.error(`recorder: could not stat ${outputPath} for recordings size:`, err.message);
         }
         recordCompleteRow(item.folder, stamp, sizeBytes);
     });
@@ -255,12 +256,12 @@ function recordingTick() {
     writeHeartbeat();
     try {
         const now = new Date;
-        console.log(`Starting recording at `+String(now.getHours()).padStart(2, '0')+`:`+currentMinute.toString().padStart(2, '0')+`.`);
+        log.info(`Starting recording at `+String(now.getHours()).padStart(2, '0')+`:`+currentMinute.toString().padStart(2, '0')+`.`);
         startRecording();
     } catch (err) {
         // A transient error (e.g. unreadable stream list) must not crash the
         // worker; log a greppable line and wait for the next tick.
-        console.error('recorder: error during scheduled recording tick:', err);
+        log.error('recorder: error during scheduled recording tick:', err);
         return;
     }
 }
@@ -298,13 +299,13 @@ function rescheduleCheck() {
             const newExpr = `${newMinute} * * * *`;
             task.stop();
             task = cron.schedule(newExpr, recordingTick);
-            console.log(`recorder: recorder_minute changed from ${currentMinute} to ${newMinute}; rescheduled to run at xx:${newMinute.toString().padStart(2, '0')}.`);
+            log.info(`recorder: recorder_minute changed from ${currentMinute} to ${newMinute}; rescheduled to run at xx:${newMinute.toString().padStart(2, '0')}.`);
             currentMinute = newMinute;
         }
     } catch (err) {
         // Best-effort: a failed re-read/reschedule must not crash the recorder;
         // the next timer fire (or a restart) will retry.
-        console.error('recorder: re-read/reschedule check failed:', err);
+        log.error('recorder: re-read/reschedule check failed:', err);
     }
 }
 
@@ -341,13 +342,13 @@ function shutdown(signal) {
         return;
     }
     shuttingDown = true;
-    console.log(`recorder: received ${signal}, shutting down gracefully (finalizing ${active.size} active recording(s)).`);
+    log.info(`recorder: received ${signal}, shutting down gracefully (finalizing ${active.size} active recording(s)).`);
 
     // Stop scheduling: no more hourly ticks, no more reschedule re-reads.
     try {
         task.stop();
     } catch (err) {
-        console.error('recorder: error stopping cron task during shutdown:', err);
+        log.error('recorder: error stopping cron task during shutdown:', err);
     }
     if (rescheduleTimer) {
         clearTimeout(rescheduleTimer);
@@ -364,15 +365,15 @@ function shutdown(signal) {
     for (const [, entry] of active) {
         entry.intentionalStop = true;
         try {
-            console.log(`recorder: finalizing recording for ${entry.item.name} (folder ${entry.item.folder}) on ${signal}.`);
+            log.info(`recorder: finalizing recording for ${entry.item.name} (folder ${entry.item.folder}) on ${signal}.`);
             entry.command.kill('SIGTERM');
         } catch (err) {
-            console.error(`recorder: error finalizing recording for ${entry.item.folder} during shutdown:`, err);
+            log.error(`recorder: error finalizing recording for ${entry.item.folder} during shutdown:`, err);
         }
     }
 
     const finish = () => {
-        console.log('recorder: shutdown complete, exiting 0.');
+        log.info('recorder: shutdown complete, exiting 0.');
         process.exit(0);
     };
 
@@ -389,7 +390,7 @@ function shutdown(signal) {
     const graceTimer = setTimeout(() => {
         clearInterval(poll);
         if (active.size > 0) {
-            console.error(`recorder: ${active.size} recording(s) did not finalize within ${SHUTDOWN_GRACE_MS}ms; exiting 0 anyway.`);
+            log.error(`recorder: ${active.size} recording(s) did not finalize within ${SHUTDOWN_GRACE_MS}ms; exiting 0 anyway.`);
         }
         finish();
     }, SHUTDOWN_GRACE_MS);
@@ -437,11 +438,11 @@ function runCatchup(streams, reason) {
     const needing = streamsNeedingCatchup(streams, (folder) => hasCurrentHourRecording(folder, stamp));
     needing.forEach((item) => {
         try {
-            console.log(`recorder: ${reason} starting for ${item.folder}: no recording for hour ${stamp} yet (${remaining}s remaining).`);
+            log.info(`recorder: ${reason} starting for ${item.folder}: no recording for hour ${stamp} yet (${remaining}s remaining).`);
             superviseStream(item, 0);
         } catch (err) {
             // One stream's failure must not abort the others or crash the process.
-            console.error(`recorder: ${reason} error for ${item.folder}:`, err);
+            log.error(`recorder: ${reason} error for ${item.folder}:`, err);
         }
     });
 }
@@ -455,7 +456,7 @@ function runCatchup(streams, reason) {
     runCatchup(catchupStreams, 'catch-up');
 })().catch((err) => {
     // The whole catch-up is best-effort; the cron schedule is already live.
-    console.error('recorder: startup catch-up failed:', err);
+    log.error('recorder: startup catch-up failed:', err);
 });
 
 // --- Periodic new-stream catch-up poll (scope addition) ---------------------
@@ -479,7 +480,7 @@ function newStreamPollTick() {
         runCatchup(streams, 'new-stream poll catch-up');
     } catch (err) {
         // Failure-isolated: log and let the next tick retry.
-        console.error('recorder: new-stream poll failed, will retry next tick:', err);
+        log.error('recorder: new-stream poll failed, will retry next tick:', err);
     }
 }
 
@@ -492,4 +493,4 @@ function scheduleNewStreamPoll() {
 }
 scheduleNewStreamPoll();
 
-console.log(`Recorder is OK! The recorder process will run every hour at xx:`+currentMinute.toString().padStart(2, '0')+`.`);
+log.info(`Recorder is OK! The recorder process will run every hour at xx:`+currentMinute.toString().padStart(2, '0')+`.`);

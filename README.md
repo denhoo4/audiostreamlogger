@@ -158,3 +158,8 @@ npm run dev
 
 Tests (where present) run per service with the built-in `node --test`, and in the frontend with
 Vitest.
+
+Each service's Docker image installs dependencies with `npm ci` against the committed
+`package-lock.json` for reproducible builds, so keep the lockfile in sync with `package.json`
+(run `npm install` in the service directory after changing dependencies and commit the updated
+lockfile).

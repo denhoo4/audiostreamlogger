@@ -2,6 +2,8 @@
   "name": "audiostreamlogger-worker",
   "private": true,
   "version": "0.1.0",
+  "description": "Generic job worker for audiostreamlogger: runs the cleaner and peakfilegenerator jobs.",
+  "license": "MIT",
   "main": "worker.js",
   "scripts": {
     "test": "node --test"

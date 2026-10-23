@@ -15,11 +15,11 @@ RUN apt-get update && \
 # Create and change to the app directory
 WORKDIR /usr/src/app
 
-# Copy package.json (and lockfile if present) from the worker directory
+# Copy package.json + lockfile from the worker directory
 COPY src/worker/package*.json ./
 
-# Install Node.js dependencies (no runtime deps beyond Node built-ins)
-RUN npm install
+# Install the exact locked dependencies (no runtime deps beyond Node built-ins)
+RUN npm ci
 
 # Copy the worker source
 COPY src/worker/ ./

@@ -14,6 +14,7 @@
  * the claimed handler synchronously, then writeTerminal with capped output.
  */
 const fs = require('fs');
+const log = require('./log');
 const { openDb, withBusyRetry, sleepSync } = require('./db');
 const { planTick, applyPlan } = require('./claim');
 const { runCleaner } = require('./handlers/cleaner');
@@ -35,7 +36,7 @@ function writeHeartbeat() {
     try {
         fs.writeFileSync(HEARTBEAT, new Date().toISOString());
     } catch (err) {
-        console.error('worker: failed to write heartbeat:', err.message);
+        log.error('worker: failed to write heartbeat:', err.message);
     }
 }
 
@@ -63,7 +64,7 @@ function writeWorkerStatus(db, { status, currentJobId }) {
             upsert.run('worker_current_job_id', currentJobId == null ? '' : String(currentJobId))
         );
     } catch (err) {
-        console.error('worker: failed to write status:', err.message);
+        log.error('worker: failed to write status:', err.message);
     }
 }
 
@@ -124,7 +125,7 @@ function reclaimStaleRunning(db) {
             .run()
     );
     if (result.changes > 0) {
-        console.error(
+        log.error(
             `worker: reclaimed ${result.changes} stale running job(s) on boot`
         );
     }
@@ -140,7 +141,7 @@ function runClaimedJob(db, job) {
             'failed',
             capOutput(`unknown job type: ${job.type}`)
         );
-        console.error(`worker: job ${job.id} (${job.type}) failed: unknown type`);
+        log.error(`worker: job ${job.id} (${job.type}) failed: unknown type`);
         return;
     }
     // Track the live job id so the 5s status timer reports 'running' + this id;
@@ -151,7 +152,7 @@ function runClaimedJob(db, job) {
         writeTerminal(db, job.id, 'done', capOutput(output));
     } catch (err) {
         writeTerminal(db, job.id, 'failed', capOutput(String(err && err.stack ? err.stack : err)));
-        console.error(`worker: job ${job.id} (${job.type}) failed: ${err.message}`);
+        log.error(`worker: job ${job.id} (${job.type}) failed: ${err.message}`);
     } finally {
         currentJobId = null;
     }
@@ -178,7 +179,7 @@ function start() {
     writeHeartbeat();
     const db = openDb();
     reclaimStaleRunning(db);
-    console.log('worker OK');
+    log.info('worker OK');
 
     // Independent heartbeat timer — never coupled to the tick body. It writes
     // the /tmp/heartbeat file (compose healthcheck) AND a best-effort app_config
@@ -196,7 +197,7 @@ function start() {
         try {
             tickOnce(db);
         } catch (err) {
-            console.error('worker: tick error:', err.message);
+            log.error('worker: tick error:', err.message);
         } finally {
             setTimeout(loop, POLL_MS);
         }

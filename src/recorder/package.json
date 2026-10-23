@@ -1,13 +1,12 @@
 {
     "name": "stream-recorder",
     "version": "1.0.0",
-    "description": "A Node.js application to record audio streams using fluent-ffmpeg.",
+    "description": "Records configured audio streams per hour with fluent-ffmpeg and per-stream supervision.",
     "main": "recorder.js",
     "scripts": {
         "start": "node recorder.js",
         "test": "node --test"
     },
-    "author": "Your Name",
     "license": "MIT",
     "dependencies": {
         "fluent-ffmpeg": "^2.1.3",

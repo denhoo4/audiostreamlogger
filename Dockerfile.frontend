@@ -3,9 +3,9 @@ FROM node:26-bookworm AS build
 
 WORKDIR /usr/src/app
 
-# Install dependencies from the React app's manifest
+# Install the exact locked dependencies from the React app's manifest + lockfile
 COPY src/frontend/package*.json ./
-RUN npm install
+RUN npm ci
 
 # Copy the rest of the React source and build the static bundle (-> dist/)
 COPY src/frontend/ .

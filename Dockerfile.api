@@ -5,15 +5,15 @@ FROM node:26-bookworm
 WORKDIR /usr/src/app
 
 # Install ffmpeg (fluent-ffmpeg in routes/util.js shells out to it) plus the
-# build toolchain (python3 make g++) needed to compile the better-sqlite3 and
-# argon2 native addons during `npm install`.
+# build toolchain (python3 make g++) needed to compile the argon2 native addon
+# during `npm ci` (the api uses the built-in node:sqlite, not better-sqlite3).
 RUN apt-get update && apt-get install -y ffmpeg python3 make g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy package.json and install Node.js dependencies
+# Copy package.json + lockfile and install the exact locked dependencies
 COPY src/api/package*.json ./
 
-RUN npm install
+RUN npm ci
 
 # Copy the API application code
 COPY src/api/ .

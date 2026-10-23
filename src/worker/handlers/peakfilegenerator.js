@@ -7,7 +7,8 @@
  * walk: readdirSync(AUDIO_DIR) -> directories -> readdirSync(subdir) -> .mp3.
  * extractFileDateTime(filename) === null skips the file (logged); current-hour
  * files are skipped; for the rest, a missing .json peak is generated with
- * execSync('audiowaveform ...'). A per-file audiowaveform failure is logged but
+ * execFileSync('audiowaveform', [...]) (no shell; paths passed as literal argv
+ * elements via the pure builders in exec-args.js). A per-file audiowaveform failure is logged but
  * does not fail the job; a top-level directory-read failure throws -> failed.
  * The walk is explicit two-level readdir, never a glob shorthand.
  *
@@ -18,7 +19,8 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
+const { audiowaveformArgs, ffprobeDurationArgs } = require('./exec-args');
 const { extractFileDateTime, parseRecordingParts } = require('../filename-utils');
 const { upsertRecordingMeta } = require('../recordings-db');
 const { AUDIO_DIR } = require('./paths');
@@ -43,9 +45,7 @@ function currentHourStamp(now) {
  * probe/parse failure so the caller can log + count the per-file error.
  */
 function probeDurationSeconds(mp3FilePath) {
-    const out = execSync(
-        `ffprobe -v error -show_entries format=duration -of default=nk=1:noprint_wrappers=1 "${mp3FilePath}"`
-    );
+    const out = execFileSync('ffprobe', ffprobeDurationArgs(mp3FilePath));
     const seconds = parseFloat(String(out).trim());
     if (!Number.isFinite(seconds)) {
         throw new Error(`ffprobe returned a non-numeric duration: ${String(out).trim()}`);
@@ -102,9 +102,8 @@ function runPeakfileGenerator(db) {
                     const mp3FilePath = path.join(outputFolder, file);
 
                     if (!fs.existsSync(jsonFilePath)) {
-                        const command = `audiowaveform -i "${mp3FilePath}" -o "${jsonFilePath}" --pixels-per-second 20 --bits 8`;
                         try {
-                            execSync(command);
+                            execFileSync('audiowaveform', audiowaveformArgs(mp3FilePath, jsonFilePath));
                             log.push(`Generated peak file: ${jsonFilePath}`);
                             counters.generated += 1;
                         } catch (error) {

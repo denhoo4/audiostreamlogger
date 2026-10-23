@@ -10,11 +10,12 @@ WORKDIR /usr/src/app
 # Copy package.json and package-lock.json
 COPY src/recorder/package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install the exact locked dependencies
+RUN npm ci
 
 # Copy the recorder script
 COPY src/recorder/recorder.js ./
+COPY src/recorder/log.js ./
 COPY src/recorder/time-helpers.js ./
 COPY src/recorder/streams-db.js ./
 COPY src/recorder/backoff-helpers.js ./

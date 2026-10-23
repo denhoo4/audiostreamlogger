@@ -9,6 +9,7 @@ import BrandingSettings from "./BrandingSettings";
 import WorkerStatus from "./WorkerStatus";
 import RecordingsAnalysis from "./RecordingsAnalysis";
 import BackupSettings from "./BackupSettings";
+import { useAppTitle } from "../useAppTitle";
 
 /**
  * Admin /settings view. On mount it checks GET /auth/me: logged out -> login
@@ -19,6 +20,10 @@ export default function SettingsPage() {
   const [checking, setChecking] = useState(true);
   const [authenticated, setAuthenticated] = useState(false);
   const [username, setUsername] = useState<string | undefined>(undefined);
+
+  // Set the page title from the configured app_title, same source as the player
+  // route. Called unconditionally before the early returns to respect hook rules.
+  useAppTitle();
 
   const checkAuth = useCallback(async () => {
     setChecking(true);

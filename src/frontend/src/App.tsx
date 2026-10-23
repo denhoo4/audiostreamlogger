@@ -3,13 +3,13 @@ import {
   audioJsonUrl,
   audioMp3Url,
   exportSelection,
-  getPublicConfig,
   getSettings,
   getSettings2,
   type Settings2,
   type Stream,
 } from "./api";
 import { displayNameForFolder, existingHoursFor } from "./player-hours";
+import { useAppTitle } from "./useAppTitle";
 import { formatTime, useWavesurfer } from "./useWavesurfer";
 
 // Skip buttons: label + data-value (seconds), 1:1 with the legacy UI.
@@ -120,21 +120,9 @@ export default function App() {
     };
   }, []);
 
-  // Set the page title at runtime from the public branding config, falling
-  // back to the bundled default on error.
-  useEffect(() => {
-    let cancelled = false;
-    getPublicConfig()
-      .then(({ title }) => {
-        if (!cancelled && title) document.title = title;
-      })
-      .catch(() => {
-        if (!cancelled) document.title = "Dé radiologger";
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Set the page title at runtime from the public branding config (shared with
+  // the /settings admin route via useAppTitle).
+  useAppTitle();
 
   // Spacebar toggles play/pause (document keydown).
   useEffect(() => {

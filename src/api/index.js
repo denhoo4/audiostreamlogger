@@ -1,5 +1,6 @@
 const express = require('express');
 const session = require('express-session');
+const log = require('./lib/log');
 
 const app = express();
 // Internal-only service: nginx reverse-proxies /api, /util and /auth to this
@@ -26,17 +27,17 @@ try {
         const { runBackfill } = require('./services/recordings-backfill');
         runBackfill(db);
     } catch (err) {
-        console.error('api: recordings backfill scan failed (non-fatal):', err);
+        log.error('api: recordings backfill scan failed (non-fatal):', err);
     }
     // (4) seedAdmin is async (argon2); await it before listening.
     seedAdmin(db)
         .then(startServer)
         .catch((err) => {
-            console.error('api: fatal — admin seed failed:', err);
+            log.error('api: fatal — admin seed failed:', err);
             process.exit(1);
         });
 } catch (err) {
-    console.error('api: fatal — DB init/schema failed:', err);
+    log.error('api: fatal — DB init/schema failed:', err);
     process.exit(1);
 }
 
@@ -48,7 +49,7 @@ function startServer() {
     const raw = process.env.SESSION_SECRET;
     const secret = raw && raw.trim() ? raw : DEV_FALLBACK;
     if (secret === DEV_FALLBACK) {
-        console.warn(
+        log.warn(
             'auth: SESSION_SECRET not set (or empty) — using insecure dev fallback; set SESSION_SECRET in production.'
         );
     }
@@ -108,6 +109,6 @@ function startServer() {
 
     // (9) Start the server.
     app.listen(PORT, () => {
-        console.log(`API service is running on port ${PORT}`);
+        log.info(`API service is running on port ${PORT}`);
     });
 }

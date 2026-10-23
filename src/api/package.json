@@ -2,6 +2,8 @@
   "name": "audiostreamlogger-api",
   "private": true,
   "version": "0.1.0",
+  "description": "Internal API service: auth, settings/streams CRUD, jobs, backup, and selection export for audiostreamlogger.",
+  "license": "MIT",
   "main": "index.js",
   "scripts": {
     "test": "node --test"
