@@ -12,9 +12,9 @@ The application consists of four services (source under `src/`):
 
 | Service | Directory | Role |
 | --- | --- | --- |
-| `recorder` | `src/recorder/` | Records each stream every hour (ffmpeg), supervising each stream's ffmpeg process independently: if one stream drops mid-hour it is restarted on its own with capped backoff (a restart writes a `.partN.mp3` segment) without disturbing the others. On startup, and on a periodic poll, it catches up the remaining part of the current hour for any stream with no recording yet — so a newly-added stream starts recording right away. Shuts down cleanly on SIGTERM/SIGINT (finalizes each mp3). Reads its run minute from the database. |
-| `worker` | `src/worker/` | Generic job runner. Polls the `jobs` table and executes one job at a time (cleaner = delete recordings past the retention window; peakfilegenerator = generate `audiowaveform` peak files). Replaces the old `cleaner` + `peakfilegenerator` containers. |
-| `api` | `src/api/` | Express API: serves the stream list and the recordings browse tree, handles cutting/downloading fragments, powers the login-gated admin screen (authentication, stream CRUD, job scheduling + Run-now + a live job feed), and hosts the DB-driven scheduler that enqueues jobs. Runs internally on port 3000, not public. |
+| `recorder` | `src/recorder/` | Records each stream every hour (ffmpeg), supervising each stream's ffmpeg process independently: if one stream drops mid-hour it is restarted on its own with capped backoff (a restart writes a `.partN.mp3` segment) without disturbing the others. On startup, and on a periodic poll, it catches up the remaining part of the current hour for any stream with no recording yet — so a newly-added stream starts recording right away. Shuts down cleanly on SIGTERM/SIGINT (finalizes each mp3). Reads its run minute from the database and writes a `recordings` row per captured hour-slot (status `recording`→`complete`/`partial` + size). |
+| `worker` | `src/worker/` | Generic job runner. Polls the `jobs` table and executes one job at a time (cleaner = delete recordings past the retention window; peakfilegenerator = generate `audiowaveform` peak files). Replaces the old `cleaner` + `peakfilegenerator` containers. Also fills each `recordings` row's duration/size (ffprobe) after processing a file and removes the row when the cleaner unlinks its mp3. |
+| `api` | `src/api/` | Express API: serves the stream list and the recordings browse tree, handles cutting/downloading fragments, powers the login-gated admin screen (authentication, stream CRUD, job scheduling + Run-now + a live job feed + a recordings-analysis view), hosts the DB-driven scheduler that enqueues jobs, exposes the requireAuth `GET /api/analysis/summary` + `/api/analysis/gaps` endpoints, and runs a one-time startup backfill that reconciles existing audio files into `recordings` rows. Runs internally on port 3000, not public. |
 | `frontend` | `src/frontend/` | React + Vite single-page app, served by nginx. nginx also serves the audio and reverse-proxies `/api`, `/util`, and `/auth` to the `api` service (same-origin, so no CORS needed). |
 
 The `recorder` records at a configured minute of each hour. The `cleaner` and `peakfilegenerator`
@@ -25,9 +25,11 @@ At most one job runs at a time across all types; a job that would overlap a runn
 
 All configuration — the stream list, the per-type schedules, the run minutes, and the log-retention
 window — lives in a SQLite database at `./data/app.db` (bind-mounted into the containers, so it
-survives rebuilds). The `api` and `worker` mount `./data` read-write; the `recorder` mounts it
-read-only. The database is created and seeded automatically on first start. There is no
-`settings.json` — it has been removed entirely.
+survives rebuilds). All three backend services mount `./data` read-write: the `api` owns the schema
+and every config/stream/job write, while the `worker` and the `recorder` each open their own scoped
+read-write handle (the recorder writes `recordings` rows for the hours it captures; the worker fills
+their duration/size and removes them when cleaning). The database is created and seeded automatically
+on first start. There is no `settings.json` — it has been removed entirely.
 
 ## Requirements
 
@@ -109,8 +111,9 @@ comes up if the variable is unset.
 
 All configuration is stored in a SQLite database at `./data/app.db`: the stream list, the per-type
 job schedules, the recorder run minute, and the log-retention window. The directory is bind-mounted
-into the containers (`api` and `worker` read-write, `recorder` read-only) so the database survives
-rebuilds. The file is created and seeded automatically on first start and is not committed to git
+into the containers read-write for all three backend services (the `api` owns schema + config writes;
+the `worker` and `recorder` each hold their own scoped handle for job status and `recordings` rows)
+so the database survives rebuilds. The file is created and seeded automatically on first start and is not committed to git
 (only `data/.gitkeep` is tracked). There is no `settings.json` any more — all of its former contents
 moved into the database and are managed from the admin screen.
 

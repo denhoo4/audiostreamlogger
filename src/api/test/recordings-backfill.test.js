@@ -3,10 +3,49 @@
  * slots not already present, folds a .partN segment into segment_count + status
  * 'partial', and is idempotent on a second run over the same scanned set.
  */
-const { test } = require('node:test');
+const { test, before, after } = require('node:test');
 const assert = require('node:assert');
+const os = require('node:os');
+const path = require('node:path');
+const fs = require('node:fs');
+const { DatabaseSync } = require('node:sqlite');
 
-const { reconcilePlan } = require('../services/recordings-backfill');
+// recordings-backfill requires ../services/recordings, which requires ../db at
+// module load (db/index.js opens a real DatabaseSync at /usr/src/app/data/app.db
+// and throws when that path is absent, as in the test toolchain). Seed a temp DB
+// into require.cache for '../db' BEFORE requiring the module under test, mirroring
+// the injection pattern in recordings.test.js / jobs-schema.test.js. reconcilePlan
+// itself is pure, but the module graph still pulls in the shared handle.
+let tmpDir;
+let db;
+let reconcilePlan;
+
+before(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'asl-backfill-'));
+    db = new DatabaseSync(path.join(tmpDir, 'app.db'));
+    db.exec('PRAGMA journal_mode = DELETE');
+    db.exec('PRAGMA busy_timeout = 5000');
+    db.exec('PRAGMA foreign_keys = ON');
+
+    const dbModulePath = require.resolve('../db');
+    require.cache[dbModulePath] = {
+        id: dbModulePath,
+        filename: dbModulePath,
+        loaded: true,
+        exports: db,
+    };
+
+    ({ reconcilePlan } = require('../services/recordings-backfill'));
+});
+
+after(() => {
+    try {
+        db.close();
+    } catch {
+        /* already closed */
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+});
 
 function scanned(folder, date, hour, part) {
     return {
