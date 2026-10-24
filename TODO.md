@@ -9,7 +9,8 @@ and FEAT-002 frontend (country-grouped StreamTable with ▲/▼ global reorder +
 badge, player preselects the default stream) both committed. Semantic review APPROVED (one non-blocking
 `sort_order` TS-type note, an accepted trade-off) — verdict at
 `.agents/tasks/stream-ordering-2026-10-23/verdict.json`. api 177 / frontend 37 tests green in
-node:26-bookworm; fast-forward merged into `main` (main == 88fbf71). Earlier: item 14 DONE + MERGED to
+node:26-bookworm; fast-forward merged into `main` and pushed to origin/main (main == origin/main ==
+9f1cec8, FEAT commits == 88fbf71). Earlier: item 14 DONE + MERGED to
 main (fast-forward == d7b1ed8) from branch `stream-url-validation` — a NON-BLOCKING admin "Test" button
 + `POST /api/streams/test-url` reachability probe, decided with the user; plan at
 `.agents/tasks/stream-url-validation-2026-10-23/plan.md`. Semantic review APPROVED (no blocking
@@ -61,7 +62,7 @@ STATUS SUMMARY (what is DONE + on origin/main):
 
 ## Branches
 
-### `stream-ordering` — MERGED + NOT PUSHED (item 17: manual stream ordering + default stream + country-grouped admin view; ADDITIVE schema change; fast-forward merged into main, main == 88fbf71, local only)
+### `stream-ordering` — MERGED + PUSHED (item 17: manual stream ordering + default stream + country-grouped admin view; ADDITIVE schema change; fast-forward merged into main AND pushed to origin/main)
 Isolated git worktree at `.worktrees/stream-ordering` on branch `stream-ordering`. Task artifacts
 under `.agents/tasks/stream-ordering-2026-10-23/` (context.json + features/FEAT-001..002.json).
 Scope is `src/api/` + `src/frontend/` only — no recorder/worker/compose/nginx edits, no change to
@@ -95,8 +96,9 @@ frontend `StreamRecord.sort_order: number` is slightly looser than the backend's
 the migration backfills every row and `createStream` always assigns, so admin reads never return null;
 accepted as-is). Fast checks re-run green in node:26-bookworm (api 177, frontend 37, build exit 0). The
 rebase onto `main` (tip d7b1ed8) was a no-op — `stream-ordering` was already two commits on that tip —
-so `main` was fast-forwarded to `stream-ordering` (main == 88fbf71). NOT pushed to origin yet (merge
-committed locally only).
+so `main` was fast-forwarded to `stream-ordering` (the two FEAT commits == 88fbf71), this living-doc
+update was committed on top (main == 9f1cec8), and `main` was pushed to origin (origin/main ==
+9f1cec8, a clean fast-forward — no force-push).
 
 ### `stream-url-validation` — IN REVIEW (item 14: NON-BLOCKING "Test" stream-URL reachability probe; NO schema change)
 Isolated git worktree at `.worktrees/stream-url-validation` on branch `stream-url-validation`.
