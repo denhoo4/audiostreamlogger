@@ -44,7 +44,7 @@ export function formatTime(seconds: number): string {
 }
 
 export interface UseWavesurfer {
-  containerRef: RefObject<HTMLDivElement>;
+  containerRef: RefObject<HTMLDivElement | null>;
   currentTime: number;
   duration: number;
   isPlaying: boolean;
