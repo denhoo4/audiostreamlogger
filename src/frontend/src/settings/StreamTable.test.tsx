@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
   fireEvent,
@@ -20,6 +20,10 @@ const createStream = vi.fn<(body: StreamInput) => Promise<StreamRecord>>();
 const updateStream = vi.fn();
 const deleteStream = vi.fn();
 const testStreamUrl = vi.fn();
+const reorderStreams = vi.fn();
+const setDefaultStream = vi.fn();
+const getPublicConfig =
+  vi.fn<() => Promise<{ title: string; default_stream_folder: string }>>();
 
 vi.mock("../api", () => ({
   ApiError: class ApiError extends Error {},
@@ -28,6 +32,9 @@ vi.mock("../api", () => ({
   updateStream: (id: number, body: StreamInput) => updateStream(id, body),
   deleteStream: (id: number) => deleteStream(id),
   testStreamUrl: (url: string) => testStreamUrl(url),
+  reorderStreams: (order: number[]) => reorderStreams(order),
+  setDefaultStream: (folder: string) => setDefaultStream(folder),
+  getPublicConfig: () => getPublicConfig(),
 }));
 
 const ROWS: StreamRecord[] = [
@@ -37,6 +44,7 @@ const ROWS: StreamRecord[] = [
     name: "Radio One",
     folder: "radio_one",
     url: "https://example.com/one",
+    sort_order: 0,
     created_at: "2026-10-23 10:00:00",
     updated_at: "2026-10-23 10:00:00",
   },
@@ -46,27 +54,108 @@ const ROWS: StreamRecord[] = [
     name: "Radio Two",
     folder: "radio_two",
     url: "https://example.com/two",
+    sort_order: 1,
     created_at: "2026-10-23 10:00:00",
     updated_at: "2026-10-23 10:00:00",
   },
 ];
 
 describe("StreamTable", () => {
+  beforeEach(() => {
+    // Default: no configured default stream. Individual tests override.
+    getPublicConfig.mockResolvedValue({
+      title: "",
+      default_stream_folder: "",
+    });
+  });
+
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
   });
 
-  it("renders one row per stream from getStreams()", async () => {
+  it("renders one data row per stream from getStreams()", async () => {
     getStreams.mockResolvedValue(ROWS);
     render(<StreamTable />);
 
     // Wait for the list to resolve.
     expect(await screen.findByText("Radio One")).toBeInTheDocument();
-    const rows = document.querySelectorAll(".settings-table tbody tr");
-    expect(rows.length).toBe(2);
+    // Data rows carry a folder cell; group-header rows do not.
+    const dataRows = document.querySelectorAll(
+      ".settings-table tbody tr:not(.settings-group-header)",
+    );
+    expect(dataRows.length).toBe(2);
     expect(screen.getByText("radio_one")).toBeInTheDocument();
     expect(screen.getByText("radio_two")).toBeInTheDocument();
+  });
+
+  it("renders a country-group header for each distinct country", async () => {
+    getStreams.mockResolvedValue(ROWS);
+    render(<StreamTable />);
+
+    await screen.findByText("Radio One");
+    const headers = Array.from(
+      document.querySelectorAll(".settings-table tr.settings-group-header th"),
+    ).map((th) => th.textContent);
+    expect(headers).toEqual(["Netherlands", "Belgium"]);
+  });
+
+  it("clicking a row's ▼ calls reorderStreams with the swapped id order", async () => {
+    getStreams.mockResolvedValue(ROWS);
+    reorderStreams.mockResolvedValue({ ok: true });
+    render(<StreamTable />);
+
+    await screen.findByText("Radio One");
+    // Move the first stream (id 1) down: order becomes [2, 1].
+    fireEvent.click(screen.getByRole("button", { name: "Move Radio One down" }));
+
+    await waitFor(() => {
+      expect(reorderStreams).toHaveBeenCalledWith([2, 1]);
+    });
+  });
+
+  it("disables ▲ on the first row and ▼ on the last row of the flat order", async () => {
+    getStreams.mockResolvedValue(ROWS);
+    render(<StreamTable />);
+
+    await screen.findByText("Radio One");
+    expect(
+      screen.getByRole("button", { name: "Move Radio One up" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Move Radio Two down" }),
+    ).toBeDisabled();
+  });
+
+  it("clicking 'Set default' calls setDefaultStream with that row's folder", async () => {
+    getStreams.mockResolvedValue(ROWS);
+    setDefaultStream.mockResolvedValue({ default_stream_folder: "radio_one" });
+    render(<StreamTable />);
+
+    await screen.findByText("Radio One");
+    const setButtons = screen.getAllByRole("button", { name: "Set default" });
+    fireEvent.click(setButtons[0]);
+
+    await waitFor(() => {
+      expect(setDefaultStream).toHaveBeenCalledWith("radio_one");
+    });
+    // The marked row now shows the Default badge.
+    expect(await screen.findByText("Default")).toBeInTheDocument();
+  });
+
+  it("marks the row whose folder matches default_stream_folder", async () => {
+    getStreams.mockResolvedValue(ROWS);
+    getPublicConfig.mockResolvedValue({
+      title: "",
+      default_stream_folder: "radio_two",
+    });
+    render(<StreamTable />);
+
+    expect(await screen.findByText("Default")).toBeInTheDocument();
+    // Only one 'Set default' button remains (for the non-default row).
+    expect(screen.getAllByRole("button", { name: "Set default" }).length).toBe(
+      1,
+    );
   });
 
   it("submitting the add form calls createStream with the entered fields", async () => {

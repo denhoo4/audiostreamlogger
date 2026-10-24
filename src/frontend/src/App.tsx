@@ -3,6 +3,7 @@ import {
   audioJsonUrl,
   audioMp3Url,
   exportSelection,
+  getPublicConfig,
   getSettings,
   getSettings2,
   type Settings2,
@@ -25,6 +26,22 @@ const SKIP_BUTTONS: { label: string; value: number }[] = [
 /** Round to one decimal (replaces lodash round(10*x)/10). */
 function round1(x: number): number {
   return Math.round(x * 10) / 10;
+}
+
+/**
+ * Choose which stream folder the player should preselect: the configured
+ * default_stream_folder when it matches a loaded stream, otherwise the first
+ * stream's folder (the long-standing fallback), or "" when there are none.
+ */
+export function pickInitialFolder(
+  streams: Stream[],
+  defaultFolder: string,
+): string {
+  if (streams.length === 0) return "";
+  if (defaultFolder && streams.some((s) => s.folder === defaultFolder)) {
+    return defaultFolder;
+  }
+  return streams[0].folder;
 }
 
 /**
@@ -90,10 +107,22 @@ export default function App() {
   useEffect(() => {
     let cancelled = false;
     getSettings()
-      .then((data) => {
+      .then(async (data) => {
         if (cancelled) return;
         setStreams(data);
-        if (data.length > 0) setSelectedFolder(data[0].folder);
+        if (data.length === 0) return;
+        // Preselect the configured default stream when it matches a loaded
+        // stream, else fall back to the first. The public config fetch is
+        // best-effort: on failure we keep the first-stream fallback.
+        let defaultFolder = "";
+        try {
+          defaultFolder = (await getPublicConfig()).default_stream_folder;
+        } catch (err) {
+          console.error("Kon standaardstream niet laden:", err);
+        }
+        if (!cancelled) {
+          setSelectedFolder(pickInitialFolder(data, defaultFolder));
+        }
       })
       .catch((err) => {
         console.error("Kon streams niet laden:", err);

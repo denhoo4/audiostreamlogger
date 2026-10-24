@@ -3,7 +3,10 @@ import {
   ApiError,
   createStream,
   deleteStream,
+  getPublicConfig,
   getStreams,
+  reorderStreams,
+  setDefaultStream,
   testStreamUrl,
   updateStream,
   type StreamInput,
@@ -11,6 +14,29 @@ import {
   type StreamTestResult,
 } from "../api";
 import { COUNTRIES_BY_NAME, countryName } from "./countries";
+
+/**
+ * Bucket the (already sort_order-ordered) rows by country, preserving each
+ * country's first-appearance order and the row order within it. Returns a flat
+ * list of [countryCode, rows] groups so the table can render a section header
+ * per country while the underlying global order stays intact.
+ */
+function groupByCountry(
+  rows: StreamRecord[],
+): { country: string; rows: StreamRecord[] }[] {
+  const groups: { country: string; rows: StreamRecord[] }[] = [];
+  const index = new Map<string, number>();
+  for (const row of rows) {
+    let at = index.get(row.country);
+    if (at === undefined) {
+      at = groups.length;
+      index.set(row.country, at);
+      groups.push({ country: row.country, rows: [] });
+    }
+    groups[at].rows.push(row);
+  }
+  return groups;
+}
 
 /** Empty add/edit form state. */
 const EMPTY_FORM: StreamInput = {
@@ -29,6 +55,7 @@ const EMPTY_FORM: StreamInput = {
  */
 export default function StreamTable() {
   const [streams, setStreams] = useState<StreamRecord[]>([]);
+  const [defaultFolder, setDefaultFolder] = useState("");
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
@@ -55,13 +82,53 @@ export default function StreamTable() {
     setLoading(true);
     setListError(null);
     try {
-      setStreams(await getStreams());
+      const [rows, config] = await Promise.all([
+        getStreams(),
+        getPublicConfig(),
+      ]);
+      setStreams(rows);
+      setDefaultFolder(config.default_stream_folder);
     } catch (err) {
       setListError(
         err instanceof ApiError ? err.message : "Could not load streams",
       );
     } finally {
       setLoading(false);
+    }
+  }
+
+  /**
+   * Move a stream one position earlier (▲) or later (▼) in the GLOBAL flat
+   * order (across country groups). Swaps the row with its neighbour in the
+   * current id sequence and persists via reorderStreams, then refreshes.
+   */
+  async function handleReorder(id: number, direction: -1 | 1) {
+    const ids = streams.map((s) => s.id);
+    const from = ids.indexOf(id);
+    const to = from + direction;
+    if (from === -1 || to < 0 || to >= ids.length) return;
+    [ids[from], ids[to]] = [ids[to], ids[from]];
+    setListError(null);
+    try {
+      await reorderStreams(ids);
+      await refresh();
+    } catch (err) {
+      setListError(
+        err instanceof ApiError ? err.message : "Could not reorder streams",
+      );
+    }
+  }
+
+  /** Mark the clicked stream's folder as the player's default stream. */
+  async function handleSetDefault(folder: string) {
+    setListError(null);
+    try {
+      const { default_stream_folder } = await setDefaultStream(folder);
+      setDefaultFolder(default_stream_folder);
+    } catch (err) {
+      setListError(
+        err instanceof ApiError ? err.message : "Could not set default stream",
+      );
     }
   }
 
@@ -160,31 +227,72 @@ export default function StreamTable() {
         <table className="settings-table">
           <thead>
             <tr>
-              <th>Country</th>
               <th>Name</th>
               <th>Folder</th>
               <th>URL</th>
+              <th>Default stream</th>
+              <th>Order</th>
               <th />
             </tr>
           </thead>
-          <tbody>
-            {streams.map((s) => (
-              <tr key={s.id}>
-                <td>{countryName(s.country)}</td>
-                <td>{s.name}</td>
-                <td>{s.folder}</td>
-                <td>{s.url}</td>
-                <td>
-                  <button type="button" onClick={() => startEdit(s)}>
-                    Edit
-                  </button>
-                  <button type="button" onClick={() => handleDelete(s.id)}>
-                    Delete
-                  </button>
-                </td>
+          {groupByCountry(streams).map((group) => (
+            <tbody key={group.country}>
+              <tr className="settings-group-header">
+                <th colSpan={6} scope="colgroup">
+                  {countryName(group.country)}
+                </th>
               </tr>
-            ))}
-          </tbody>
+              {group.rows.map((s) => {
+                const flatIndex = streams.findIndex((x) => x.id === s.id);
+                const isDefault = s.folder === defaultFolder;
+                return (
+                  <tr key={s.id}>
+                    <td>{s.name}</td>
+                    <td>{s.folder}</td>
+                    <td>{s.url}</td>
+                    <td>
+                      {isDefault ? (
+                        <span className="settings-default-badge">Default</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleSetDefault(s.folder)}
+                        >
+                          Set default
+                        </button>
+                      )}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        aria-label={`Move ${s.name} up`}
+                        disabled={flatIndex === 0}
+                        onClick={() => handleReorder(s.id, -1)}
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Move ${s.name} down`}
+                        disabled={flatIndex === streams.length - 1}
+                        onClick={() => handleReorder(s.id, 1)}
+                      >
+                        ▼
+                      </button>
+                    </td>
+                    <td>
+                      <button type="button" onClick={() => startEdit(s)}>
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => handleDelete(s.id)}>
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          ))}
         </table>
       )}
 

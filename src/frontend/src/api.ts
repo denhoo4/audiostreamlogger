@@ -22,6 +22,7 @@ export interface StreamRecord {
   name: string;
   folder: string;
   url: string;
+  sort_order: number;
   created_at: string;
   updated_at: string;
 }
@@ -292,14 +293,44 @@ export async function exportSelection(body: SelectionExportBody): Promise<Blob> 
  * GET /api/app-config/public -> runtime branding read by the public player
  * (page title). No credentials: this endpoint is unauthenticated.
  */
-export async function getPublicConfig(): Promise<{ title: string }> {
+export async function getPublicConfig(): Promise<{
+  title: string;
+  default_stream_folder: string;
+}> {
   const res = await fetch(
     `${window.location.origin}/api/app-config/public`,
   );
   if (!res.ok) {
     throw await toApiError(res);
   }
-  return (await res.json()) as { title: string };
+  return (await res.json()) as {
+    title: string;
+    default_stream_folder: string;
+  };
+}
+
+/**
+ * PUT /api/app-config/default-stream {folder} -> set (or clear) the default
+ * stream folder preselected by the public player. A non-empty folder must match
+ * an existing stream else the backend returns 400 {field:'folder'}; an empty
+ * string clears the default. Returns the stored default_stream_folder.
+ */
+export async function setDefaultStream(
+  folder: string,
+): Promise<{ default_stream_folder: string }> {
+  const res = await fetch(
+    `${window.location.origin}/api/app-config/default-stream`,
+    {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder }),
+    },
+  );
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as { default_stream_folder: string };
 }
 
 /** PUT /api/app-config/title {title} -> update the editable page title. */
@@ -494,6 +525,27 @@ export async function updateStream(
     throw await toApiError(res);
   }
   return (await res.json()) as StreamRecord;
+}
+
+/**
+ * PUT /api/streams/reorder {order} -> persist a new global stream ordering.
+ * `order` must list every current stream id exactly once (positive integers);
+ * the backend assigns sort_order = array index. Throws ApiError on the 400
+ * {field:'order'} responses (non-array/invalid or an id-set mismatch).
+ */
+export async function reorderStreams(
+  order: number[],
+): Promise<{ ok: true }> {
+  const res = await fetch(`${window.location.origin}/api/streams/reorder`, {
+    method: "PUT",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ order }),
+  });
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as { ok: true };
 }
 
 /** DELETE /api/streams/:id -> remove a stream. */

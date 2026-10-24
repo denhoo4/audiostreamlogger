@@ -54,6 +54,16 @@
   background-color: #eeeeee;
 }
 
+.settings-table tr.settings-group-header th {
+  background-color: #dddddd;
+  font-weight: bold;
+}
+
+.settings-default-badge {
+  font-weight: bold;
+  color: #2a6f2a;
+}
+
 .settings-form {
   display: flex;
   flex-direction: column;

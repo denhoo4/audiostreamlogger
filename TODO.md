@@ -1,7 +1,13 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (stream-url-validation branch: item 14 — non-blocking "Test" stream-URL
+Last updated: 2026-10-23 (stream-ordering branch: item 17 — manual stream ordering + default stream
++ country-grouped admin view — IN PROGRESS on `.worktrees/stream-ordering`: FEAT-001 backend
+(additive `streams.sort_order` column + idempotent in-place migration, `PUT /api/streams/reorder`,
+`default_stream_folder` app_config key on public config + `PUT /api/app-config/default-stream`) and
+FEAT-002 frontend (country-grouped StreamTable with ▲/▼ global reorder + Set-default control + badge,
+player preselects the default stream) both committed; api 177 / frontend 37 tests green in
+node:26-bookworm. Earlier: stream-url-validation branch: item 14 — non-blocking "Test" stream-URL
 reachability probe — implemented: `POST /api/streams/test-url` + a "Test" button in StreamTable;
 format validation stays the only save gate; api 158 / frontend 26 tests green in node:26-bookworm;
 in review. Earlier: stream-health branch: item 21 admin "which streams are NOT working" health
@@ -40,6 +46,37 @@ STATUS SUMMARY (what is DONE + on origin/main):
 ---
 
 ## Branches
+
+### `stream-ordering` — IN PROGRESS (item 17: manual stream ordering + default stream + country-grouped admin view; ADDITIVE schema change)
+Isolated git worktree at `.worktrees/stream-ordering` on branch `stream-ordering`. Task artifacts
+under `.agents/tasks/stream-ordering-2026-10-23/` (context.json + features/FEAT-001..002.json).
+Scope is `src/api/` + `src/frontend/` only — no recorder/worker/compose/nginx edits, no change to
+`PRAGMA journal_mode` (stays DELETE), and the schema change is ADDITIVE ONLY.
+- **FEAT-001 — backend (committed).** `db/schema.js` adds `sort_order INTEGER` to the streams DDL
+  plus a guarded `migrateStreamsSortOrder(db)` (reads `PRAGMA table_info(streams)`, runs
+  `ALTER TABLE streams ADD COLUMN sort_order INTEGER` + backfill `sort_order=id` only when absent;
+  idempotent; establishes the first ALTER/migration pattern in the codebase). `services/streams.js`
+  orders reads by `sort_order IS NULL, sort_order, id`, appends new rows with the next sort_order,
+  and adds `reorderStreams(orderedIds)` + `ReorderMismatchError` (transactional index-based reassign).
+  `routes/api.js` adds `PUT /api/streams/reorder` (requireAuth, registered BEFORE `/:id`), extends
+  public `GET /api/app-config/public` with `default_stream_folder` (default ''), and adds
+  `PUT /api/app-config/default-stream` (requireAuth, folder-existence validated). `app-config.js`
+  gains a `default_stream_folder` validateConfig branch (any string incl. ''; rejects non-strings).
+  Documented in `openapi/spec.js`. api node:test 158 → 177.
+- **FEAT-002 — frontend (committed).** `api.ts`: `StreamRecord.sort_order`, clients
+  `reorderStreams(order)` + `setDefaultStream(folder)`, and `getPublicConfig()` extended to
+  `{title, default_stream_folder}`. `settings/StreamTable.tsx`: list GROUPED BY COUNTRY (one
+  `<tbody>` per country with a `.settings-group-header`, countryName header, first-appearance order,
+  rows in backend sort_order), per-row ▲/▼ buttons that reorder across the GLOBAL flat id sequence
+  (swap-with-neighbour → `reorderStreams` → refresh; ends disabled), and a per-row 'Set default'
+  button + `.settings-default-badge` 'Default' marker (the column header is 'Default stream' to avoid
+  colliding with the badge). `App.tsx`: exported pure `pickInitialFolder(streams, defaultFolder)` and
+  a best-effort `getPublicConfig()` fetch in the settings effect so the player preselects the default
+  stream (falls back to the first stream) for anonymous users. Minimal CSS in `App.css`. frontend
+  vitest 26 → 37; App default-selection tested BOTH via a full jsdom App render AND the pure
+  `pickInitialFolder` unit tests. Verified in node:26-bookworm:
+  `npm ci && npm test -- --run && npm run build` green (exit 0).
+Next: review + merge.
 
 ### `stream-url-validation` — IN REVIEW (item 14: NON-BLOCKING "Test" stream-URL reachability probe; NO schema change)
 Isolated git worktree at `.worktrees/stream-url-validation` on branch `stream-url-validation`.

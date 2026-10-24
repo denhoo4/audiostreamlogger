@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import App from "./App";
+import App, { pickInitialFolder } from "./App";
+import type { Stream } from "./api";
 
 // Guard WaveSurfer so it never tries to decode real audio in jsdom. We stub the
 // module with a minimal instance that records event handlers but does nothing.
@@ -49,6 +50,17 @@ describe("App smoke test", () => {
       "fetch",
       vi.fn((input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.includes("/api/app-config/public")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ title: "", default_stream_folder: "" }),
+              {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              },
+            ),
+          );
+        }
         if (url.includes("/api/settings2")) {
           return Promise.resolve(
             new Response(JSON.stringify({}), {
@@ -128,5 +140,110 @@ describe("App smoke test", () => {
 
     // No console.error during render / data load.
     expect(errorSpy).not.toHaveBeenCalled();
+  });
+});
+
+const STREAM_ROWS: Stream[] = [
+  {
+    country: "NL",
+    name: "Radio One",
+    folder: "radio_one",
+    url: "https://example.com/one",
+  },
+  {
+    country: "BE",
+    name: "Radio Two",
+    folder: "radio_two",
+    url: "https://example.com/two",
+  },
+];
+
+/**
+ * Stub fetch so /api/settings returns STREAM_ROWS, /api/settings2 returns {},
+ * and /api/app-config/public returns the given default_stream_folder. This lets
+ * the default-selection behaviour be exercised through a full App render.
+ */
+function stubFetchWithDefault(defaultFolder: string) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/app-config/public")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              title: "",
+              default_stream_folder: defaultFolder,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      if (url.includes("/api/settings2")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({}), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (url.includes("/api/settings")) {
+        return Promise.resolve(
+          new Response(JSON.stringify(STREAM_ROWS), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      return Promise.resolve(new Response("", { status: 404 }));
+    }),
+  );
+}
+
+describe("App default-stream preselection (full render)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("preselects the configured default_stream_folder when it matches a stream", async () => {
+    stubFetchWithDefault("radio_two");
+    render(<App />);
+    const selector = document.getElementById(
+      "stringSelector",
+    ) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(selector.value).toBe("radio_two");
+    });
+  });
+
+  it("falls back to the first stream when the default is empty/unknown", async () => {
+    stubFetchWithDefault("does_not_exist");
+    render(<App />);
+    const selector = document.getElementById(
+      "stringSelector",
+    ) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(selector.value).toBe("radio_one");
+    });
+  });
+});
+
+describe("pickInitialFolder", () => {
+  it("returns the default folder when it matches a loaded stream", () => {
+    expect(pickInitialFolder(STREAM_ROWS, "radio_two")).toBe("radio_two");
+  });
+
+  it("falls back to the first stream for an unknown default", () => {
+    expect(pickInitialFolder(STREAM_ROWS, "nope")).toBe("radio_one");
+  });
+
+  it("falls back to the first stream for an empty default", () => {
+    expect(pickInitialFolder(STREAM_ROWS, "")).toBe("radio_one");
+  });
+
+  it("returns '' when there are no streams", () => {
+    expect(pickInitialFolder([], "radio_one")).toBe("");
   });
 });
