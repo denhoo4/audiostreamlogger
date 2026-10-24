@@ -7,7 +7,8 @@ quality — FEAT-001 api backend + FEAT-002 recorder/worker/api de-`.mp3`-ificat
 integration verification PASSED (one fix: opus pinned to 48000 Hz — libopus rejects 44100), semantic
 review APPROVED (gate `.agents/tasks/stream-quality-2026-10-23/review.json` verdict=APPROVED, no
 findings), fast checks re-run green in node:26-bookworm (api 211 / frontend 41 / worker 56 /
-recorder 54, frontend build exit 0) and the branch fast-forward merged into `main`. New test
+recorder 54, frontend build exit 0) and the branch fast-forward merged into `main` AND pushed to
+origin/main (main == origin/main == 170642d). New test
 baselines: api 211 (was 177), frontend 41 (was 37), worker 56, recorder 54. Recording files are now
 named `<folder>-<stamp>.<ext>` (mp3/opus/flac) — no longer always `.mp3`. FEAT-001:
 additive `codec`/`bitrate_kbps`/`bit_depth` columns + idempotent in-place migration, authoritative
@@ -100,8 +101,12 @@ checks were re-run green in node:26-bookworm one last time before merging: api 2
 frontend `npm ci && npm run build` exit 0 + 41 vitest, worker 56 + recorder 54 node:test. `main` was
 still at `origin/main` (36c0bd7) with `stream-quality` four commits ahead on that exact tip, so no
 rebase was needed; this living-doc update was committed on the branch, then `main` was
-fast-forwarded to `stream-quality` (a clean fast-forward — no force-push). New test baselines to
-carry forward: api 211, frontend 41, worker 56, recorder 54. Recording files are now
+fast-forwarded to `stream-quality` and PUSHED to origin/main — a clean fast-forward, no force-push
+(main == origin/main == stream-quality == 170642d; `origin/main` advanced 36c0bd7..170642d). A stale
+uncommitted item-22 "DESIGNED + PLANNED" scratch edit lingering in the main-repo working-tree TODO.md
+was discarded by hand during the merge (superseded by the branch's authoritative DONE+MERGED text; the
+design detail it held lives in `.agents/tasks/stream-quality-2026-10-23/design.md`). New test baselines
+to carry forward: api 211, frontend 41, worker 56, recorder 54. Recording files are now
 `<folder>-<stamp>.<ext>` (mp3/opus/flac), no longer always `.mp3`.
 
 **Cross-FEAT integration (2026-10-23) — PASSED with one fix.** All four suites green in
