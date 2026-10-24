@@ -4,9 +4,11 @@ Living document tracking the modernization/cleanup of the project.
 Last updated: 2026-10-23 (ALL FIVE CHUNKS (A–E) + all big steps DONE, merged, and pushed to
 origin/main == d16304a. Full roadmap complete; see HANDOVER.md for a fresh-start briefing.
 Dependabot + GitHub Actions are now enabled on the repo; its first run opened 10 PRs (#3–#12) —
-see item 19 below for which are green/safe vs. red. Open feature items remaining: 14 (stream URL
-reachability validation), 17 (stream ordering / default stream / country grouping), 18 (recordings
-reconcile job), 19 (Dependabot PR triage), and the FastAPI-vs-OpenAPI decision point (item 20).)
+see item 19 below for which are green/safe vs. red. Item 20 (API docs) is DECIDED + IMPLEMENTED on
+branch `api-openapi-docs` (OpenAPI 3 via zod + swagger-ui-express behind requireAuth), awaiting
+review/merge. Open feature items remaining: 14 (stream URL reachability validation), 17 (stream
+ordering / default stream / country grouping), 18 (recordings reconcile job), and 19 (Dependabot PR
+triage).)
 
 STATUS SUMMARY (what is DONE + on origin/main):
 - Node 26 Docker stack, 4 services: recorder, worker, api, frontend (cleaner + peakfilegenerator
@@ -920,11 +922,25 @@ do the non-frontend ones (#3, #7, #9) first, then tackle the bundled frontend up
 major but CI-green — still verify before merging.
 
 ### 20. Decision point: API docs — add OpenAPI/Swagger to Express vs. migrate api to FastAPI
-Discussed 2026-10-23. The api is hand-written Express (Node) with NO OpenAPI/Swagger docs. Two paths:
-- [ ] Option 1 (cheap, recommended if the goal is just docs/validation): add OpenAPI docs to the
+DECIDED (user, 2026-10-23): Option 1 (OpenAPI docs on the existing Express api), NOT a FastAPI rewrite.
+IMPLEMENTED on branch `api-openapi-docs` (worktree `.worktrees/api-openapi-docs`), awaiting review/merge.
+- [x] Option 1 (cheap, recommended if the goal is just docs/validation): add OpenAPI docs to the
       EXISTING Express api. Prefer a schema-first approach (e.g. `zod` + `zod-to-openapi`) so the
       spec stays in sync with the code (closest to the FastAPI feel), served via `swagger-ui-express`
       behind requireAuth. Alternative: hand-written `swagger-jsdoc` annotations (drifts more easily).
+      DONE: `zod@^4.6.7` + `@asteasolutions/zod-to-openapi@^9.1.0` + `swagger-ui-express@^5.0.1` added
+      to `src/api/package.json` (lockfile regenerated). A pure `src/api/openapi/spec.js`
+      (`buildOpenApiDocument()`, no DB/session side effects) describes the REAL routes read from
+      `routes/*.js` (auth, streams/settings/app-config, jobs incl. the SSE stream, analysis, branding,
+      backup, util, healthz — 24 paths) as an OpenAPI 3.0.0 document with tags + a `connect.sid`
+      session-cookie security scheme on authed ops. `src/api/openapi/docs.js` (`mountDocs`) serves the
+      Swagger UI at `GET /api/docs` and the raw spec at `GET /api/docs.json`, BOTH behind the existing
+      `requireAuth` (admin-only — docs not publicly reachable); wired in `index.js` after the session +
+      global `express.json`. nginx `location /api/` already proxies both paths (no nginx change). New
+      `node:test` suite `test/openapi-docs.test.js` (spec-shape unit check + anon-401 / authed-200
+      integration). Verified in node:26-bookworm: 119 api tests pass (114 existing + 5 new), and a
+      throwaway-container boot smoke on an ALTERNATE port confirmed anon `/api/docs.json` + `/api/docs`
+      → 401 and `/healthz` → `{status:ok}`.
 - [ ] Option 2 (big, only with a broader motive): migrate the api service to FastAPI (Python), which
       ships Swagger `/docs` + ReDoc `/redoc` automatically. This is a full rewrite of ONE service in
       another language (all routes incl. SSE, Argon2id auth + session store, the node:sqlite DB layer

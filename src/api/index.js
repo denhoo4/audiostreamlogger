@@ -97,6 +97,13 @@ function startServer() {
     app.use('/api/backup', backupRouter);
     app.use('/util', utilRouter);
 
+    // OpenAPI docs: Swagger UI at GET /api/docs and the raw spec at
+    // GET /api/docs.json, BOTH behind requireAuth (admin-only API). Mounted
+    // after the session middleware + global express.json so req.session is
+    // populated when requireAuth runs.
+    const { mountDocs } = require('./openapi/docs');
+    mountDocs(app);
+
     // Lightweight liveness probe for the compose healthcheck: plain 200 JSON.
     app.get('/healthz', (req, res) => res.json({ status: 'ok' }));
 
