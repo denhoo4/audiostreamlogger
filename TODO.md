@@ -1,7 +1,8 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (item 24 live-hour-refresh DONE + MERGED to main (fast-forward, main ==
+Last updated: 2026-10-23. Items 25 DELETE + 26 RENAME stream-folder lifecycle CODED + VERIFIED green on
+branch `stream-folder-lifecycle2`, in review — see the Branches section. Earlier context: item 24 live-hour-refresh DONE + MERGED to main (fast-forward, main ==
 live-hour-refresh == 39b701f), NOT pushed to origin — left merged locally. Backend: a new worker
 handler `src/worker/handlers/currenthourpeaks.js` driven by an independent
 `setInterval(CURRENT_HOUR_PEAK_MS)` (default 30s) in `worker.js`, decoupled from the job busy lock,
@@ -119,6 +120,37 @@ STATUS SUMMARY (what is DONE + on origin/main):
 ---
 
 ## Branches
+
+### `stream-folder-lifecycle2` — IN REVIEW (items 25 DELETE + 26 RENAME stream folder; API-DIRECT HYBRID, NO schema change, NO new jobs.type, NO worker change)
+Isolated git worktree at `.worktrees/stream-folder-lifecycle2` on branch `stream-folder-lifecycle2`.
+Scope is `src/api` + `src/frontend` ONLY. The api does the DB row changes transactionally AND the
+filesystem rm/rename over its read-write `./audio` mount — no new worker job type. Verification
+evidence: `.agents/tasks/verification.md`.
+- **Item 25 — DELETE stream (destructive).** New `GET /api/streams/:id/deletion-impact` returns an
+  ADVISORY {folder, fileCount, totalBytes} snapshot; the real gate is a typed-folder confirmation in
+  the admin UI. `DELETE /api/streams/:id` removes the recordings rows + the streams row
+  TRANSACTIONALLY FIRST, THEN rm's the on-disk `audio/<folder>/` (row-first closes the window where
+  the live recorder could resurrect the folder; an rm failure after the rows are gone is logged, not
+  rolled back). Refuses 409 when a CURRENT Amsterdam-slot `status='recording'` row exists (concrete
+  current-slot predicate — a purely historical row never blocks).
+- **Item 26 — RENAME folder (on stream update when `folder` changes).** Validates the new folder
+  (`^[a-z0-9_-]+$` allowlist + not-already-on-disk + differs), applies the same current-slot 409
+  guard, `fs.rename`s the dir, renames each inner recording + its `.json` peak to the new prefix, and
+  re-points each recordings row STAMP-ANCHORED (parse with `parseRecordingFilename` + rebuild the
+  canonical absolute path under `AUDIO_DIR` — NOT a blind SQL REPLACE, which would corrupt the date
+  stamp for NUMERIC folders like 100nl/z100/m2o). After the move + rebuild disk and DB agree, so a
+  reconcile is a true no-op.
+- New api modules: `src/api/lib/folder-utils.js` (verbatim `isContainedPath`/allowlist copy),
+  `src/api/lib/audio-dir.js` (the `process.env.AUDIO_DIR || '/usr/src/app/audio'` base-dir expression,
+  identical to the worker's paths.js so rebuilt file_paths match the reconcile scan),
+  `src/api/services/stream-lifecycle.js`, plus a manual `src/api/scripts/lifecycle-smoke.js`.
+- Frontend: a typed-confirm DELETE panel in `StreamTable` showing the advisory count (Cancel aborts,
+  Confirm fires only on an exact folder-name match); an edit-form warning that changing the folder
+  MOVES the recordings; 409 'recording right now' surfaced inline.
+- Verified green in node:26-bookworm (host has no node; all runs in Docker): api 223 → 248 node:test,
+  frontend 55 → 61 vitest + clean `tsc -b && vite build`, and a real destructive fs smoke in a
+  throwaway temp dir (never repo-root `./audio`). `Dockerfile.api` COPYs `src/api/ .` so the new files
+  need no Dockerfile change.
 
 ### `live-hour-refresh` — DONE + MERGED to main (item 24: live auto-refresh of the currently-recording hour; FEAT-001 worker current-hour peak regen + FEAT-002 frontend live-poll; cross-FEAT integration PASSED, semantic review APPROVED, fast-forward merged into main (main == live-hour-refresh == 39b701f), NOT pushed to origin)
 Isolated git worktree at `.worktrees/live-hour-refresh` on branch `live-hour-refresh`. Task artifacts

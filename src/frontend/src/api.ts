@@ -669,7 +669,36 @@ export async function reorderStreams(
   return (await res.json()) as { ok: true };
 }
 
-/** DELETE /api/streams/:id -> remove a stream. */
+/**
+ * ADVISORY deletion-impact snapshot for a stream (TODO item 25): the file count
+ * + total bytes under its on-disk audio/<folder>/. Advisory ONLY — the real
+ * gate is the typed-folder confirmation in the UI. Shape matches
+ * src/api/services/stream-lifecycle.js::deletionImpact.
+ */
+export interface DeletionImpact {
+  folder: string;
+  fileCount: number;
+  totalBytes: number;
+}
+
+/** GET /api/streams/:id/deletion-impact -> advisory file/byte snapshot. */
+export async function getDeletionImpact(id: number): Promise<DeletionImpact> {
+  const res = await fetch(
+    `${window.location.origin}/api/streams/${id}/deletion-impact`,
+    { credentials: "same-origin" },
+  );
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as DeletionImpact;
+}
+
+/**
+ * DELETE /api/streams/:id -> remove a stream, its recordings rows AND its
+ * on-disk folder (TODO item 25, destructive + irreversible). The backend
+ * returns 409 when the stream is recording the current hour-slot right now;
+ * that surfaces as an ApiError the caller shows inline.
+ */
 export async function deleteStream(id: number): Promise<void> {
   const res = await fetch(`${window.location.origin}/api/streams/${id}`, {
     method: "DELETE",

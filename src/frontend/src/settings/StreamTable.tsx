@@ -3,6 +3,7 @@ import {
   ApiError,
   createStream,
   deleteStream,
+  getDeletionImpact,
   getPublicConfig,
   getStreams,
   reorderStreams,
@@ -10,6 +11,7 @@ import {
   testStreamUrl,
   updateStream,
   type Codec,
+  type DeletionImpact,
   type StreamInput,
   type StreamRecord,
   type StreamTestResult,
@@ -74,6 +76,19 @@ function groupByCountry(
   return groups;
 }
 
+/** Human-readable byte size for the advisory deletion-impact display. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i += 1;
+  }
+  return `${value.toFixed(1)} ${units[i]}`;
+}
+
 /** Empty add/edit form state (behaviour-preserving mp3@160 quality default). */
 const EMPTY_FORM: StreamInput = {
   country: "",
@@ -111,6 +126,16 @@ export default function StreamTable() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<StreamTestResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
+
+  // Typed-confirm DELETE flow (TODO item 25). `deleteTarget` is the row being
+  // deleted (null when no confirm panel is open); `deleteImpact` is the advisory
+  // file/byte snapshot; `deleteTyped` is what the admin has typed to confirm;
+  // `deleteError` surfaces a 409 ('recording right now') or other delete error.
+  const [deleteTarget, setDeleteTarget] = useState<StreamRecord | null>(null);
+  const [deleteImpact, setDeleteImpact] = useState<DeletionImpact | null>(null);
+  const [deleteTyped, setDeleteTyped] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   function clearTest() {
     setTestResult(null);
@@ -255,16 +280,57 @@ export default function StreamTable() {
     }
   }
 
-  async function handleDelete(id: number) {
-    setListError(null);
+  /**
+   * Open the typed-confirm delete panel for a row and fetch its advisory
+   * impact. The actual delete does not fire until the admin types the folder
+   * name and clicks Confirm (handleDeleteConfirm).
+   */
+  async function openDeleteConfirm(stream: StreamRecord) {
+    setDeleteTarget(stream);
+    setDeleteImpact(null);
+    setDeleteTyped("");
+    setDeleteError(null);
     try {
-      await deleteStream(id);
-      if (editingId === id) resetForm();
+      setDeleteImpact(await getDeletionImpact(stream.id));
+    } catch (err) {
+      // The count is advisory; a failure to load it must not block the typed
+      // confirm. Show the reason but keep the panel open.
+      setDeleteError(
+        err instanceof ApiError
+          ? err.message
+          : "Could not load deletion impact",
+      );
+    }
+  }
+
+  /** Abort the delete: close the confirm panel, discard the typed value. */
+  function cancelDelete() {
+    setDeleteTarget(null);
+    setDeleteImpact(null);
+    setDeleteTyped("");
+    setDeleteError(null);
+  }
+
+  /**
+   * Fire the DELETE once the typed folder name matches. Surfaces a 409
+   * ('recording right now') or any other backend error inline without closing
+   * the panel so the admin can retry.
+   */
+  async function handleDeleteConfirm() {
+    if (!deleteTarget || deleteTyped !== deleteTarget.folder) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteStream(deleteTarget.id);
+      if (editingId === deleteTarget.id) resetForm();
+      cancelDelete();
       await refresh();
     } catch (err) {
-      setListError(
+      setDeleteError(
         err instanceof ApiError ? err.message : "Could not delete stream",
       );
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -343,13 +409,66 @@ export default function StreamTable() {
                       <button type="button" onClick={() => startEdit(s)}>
                         Edit
                       </button>
-                      <button type="button" onClick={() => handleDelete(s.id)}>
+                      <button
+                        type="button"
+                        onClick={() => openDeleteConfirm(s)}
+                      >
                         Delete
                       </button>
                     </td>
                   </tr>
                 );
               })}
+              {deleteTarget &&
+                group.rows.some((r) => r.id === deleteTarget.id) && (
+                  <tr className="settings-delete-confirm">
+                    <td colSpan={6}>
+                      <div role="alertdialog" aria-label="Confirm delete stream">
+                        <p className="settings-error">
+                          This permanently deletes the <b>{deleteTarget.name}</b>{" "}
+                          stream, its recordings rows and its on-disk folder{" "}
+                          <code>{deleteTarget.folder}</code>. This cannot be
+                          undone.
+                        </p>
+                        <p>
+                          {deleteImpact
+                            ? `On disk: ${deleteImpact.fileCount} file(s), ${formatBytes(deleteImpact.totalBytes)}.`
+                            : "Loading impact…"}
+                        </p>
+                        <label>
+                          Type the folder name{" "}
+                          <code>{deleteTarget.folder}</code> to confirm
+                          <input
+                            type="text"
+                            aria-label="Type folder name to confirm delete"
+                            value={deleteTyped}
+                            onChange={(e) => setDeleteTyped(e.target.value)}
+                          />
+                        </label>
+                        {deleteError && (
+                          <p className="settings-error" role="alert">
+                            {deleteError}
+                          </p>
+                        )}
+                        <div className="settings-form-actions">
+                          <button
+                            type="button"
+                            disabled={
+                              deleting ||
+                              deleteTyped !== deleteTarget.folder
+                            }
+                            onClick={handleDeleteConfirm}
+                          >
+                            {deleting ? "Deleting…" : "Confirm delete"}
+                          </button>
+                          <button type="button" onClick={cancelDelete}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
             </tbody>
           ))}
         </table>
@@ -389,6 +508,12 @@ export default function StreamTable() {
             onChange={(e) => setForm({ ...form, folder: e.target.value })}
           />
         </label>
+        {editingId !== null && (
+          <p className="settings-warning" role="note">
+            Changing the folder MOVES the existing recordings on disk to the new
+            folder. It is refused while the stream is recording the current hour.
+          </p>
+        )}
         <label>
           URL
           <input

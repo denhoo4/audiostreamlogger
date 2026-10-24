@@ -28,11 +28,18 @@ const {
     getStreamByFolder,
     createStream,
     updateStream,
-    deleteStream,
     reorderStreams,
     DuplicateFolderError,
     ReorderMismatchError,
 } = require('../services/streams');
+const {
+    deletionImpact,
+    deleteStreamWithFolder,
+    renameStreamFolder,
+    RenameValidationError,
+    StreamRecordingNowError,
+    UnsafeFolderError,
+} = require('../services/stream-lifecycle');
 
 // GET /api/settings (PUBLIC) — player selector; shaped like the old
 // settings.json.streams array (no id/timestamps).
@@ -159,6 +166,30 @@ router.get('/streams', requireAuth, (req, res) => {
     }
 });
 
+// GET /api/streams/:id/deletion-impact (requireAuth) — ADVISORY snapshot of
+// what a DELETE would destroy: the file count + total bytes under
+// audio/<folder>/ for the stream. Advisory ONLY — the real gate is the
+// typed-folder confirmation in the admin UI. 404 on an unknown id.
+router.get('/streams/:id/deletion-impact', requireAuth, (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+        return res.status(400).json({ error: 'invalid id', field: 'id' });
+    }
+
+    const stream = getStream(id);
+    if (!stream) {
+        return res.status(404).json({ error: 'stream not found' });
+    }
+
+    try {
+        const impact = deletionImpact(stream.folder);
+        return res.json(impact);
+    } catch (err) {
+        console.error('Error computing deletion impact:', err);
+        return res.status(500).json({ error: `Internal Server Error: ${err.message}` });
+    }
+});
+
 // POST /api/streams (requireAuth) — create a stream.
 router.post('/streams', requireAuth, (req, res) => {
     const body = req.body || {};
@@ -258,7 +289,24 @@ router.put('/streams/:id', requireAuth, (req, res) => {
         return res.status(400).json(invalid);
     }
 
+    // ITEM 26 — when the update CHANGES `folder`, the on-disk audio/<folder>/
+    // dir must move and every recordings row must re-point BEFORE the streams
+    // row flips to the new folder. renameStreamFolder does the move + row
+    // rebuild (stamp-anchored) and enforces the allowlist/not-exists/differs
+    // validation + the current-slot live-recorder 409 guard. We run it first so
+    // a refusal (409/400) leaves both disk and the streams row untouched.
+    const existing = getStream(id);
+    if (!existing) {
+        return res.status(404).json({ error: 'stream not found' });
+    }
+    const folderChanged =
+        typeof body.folder === 'string' && body.folder !== existing.folder;
+
     try {
+        if (folderChanged) {
+            renameStreamFolder(existing.folder, body.folder);
+        }
+
         const updated = updateStream(id, {
             country: body.country,
             name: body.name,
@@ -273,6 +321,15 @@ router.put('/streams/:id', requireAuth, (req, res) => {
         }
         return res.json(updated);
     } catch (err) {
+        if (err instanceof StreamRecordingNowError) {
+            return res.status(409).json({ error: err.message });
+        }
+        if (err instanceof RenameValidationError) {
+            return res.status(400).json({ error: err.message, field: err.field });
+        }
+        if (err instanceof UnsafeFolderError) {
+            return res.status(400).json({ error: err.message, field: 'folder' });
+        }
         if (err instanceof DuplicateFolderError) {
             return res.status(409).json({ error: 'folder already in use' });
         }
@@ -281,7 +338,15 @@ router.put('/streams/:id', requireAuth, (req, res) => {
     }
 });
 
-// DELETE /api/streams/:id (requireAuth) — remove a stream.
+// DELETE /api/streams/:id (requireAuth) — remove a stream, its recordings rows
+// AND its on-disk audio/<folder>/ dir (ITEM 25, destructive + irreversible).
+//
+// deleteStreamWithFolder removes the rows (recordings + streams) TRANSACTIONALLY
+// FIRST, then rm's the folder — the row-first ordering closes the window where
+// the live recorder could resurrect the folder (see the service for the full
+// rationale). It refuses with 409 when the stream is recording the current hour
+// right now. An fs.rm failure AFTER the rows are gone is reported (fsError) but
+// is not an error: the stream is already logically deleted.
 router.delete('/streams/:id', requireAuth, (req, res) => {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
@@ -289,12 +354,18 @@ router.delete('/streams/:id', requireAuth, (req, res) => {
     }
 
     try {
-        const removed = deleteStream(id);
-        if (!removed) {
+        const result = deleteStreamWithFolder(id);
+        if (!result) {
             return res.status(404).json({ error: 'stream not found' });
         }
-        return res.json({ ok: true });
+        return res.json({ ok: true, folder: result.folder, fsError: result.fsError });
     } catch (err) {
+        if (err instanceof StreamRecordingNowError) {
+            return res.status(409).json({ error: err.message });
+        }
+        if (err instanceof UnsafeFolderError) {
+            return res.status(400).json({ error: err.message, field: 'folder' });
+        }
         console.error('Error deleting stream:', err);
         return res.status(500).json({ error: `Internal Server Error: ${err.message}` });
     }
