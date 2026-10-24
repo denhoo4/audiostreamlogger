@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -359,6 +360,213 @@ describe("App non-mp3 player load", () => {
       });
     },
   );
+});
+
+const LIVE_STREAM_ROWS: Stream[] = [
+  {
+    country: "NL",
+    name: "Live Radio",
+    folder: "live_radio",
+    url: "https://example.com/live",
+    codec: "mp3",
+  },
+];
+
+/**
+ * Stub fetch so /api/settings returns a single mp3 stream, /api/settings2 and
+ * the public config are empty, and the peaks JSON responds per `peaksOk`:
+ * `true` -> 200 with a tiny peaks payload (ws.load gets peaks), `false` -> 404
+ * (graceful decode-from-media fallback).
+ */
+function stubFetchForLive(peaksOk: boolean) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/app-config/public")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ title: "", default_stream_folder: "" }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      if (url.includes("/api/settings2")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({}), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (url.includes("/api/settings")) {
+        return Promise.resolve(
+          new Response(JSON.stringify(LIVE_STREAM_ROWS), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (url.includes(".json")) {
+        return peaksOk
+          ? Promise.resolve(
+              new Response(JSON.stringify({ data: [[0, 0]] }), {
+                status: 200,
+                headers: { "Content-Type": "application/json" },
+              }),
+            )
+          : Promise.resolve(new Response("", { status: 404 }));
+      }
+      return Promise.resolve(new Response("", { status: 404 }));
+    }),
+  );
+}
+
+/**
+ * Set the given date + inject/select the given hour option, then click
+ * "Inladen!". Mirrors the per-codec test's hour-option injection (the option
+ * list is empty because settings2 is {}). Assumes the stream is already
+ * preselected (the caller settles the settings fetch first — with real timers
+ * via waitFor, with fake timers via advanceTimersByTimeAsync).
+ */
+function loadHour(date: string, hour: string) {
+  fireEvent.change(
+    document.getElementById("dateSelector") as HTMLInputElement,
+    { target: { value: date } },
+  );
+  const hourSelect = document.getElementById(
+    "hourSelector",
+  ) as HTMLSelectElement;
+  const opt = document.createElement("option");
+  opt.value = hour;
+  hourSelect.appendChild(opt);
+  fireEvent.change(hourSelect, { target: { value: hour } });
+  fireEvent.click(screen.getByRole("button", { name: "Inladen!" }));
+}
+
+describe("App live-hour auto-refresh", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    loadedUrls.length = 0;
+  });
+
+  it("re-loads the LIVE hour with a cache-busted URL after the poll interval", async () => {
+    vi.useFakeTimers();
+    // 2026-07-15T08:30:00Z -> Amsterdam CEST 10:xx, so hour "10" on 2026-07-15
+    // is the live slot.
+    vi.setSystemTime(new Date("2026-07-15T08:30:00Z"));
+    stubFetchForLive(true);
+    render(<App />);
+
+    // Settle the settings/preselect promise chain under fake timers.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    loadHour("2026-07-15", "10");
+    // Flush the initial reload's fetch/load microtasks.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(
+      loadedUrls.some((u) =>
+        u.endsWith("/audio/live_radio/live_radio-2026-07-15-10.mp3"),
+      ),
+    ).toBe(true);
+
+    // Advance one poll tick; a cache-busted (?t=) reload must fire.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000);
+    });
+    expect(
+      loadedUrls.some((u) =>
+        /\/audio\/live_radio\/live_radio-2026-07-15-10\.mp3\?t=\d+/.test(u),
+      ),
+    ).toBe(true);
+  });
+
+  it("clicking 'Ververs' triggers an immediate cache-busted reload", async () => {
+    stubFetchForLive(true);
+    render(<App />);
+
+    const selector = document.getElementById(
+      "stringSelector",
+    ) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(selector.value).toBe("live_radio");
+    });
+
+    // A PAST hour is fine here: the manual button reloads regardless of live-ness.
+    loadHour("2020-01-01", "09");
+    await waitFor(() => {
+      expect(
+        loadedUrls.some((u) =>
+          u.endsWith("/audio/live_radio/live_radio-2020-01-01-09.mp3"),
+        ),
+      ).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Ververs" }));
+    await waitFor(() => {
+      expect(
+        loadedUrls.some((u) =>
+          /\/audio\/live_radio\/live_radio-2020-01-01-09\.mp3\?t=\d+/.test(u),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("does NOT schedule a reload for a PAST hour", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T08:30:00Z"));
+    stubFetchForLive(true);
+    render(<App />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    // Load a clearly past hour (not the current Amsterdam slot).
+    loadHour("2026-07-15", "05");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(
+      loadedUrls.some((u) =>
+        u.endsWith("/audio/live_radio/live_radio-2026-07-15-05.mp3"),
+      ),
+    ).toBe(true);
+    const countAfterLoad = loadedUrls.length;
+
+    // Advancing well past the poll interval must not re-load anything.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(90000);
+    });
+    expect(loadedUrls.length).toBe(countAfterLoad);
+  });
+
+  it("falls back to ws.load(mediaUrl) when the peaks fetch fails (graceful missing peak)", async () => {
+    stubFetchForLive(false);
+    render(<App />);
+
+    const selector = document.getElementById(
+      "stringSelector",
+    ) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(selector.value).toBe("live_radio");
+    });
+
+    loadHour("2026-07-15", "10");
+    await waitFor(() => {
+      // mediaUrl was loaded even though the .json 404'd.
+      expect(
+        loadedUrls.some((u) =>
+          u.endsWith("/audio/live_radio/live_radio-2026-07-15-10.mp3"),
+        ),
+      ).toBe(true);
+    });
+  });
 });
 
 describe("pickInitialFolder", () => {

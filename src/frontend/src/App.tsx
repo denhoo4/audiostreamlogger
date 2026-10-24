@@ -2,10 +2,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   audioJsonUrl,
   audioUrl,
+  currentAmsterdamSlot,
   exportSelection,
   getPublicConfig,
   getSettings,
   getSettings2,
+  isLiveHour,
   type Codec,
   type Settings2,
   type Stream,
@@ -27,6 +29,20 @@ const SKIP_BUTTONS: { label: string; value: number }[] = [
 /** Round to one decimal (replaces lodash round(10*x)/10). */
 function round1(x: number): number {
   return Math.round(x * 10) / 10;
+}
+
+// How often the player reloads the LIVE (current Amsterdam hour) recording so
+// the mp3 + regenerated peaks keep growing in the UI. Past hours never poll.
+const LIVE_POLL_MS = 30000;
+
+/** The folder + date/hour parts of a loaded recording (for live detection). */
+interface LoadedSelection {
+  folder: string;
+  year: string;
+  month: string;
+  day: string;
+  hour: string;
+  ext: Codec;
 }
 
 /**
@@ -75,6 +91,10 @@ export default function App() {
   const [date, setDate] = useState("");
   const [hour, setHour] = useState("");
   const [downloadWaiting, setDownloadWaiting] = useState(false);
+
+  // The folder + date/hour parts of the currently loaded recording, or null
+  // before the first successful load. Drives live-hour detection + polling.
+  const [loaded, setLoaded] = useState<LoadedSelection | null>(null);
 
   // #downloadbutton anchor attributes (set on load).
   const [downloadHref, setDownloadHref] = useState<string | undefined>(
@@ -176,33 +196,87 @@ export default function App() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [ws]);
 
-  // Load (#load): build URLs, set download anchor, try peaks JSON then fall back
-  // to decoding the mp3. NaN guard with the Dutch alert. Runs the reset routine.
+  // Core load body, shared by the initial load, the live-poll interval and the
+  // manual "Ververs" button. Rebuilds the media + peaks URLs for `sel` (passing
+  // an optional cache-busting `?t=` so a grown current-hour file/json is not
+  // served stale), updates the download anchor, and tries the peaks JSON before
+  // falling back to decoding the audio directly — preserving the graceful
+  // missing/partial-peak behaviour (ws.load(mediaUrl) with no peaks).
+  const reload = useCallback(
+    async (sel: LoadedSelection, cacheBust?: number) => {
+      const { folder, year, month, day, hour: h, ext } = sel;
+      const mediaUrl = audioUrl(folder, year, month, day, h, ext, cacheBust);
+      const jsonUrl = audioJsonUrl(folder, year, month, day, h, cacheBust);
+
+      setDownloadHref(mediaUrl);
+      setDownloadName(`${folder}-${year}-${month}-${day}-${h}.${ext}`);
+
+      ws.reset();
+
+      try {
+        const res = await fetch(jsonUrl);
+        if (!res.ok) throw new Error(`peaks ${res.status}`);
+        const json = (await res.json()) as { data: number[][] };
+        ws.load(mediaUrl, json.data);
+      } catch {
+        ws.load(mediaUrl);
+      }
+    },
+    [ws],
+  );
+
+  // Load (#load): validate the day/hour (NaN guard with the Dutch alert), record
+  // the loaded selection (so the live-hour poll can key off it), then perform
+  // the shared load.
   const handleLoad = useCallback(async () => {
     const parts = parseDateParts(date, hour);
     if (!selectedFolder || !parts) {
       alert("Wel ff een dag en uur selecteren hè!");
       return;
     }
-    const { year, month, day, hour: h } = parts;
-    const ext = selectedCodec;
-    const mediaUrl = audioUrl(selectedFolder, year, month, day, h, ext);
-    const jsonUrl = audioJsonUrl(selectedFolder, year, month, day, h);
+    const sel: LoadedSelection = {
+      folder: selectedFolder,
+      year: parts.year,
+      month: parts.month,
+      day: parts.day,
+      hour: parts.hour,
+      ext: selectedCodec,
+    };
+    setLoaded(sel);
+    await reload(sel);
+  }, [date, hour, selectedFolder, selectedCodec, reload]);
 
-    setDownloadHref(mediaUrl);
-    setDownloadName(`${selectedFolder}-${year}-${month}-${day}-${h}.${ext}`);
+  // Keep the latest loaded selection available to the manual refresh button
+  // without re-creating the handler on every state change.
+  const loadedRef = useRef<LoadedSelection | null>(loaded);
+  loadedRef.current = loaded;
 
-    ws.reset();
+  // Manual "Ververs" fallback: reload the currently loaded recording right away
+  // with a fresh cache-busting param. No-op before anything is loaded.
+  const handleRefresh = useCallback(() => {
+    const sel = loadedRef.current;
+    if (!sel) return;
+    void reload(sel, Date.now());
+  }, [reload]);
 
-    try {
-      const res = await fetch(jsonUrl);
-      if (!res.ok) throw new Error(`peaks ${res.status}`);
-      const json = (await res.json()) as { data: number[][] };
-      ws.load(mediaUrl, json.data);
-    } catch {
-      ws.load(mediaUrl);
-    }
-  }, [date, hour, selectedFolder, selectedCodec, ws]);
+  // Live-hour auto-refresh: only when the loaded selection IS the current
+  // Amsterdam hour-slot, poll every LIVE_POLL_MS and reload with a cache-busting
+  // param so the grown mp3 + regenerated peaks show up. The interval is cleared
+  // when the selection changes, when a past hour is loaded, when the slot rolls
+  // past the loaded hour, and on unmount. Nothing is polled before a load.
+  useEffect(() => {
+    if (!loaded) return;
+    if (!isLiveHour(currentAmsterdamSlot(), loaded)) return;
+    const id = setInterval(() => {
+      // Stop once the live slot has rolled past the loaded hour.
+      if (!isLiveHour(currentAmsterdamSlot(), loaded)) {
+        clearInterval(id);
+        return;
+      }
+      void reload(loaded, Date.now());
+    }, LIVE_POLL_MS);
+    return () => clearInterval(id);
+  }, [loaded, reload]);
 
   // Download Selection (#downloadRegionButton): show wait message, POST the
   // selection, trigger a browser download of the returned mp3, hide the message.
@@ -342,6 +416,13 @@ export default function App() {
         </select>
         <button id="load" onClick={handleLoad}>
           Inladen!
+        </button>
+        <button
+          id="refresh"
+          disabled={loaded === null}
+          onClick={handleRefresh}
+        >
+          Ververs
         </button>
       </div>
       <p

@@ -293,10 +293,73 @@ export async function getSettings2(): Promise<Settings2> {
   return (await res.json()) as Settings2;
 }
 
+/** Zero-padded Amsterdam-local hour-slot fields used for live-hour detection. */
+export interface AmsterdamSlot {
+  year: string;
+  month: string;
+  day: string;
+  hour: string;
+}
+
+// Amsterdam-local formatter mirroring src/api/lib/amsterdam-slot.js (TODO item
+// 21): timeZone 'Europe/Amsterdam' + hourCycle 'h23' so the slot is DST-correct
+// (CEST +2 / CET +1) and never depends on the browser's ambient TZ. en-GB is
+// used so formatToParts yields numeric fields; punctuation is irrelevant since
+// we read parts by type, not a formatted string.
+const AMS_SLOT_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Europe/Amsterdam",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  hourCycle: "h23",
+});
+
+/**
+ * The current Amsterdam-local hour-slot as zero-padded strings
+ * { year, month, day, hour }. DST-safe via Intl (never a hardcoded offset);
+ * `hourCycle:'h23'` makes midnight '00'. Pure: the caller injects the instant,
+ * defaulting to now.
+ */
+export function currentAmsterdamSlot(now: Date = new Date()): AmsterdamSlot {
+  const parts = AMS_SLOT_FORMATTER.formatToParts(now);
+  const get = (type: string) =>
+    parts.find((p) => p.type === type)?.value ?? "";
+  let hour = get("hour");
+  // Some ICU builds emit '24' for midnight under h23; normalize to '00'.
+  if (hour === "24") hour = "00";
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour,
+  };
+}
+
+/**
+ * True when the loaded selection's slot exactly matches the current Amsterdam
+ * slot on all four fields (year, month, day, hour) — i.e. the selection IS the
+ * live, still-growing recording hour.
+ */
+export function isLiveHour(
+  slot: AmsterdamSlot,
+  loaded: { year: string; month: string; day: string; hour: string },
+): boolean {
+  return (
+    slot.year === loaded.year &&
+    slot.month === loaded.month &&
+    slot.day === loaded.day &&
+    slot.hour === loaded.hour
+  );
+}
+
 /**
  * URL of the recorded audio for a given folder + date/hour. The file extension
  * equals the stream's codec (mp3/opus/flac); opus files use an Ogg container
- * but keep the .opus on-disk extension.
+ * but keep the .opus on-disk extension. When `cacheBust` is provided a
+ * `?t=<cacheBust>` query param is appended so a grown current-hour file is not
+ * served stale from the browser/nginx cache; omitting it yields the exact
+ * byte-identical URL existing callers rely on.
  */
 export function audioUrl(
   folder: string,
@@ -305,19 +368,28 @@ export function audioUrl(
   day: string,
   hour: string,
   ext: string,
+  cacheBust?: number,
 ): string {
-  return `${window.location.origin}/audio/${folder}/${folder}-${year}-${month}-${day}-${hour}.${ext}`;
+  const base = `${window.location.origin}/audio/${folder}/${folder}-${year}-${month}-${day}-${hour}.${ext}`;
+  return cacheBust === undefined ? base : `${base}?t=${cacheBust}`;
 }
 
-/** URL of the precomputed peaks JSON for a given folder + date/hour. */
+/**
+ * URL of the precomputed peaks JSON for a given folder + date/hour. When
+ * `cacheBust` is provided a `?t=<cacheBust>` query param is appended (cache-bust
+ * the regenerated current-hour peaks); omitting it yields the byte-identical URL
+ * existing callers rely on.
+ */
 export function audioJsonUrl(
   folder: string,
   year: string,
   month: string,
   day: string,
   hour: string,
+  cacheBust?: number,
 ): string {
-  return `${window.location.origin}/audio/${folder}/${folder}-${year}-${month}-${day}-${hour}.json`;
+  const base = `${window.location.origin}/audio/${folder}/${folder}-${year}-${month}-${day}-${hour}.json`;
+  return cacheBust === undefined ? base : `${base}?t=${cacheBust}`;
 }
 
 /**
