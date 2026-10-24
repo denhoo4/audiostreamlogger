@@ -1,7 +1,9 @@
 /**
- * Backfill reconcile coverage (FEAT-001): reconcilePlan plans an upsert only for
+ * Backfill reconcile coverage (FEAT-001): reconcilePlan plans an insert only for
  * slots not already present, folds a .partN segment into segment_count + status
- * 'partial', and is idempotent on a second run over the same scanned set.
+ * 'partial', and is idempotent on a second run over the same scanned set. The
+ * planner now returns { inserts, removes, updates }; these assertions target
+ * `inserts` — the only direction the startup backfill applies.
  */
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
@@ -59,8 +61,21 @@ function scanned(folder, date, hour, part) {
     };
 }
 
-test('reconcilePlan plans upserts only for slots not already present', () => {
-    const existing = new Set(['radio1|2026-10-23|09']);
+/** An existing DB row for the slot, derived like a prior reconcile would store it. */
+function row(folder, date, hour, extra = {}) {
+    return {
+        stream_folder: folder,
+        date,
+        hour,
+        status: 'complete',
+        segment_count: 1,
+        file_path: `/audio/${folder}/${folder}-${date}-${hour}.mp3`,
+        ...extra,
+    };
+}
+
+test('reconcilePlan plans inserts only for slots not already present', () => {
+    const existing = [row('radio1', '2026-10-23', '09')];
     const files = [
         scanned('radio1', '2026-10-23', '09', 1), // already present -> skipped
         scanned('radio1', '2026-10-23', '10', 1), // new
@@ -68,10 +83,12 @@ test('reconcilePlan plans upserts only for slots not already present', () => {
     ];
 
     const plan = reconcilePlan(existing, files);
-    assert.strictEqual(plan.length, 2);
-    const keys = plan.map((p) => `${p.stream_folder}|${p.date}|${p.hour}`).sort();
+    assert.strictEqual(plan.inserts.length, 2);
+    const keys = plan.inserts
+        .map((p) => `${p.stream_folder}|${p.date}|${p.hour}`)
+        .sort();
     assert.deepStrictEqual(keys, ['radio1|2026-10-23|10', 'radio2|2026-10-23|00']);
-    for (const p of plan) {
+    for (const p of plan.inserts) {
         assert.strictEqual(p.status, 'complete');
         assert.strictEqual(p.segment_count, 1);
     }
@@ -83,43 +100,49 @@ test('reconcilePlan folds a .partN segment into segment_count + status partial',
         scanned('radio1', '2026-10-23', '09', 2),
         scanned('radio1', '2026-10-23', '09', 3),
     ];
-    const plan = reconcilePlan(new Set(), files);
-    assert.strictEqual(plan.length, 1, 'all segments fold into one hour-slot');
-    assert.strictEqual(plan[0].status, 'partial');
-    assert.strictEqual(plan[0].segment_count, 3);
+    const plan = reconcilePlan([], files);
+    assert.strictEqual(plan.inserts.length, 1, 'all segments fold into one hour-slot');
+    assert.strictEqual(plan.inserts[0].status, 'partial');
+    assert.strictEqual(plan.inserts[0].segment_count, 3);
     // file_path points at the primary file for the slot.
     assert.strictEqual(
-        plan[0].file_path,
+        plan.inserts[0].file_path,
         '/audio/radio1/radio1-2026-10-23-09.mp3'
     );
 });
 
 test('reconcilePlan with only a .partN (no primary) is still partial', () => {
     const files = [scanned('radio1', '2026-10-23', '09', 2)];
-    const plan = reconcilePlan(new Set(), files);
-    assert.strictEqual(plan.length, 1);
-    assert.strictEqual(plan[0].status, 'partial');
-    assert.strictEqual(plan[0].segment_count, 1);
+    const plan = reconcilePlan([], files);
+    assert.strictEqual(plan.inserts.length, 1);
+    assert.strictEqual(plan.inserts[0].status, 'partial');
+    assert.strictEqual(plan.inserts[0].segment_count, 1);
     assert.strictEqual(
-        plan[0].file_path,
+        plan.inserts[0].file_path,
         '/audio/radio1/radio1-2026-10-23-09.part2.mp3'
     );
 });
 
-test('reconcilePlan is idempotent: a second run over the same set plans nothing', () => {
+test('reconcilePlan is idempotent: a second run over the same set inserts nothing', () => {
     const files = [
         scanned('radio1', '2026-10-23', '09', 1),
         scanned('radio1', '2026-10-23', '09', 2),
         scanned('radio2', '2026-10-23', '00', 1),
     ];
 
-    const first = reconcilePlan(new Set(), files);
-    assert.strictEqual(first.length, 2);
+    const first = reconcilePlan([], files);
+    assert.strictEqual(first.inserts.length, 2);
 
-    // Feed the first run's produced keys back as "already present".
-    const now = new Set(
-        first.map((p) => `${p.stream_folder}|${p.date}|${p.hour}`)
+    // Feed the first run's produced inserts back as existing rows.
+    const now = first.inserts.map((p) =>
+        row(p.stream_folder, p.date, p.hour, {
+            status: p.status,
+            segment_count: p.segment_count,
+            file_path: p.file_path,
+        })
     );
     const second = reconcilePlan(now, files);
-    assert.strictEqual(second.length, 0, 'nothing new to upsert on a re-run');
+    assert.strictEqual(second.inserts.length, 0, 'nothing new to insert on a re-run');
+    assert.strictEqual(second.updates.length, 0, 'matching metadata -> no updates');
+    assert.strictEqual(second.removes.length, 0, 'every row still on disk -> no removes');
 });

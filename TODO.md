@@ -1,7 +1,8 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (ALL FIVE CHUNKS (A–E) + all big steps DONE, merged, and pushed to
+Last updated: 2026-10-23 (reconcile-job branch: FEAT-001 shared two-way reconcile planner landed —
+see item 18. ALL FIVE CHUNKS (A–E) + all big steps DONE, merged, and pushed to
 origin/main == d16304a. Full roadmap complete; see HANDOVER.md for a fresh-start briefing.
 Dependabot + GitHub Actions are now enabled on the repo; its first run opened 10 PRs (#3–#12) —
 see item 19 below for which are green/safe vs. red. Item 20 (API docs) is DECIDED + IMPLEMENTED on
@@ -893,6 +894,22 @@ out-of-band, a missed event). Add a periodic FULL SYNC that reconciles both dire
 - [ ] Expose it in the admin scheduler UI as a schedulable type with a "Run now" button.
 Order: AFTER Chunk C lands (needs the recordings table + job model). Natural follow-on; could fold
 into Chunk C follow-ups or be its own small workflow.
+IN PROGRESS on branch `reconcile-job` (worktree `.worktrees/reconcile-job`), decomposed into
+FEAT-001 (shared planner) + FEAT-002 (worker job type + UI + seed):
+- [x] FEAT-001 DONE (not yet merged): generalized the startup-backfill reconcile logic into a
+      SHARED PURE two-way planner `src/api/services/reconcile-planner.js` —
+      `reconcilePlan(existingRows, scannedFiles, options) -> { inserts, removes, updates }` (no fs,
+      no DB). It folds `.partN` segments per (folder,date,hour) slot, plans inserts (disk-only
+      slots), removes (db-only rows — full-sync, matching the cleaner's row removal), and updates
+      (drifted status/segment_count/file_path), with a guard that NEVER removes or restatuses the
+      actively-recorded slot (status 'recording' OR date-hour === currentStamp). `runBackfill` now
+      consumes it INSERT-ONLY (identical startup behaviour) and re-exports `reconcilePlan` for
+      backward compat. New `src/api/test/reconcile-planner.test.js` (all three directions + the
+      guard + idempotency) plus the updated `recordings-backfill.test.js`; api suite green (127
+      tests) in node:26-bookworm. FEAT-002 ports this planner byte-for-byte into
+      `src/worker/reconcile-planner.js`.
+- [ ] FEAT-002: worker "reconcile" job type (ports the planner, applies all three directions under
+      the busy-skip lock), seed the schedule, admin scheduler UI + Run-now.
 
 ### 19. Triage the first Dependabot PRs (opened 2026-10-23; user wants these picked up)
 Dependabot's first run opened 10 PRs. `gh` is installed and authenticated as `denhoo4`. CI
