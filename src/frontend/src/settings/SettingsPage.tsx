@@ -9,6 +9,7 @@ import BrandingSettings from "./BrandingSettings";
 import WorkerStatus from "./WorkerStatus";
 import StreamHealth from "./StreamHealth";
 import RecordingsAnalysis from "./RecordingsAnalysis";
+import StorageEstimate from "./StorageEstimate";
 import BackupSettings from "./BackupSettings";
 import { useAppTitle } from "../useAppTitle";
 
@@ -89,6 +90,7 @@ export default function SettingsPage() {
       <WorkerStatus />
       <StreamHealth />
       <RecordingsAnalysis />
+      <StorageEstimate />
       <JobViewer />
       <BackupSettings />
       <ChangePasswordForm />

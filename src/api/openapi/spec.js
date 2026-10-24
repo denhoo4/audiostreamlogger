@@ -208,6 +208,26 @@ const StreamHealthResponse = z
     })
     .openapi('StreamHealthResponse');
 
+const StorageEstimate = z
+    .object({
+        retention_hours: z.number(),
+        actual_bytes: z.number(),
+        projection: z.object({
+            retentionHours: z.number(),
+            totalProjectedBytes: z.number(),
+            perStream: z.array(
+                z.object({
+                    folder: z.string(),
+                    name: z.string(),
+                    bytesPerHour: z.number(),
+                    source: z.enum(['measured', 'estimated']),
+                    projectedBytes: z.number(),
+                })
+            ),
+        }),
+    })
+    .openapi('StorageEstimate');
+
 const BackupImport = z
     .object({
         streams: z.array(StreamInput).optional(),
@@ -760,6 +780,22 @@ function buildOpenApiDocument() {
                 content: json(StreamHealthResponse),
             },
             ...validationErr,
+            ...authErr,
+            ...serverErr,
+        },
+    });
+    registry.registerPath({
+        method: 'get',
+        path: '/api/analysis/storage-estimate',
+        tags: ['analysis'],
+        summary:
+            'Projected steady-state disk usage per stream + total, plus actual on-disk bytes',
+        security: authed,
+        responses: {
+            200: {
+                description: 'storage estimate',
+                content: json(StorageEstimate),
+            },
             ...authErr,
             ...serverErr,
         },

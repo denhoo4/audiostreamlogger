@@ -229,6 +229,44 @@ function latestCompleteByFolder() {
 }
 
 /**
+ * MEASURED mean bytes/hour per folder, as a plain object
+ *   { [stream_folder]: number }
+ * computed from AVG(size_bytes) over this folder's `status = 'complete'` rows
+ * with a non-null size_bytes (in-progress `recording` / short `partial` hours
+ * are excluded so they do not skew the mean). Feeds the storage-estimate helper
+ * as its preferred per-stream bytes/hour. Mirrors latestCompleteByFolder: all
+ * complete rows are averaged (not a recent window) since steady-state projection
+ * is the goal and older complete hours encode the same quality.
+ */
+function measuredBytesPerHourByFolder() {
+    const rows = db
+        .prepare(
+            `SELECT stream_folder, AVG(size_bytes) AS bph
+             FROM recordings
+             WHERE status = 'complete' AND size_bytes IS NOT NULL
+             GROUP BY stream_folder`
+        )
+        .all();
+    const out = {};
+    for (const row of rows) {
+        if (row.bph !== null && row.bph !== undefined) {
+            out[row.stream_folder] = Number(row.bph);
+        }
+    }
+    return out;
+}
+
+/** Total size_bytes currently stored across all recordings (0 when empty). */
+function totalStoredBytes() {
+    const row = db
+        .prepare(
+            'SELECT COALESCE(SUM(size_bytes), 0) AS total FROM recordings'
+        )
+        .get();
+    return Number(row.total) || 0;
+}
+
+/**
  * Indexed SQL aggregates grouped by stream_folder plus an overall roll-up:
  *   { per_stream: [{ stream_folder, total_hours, storage_bytes,
  *                    recording_count, avg_duration_seconds, earliest, latest }],
@@ -281,5 +319,7 @@ module.exports = {
     listByStreamAndRange,
     listRecentByDate,
     latestCompleteByFolder,
+    measuredBytesPerHourByFolder,
+    totalStoredBytes,
     summarize,
 };

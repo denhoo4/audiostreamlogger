@@ -15,13 +15,21 @@ const {
     listRecentByDate,
     expectedHourSlots,
     missingSlots,
+    measuredBytesPerHourByFolder,
+    totalStoredBytes,
 } = require('../services/recordings');
 const { listStreams } = require('../services/streams');
 const {
     deriveStreamHealth,
     summarizeHealth,
 } = require('../services/stream-health');
+const { estimateStorage } = require('../services/storage-estimate');
+const { getConfig } = require('../services/app-config');
 const { amsterdamSlot } = require('../lib/amsterdam-slot');
+
+// Seeded default for log_retention (db/seed-jobconfig.js) used when the config
+// row is missing or unparseable, so the projection always has a window.
+const DEFAULT_RETENTION_HOURS = 2;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -158,6 +166,51 @@ router.get('/stream-health', requireAuth, (req, res) => {
         });
     } catch (err) {
         console.error('Error building stream health:', err);
+        return res
+            .status(500)
+            .json({ error: `Internal Server Error: ${err.message}` });
+    }
+});
+
+// GET /api/analysis/storage-estimate (requireAuth) — a read-only projection of
+// how much disk the app will hold at steady state: per-stream bytes/hour (the
+// MEASURED mean of complete recordings, else a THEORETICAL estimate from the
+// quality fields) × the configured retention window, summed. Also reports the
+// ACTUAL bytes currently on disk. No query params. Shape:
+//   { retention_hours,
+//     projection:{ perStream:[{folder,name,bytesPerHour,source,projectedBytes}],
+//                  totalProjectedBytes, retentionHours },
+//     actual_bytes }
+router.get('/storage-estimate', requireAuth, (req, res) => {
+    try {
+        const parsed = Number(getConfig('log_retention'));
+        const retentionHours =
+            Number.isFinite(parsed) && parsed > 0
+                ? parsed
+                : DEFAULT_RETENTION_HOURS;
+
+        const streams = listStreams().map((s) => ({
+            folder: s.folder,
+            name: s.name,
+            codec: s.codec,
+            bitrate_kbps: s.bitrate_kbps,
+            bit_depth: s.bit_depth,
+        }));
+        const measuredByFolder = measuredBytesPerHourByFolder();
+
+        const projection = estimateStorage({
+            streams,
+            measuredByFolder,
+            retentionHours,
+        });
+
+        return res.json({
+            retention_hours: retentionHours,
+            projection,
+            actual_bytes: totalStoredBytes(),
+        });
+    } catch (err) {
+        console.error('Error building storage estimate:', err);
         return res
             .status(500)
             .json({ error: `Internal Server Error: ${err.message}` });

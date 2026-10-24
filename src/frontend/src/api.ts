@@ -175,6 +175,39 @@ export interface StreamHealthResponse {
 }
 
 /**
+ * One stream's projected storage line inside GET /api/analysis/storage-estimate
+ * (requireAuth): `bytesPerHour` is the MEASURED mean of complete recordings
+ * (`source: "measured"`) or a THEORETICAL estimate from the quality fields
+ * (`source: "estimated"`); `projectedBytes` is bytesPerHour × the retention
+ * window.
+ */
+export interface StorageEstimatePerStream {
+  folder: string;
+  name: string;
+  bytesPerHour: number;
+  source: "measured" | "estimated";
+  projectedBytes: number;
+}
+
+/** The projection object returned inside a storage-estimate response. */
+export interface StorageEstimateProjection {
+  perStream: StorageEstimatePerStream[];
+  totalProjectedBytes: number;
+  retentionHours: number;
+}
+
+/**
+ * Shape of GET /api/analysis/storage-estimate (requireAuth): a read-only
+ * projection of steady-state disk usage (per stream + total) over the configured
+ * retention window, plus `actual_bytes` currently on disk.
+ */
+export interface StorageEstimateResponse {
+  retention_hours: number;
+  projection: StorageEstimateProjection;
+  actual_bytes: number;
+}
+
+/**
  * An api error carrying the backend's {error, field?} body so forms can show
  * the server-side validation message (400) or conflict message (409).
  */
@@ -804,4 +837,20 @@ export async function getStreamHealth(
     throw await toApiError(res);
   }
   return (await res.json()) as StreamHealthResponse;
+}
+
+/**
+ * GET /api/analysis/storage-estimate -> projected steady-state disk usage per
+ * stream + total over the configured retention window, plus the actual bytes
+ * currently on disk. Throws ApiError on a non-2xx response.
+ */
+export async function getStorageEstimate(): Promise<StorageEstimateResponse> {
+  const res = await fetch(
+    `${window.location.origin}/api/analysis/storage-estimate`,
+    { credentials: "same-origin" },
+  );
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as StorageEstimateResponse;
 }

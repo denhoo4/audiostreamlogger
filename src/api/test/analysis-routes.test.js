@@ -353,3 +353,101 @@ test('stream-health computes the current slot in Amsterdam time, not UTC (regres
     // logic this would have been true: that is the bug this test guards.
     assert.strictEqual(byFolder.nl_utc.recordingNow, false);
 });
+
+test('storage-estimate is 401 when anonymous', async () => {
+    authenticated = false;
+    assert.strictEqual(
+        (await getJson('/api/analysis/storage-estimate')).status,
+        401
+    );
+    authenticated = true;
+});
+
+test('authenticated storage-estimate returns the projection shape (measured + estimated + actual)', async () => {
+    authenticated = true;
+
+    // Seed a dedicated stream WITH complete rows so it reports source
+    // "measured", and one WITHOUT any rows so it falls back to "estimated".
+    // Separate folders keep the earlier fixed-count assertions intact.
+    const streams = require('../services/streams');
+    const recordings = require('../services/recordings');
+    const { setConfig } = require('../services/app-config');
+
+    // Measured stream: two complete hours of 1000 + 3000 bytes → mean 2000 b/h.
+    streams.createStream({
+        country: 'NL',
+        name: 'Storage Measured',
+        folder: 'se_measured',
+        url: 'https://example.com/se_measured',
+        codec: 'mp3',
+        bitrate_kbps: 128,
+    });
+    recordings.upsertRecording(db, {
+        stream_folder: 'se_measured',
+        date: '2026-02-01',
+        hour: '00',
+        file_path: '/audio/se_measured/x-00.mp3',
+        status: 'complete',
+        duration_seconds: 3600,
+        size_bytes: 1000,
+        segment_count: 1,
+    });
+    recordings.upsertRecording(db, {
+        stream_folder: 'se_measured',
+        date: '2026-02-01',
+        hour: '01',
+        file_path: '/audio/se_measured/x-01.mp3',
+        status: 'complete',
+        duration_seconds: 3600,
+        size_bytes: 3000,
+        segment_count: 1,
+    });
+
+    // Estimated stream: no recordings at all → theoretical from its bitrate.
+    streams.createStream({
+        country: 'NL',
+        name: 'Storage Estimated',
+        folder: 'se_estimated',
+        url: 'https://example.com/se_estimated',
+        codec: 'mp3',
+        bitrate_kbps: 320,
+    });
+
+    // Pin the retention window so retention_hours is asserted deterministically.
+    setConfig('log_retention', '10');
+
+    const res = await getJson('/api/analysis/storage-estimate');
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.retention_hours, 10);
+    assert.ok(res.body.projection);
+    assert.strictEqual(res.body.projection.retentionHours, 10);
+    assert.ok(Array.isArray(res.body.projection.perStream));
+    assert.strictEqual(typeof res.body.projection.totalProjectedBytes, 'number');
+    assert.strictEqual(typeof res.body.actual_bytes, 'number');
+
+    const byFolder = Object.fromEntries(
+        res.body.projection.perStream.map((s) => [s.folder, s])
+    );
+
+    // Measured: mean of 1000 + 3000 = 2000 b/h, projected over 10h = 20000.
+    assert.ok(byFolder.se_measured);
+    assert.strictEqual(byFolder.se_measured.source, 'measured');
+    assert.strictEqual(byFolder.se_measured.bytesPerHour, 2000);
+    assert.strictEqual(byFolder.se_measured.projectedBytes, 20000);
+
+    // Estimated: no rows → theoretical from 320 kbps = 320*1000/8*3600 b/h.
+    assert.ok(byFolder.se_estimated);
+    assert.strictEqual(byFolder.se_estimated.source, 'estimated');
+    assert.strictEqual(
+        byFolder.se_estimated.bytesPerHour,
+        (320 * 1000 / 8) * 3600
+    );
+    assert.strictEqual(
+        byFolder.se_estimated.projectedBytes,
+        (320 * 1000 / 8) * 3600 * 10
+    );
+
+    // actual_bytes sums EVERY size_bytes now in recordings across all folders,
+    // so it is at least the measured stream's seeded 1000 + 3000 bytes.
+    assert.ok(res.body.actual_bytes >= 4000);
+});

@@ -72,6 +72,16 @@ function stubFetch(authState: { authenticated: boolean; username?: string }) {
           },
           streams: [],
         });
+      if (url.includes("/api/analysis/storage-estimate"))
+        return json({
+          retention_hours: 24,
+          projection: {
+            perStream: [],
+            totalProjectedBytes: 0,
+            retentionHours: 24,
+          },
+          actual_bytes: 0,
+        });
       // Default: an empty object is safe for the remaining GETs.
       return json({});
     }),

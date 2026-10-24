@@ -1,7 +1,11 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (item 21 v2 DONE + MERGED to main (== b06db8b) AND pushed to origin/main,
+Last updated: 2026-10-23 (item 23 storage-estimate DONE on branch `storage-estimate`, in review:
+requireAuth `GET /api/analysis/storage-estimate` + a StorageEstimate admin panel projecting
+steady-state disk use from measured/estimated per-stream bytes/hour × the retention window, plus
+actual on-disk bytes; read-only, api 223 + frontend 45 tests green. Earlier this day: item 21 v2 DONE
++ MERGED to main (== b06db8b) AND pushed to origin/main,
 review APPROVED: the first Stream Health panel was WRONG in practice — a TZ bug (route used ambient
 `getHours()`/UTC while the recorder stamps Amsterdam-local slots) plus the `ok/degraded/down/never`
 24h-gap model made the recorder-running case read "0 streams OK". Rebuilt as a TWO-SIGNAL design — a
@@ -1264,21 +1268,32 @@ per-stream quality settings).
 ### 23. Admin screen: storage estimate for current settings (user wish, 2026-10-23)
 The user wants to see an ESTIMATE of how much data the application will store given the current
 settings — a projected disk-usage figure shown in the admin screen.
-- [ ] Compute an estimate from: the number of streams, each stream's recording quality (codec +
+- [x] Compute an estimate from: the number of streams, each stream's recording quality (codec +
       bitrate + bit depth — see item 22; until that lands, use the current fixed encoding), and the
       log-retention window (hours) that bounds how much is kept on disk at steady state. Roughly:
       per-stream bytes/hour (derived from bitrate, or measured from existing recordings) × retention
       hours, summed over all streams.
-- [ ] Show it in the admin screen (next to retention / the analysis panels): projected steady-state
+- [x] Show it in the admin screen (next to retention / the analysis panels): projected steady-state
       total, ideally a per-stream breakdown, and optionally compare against actual current on-disk
       usage (the `recordings` table already tracks `size_bytes`, so a measured bytes/hour per stream
       is available as a more accurate basis than a theoretical bitrate calc).
-- [ ] Likely a requireAuth api endpoint (e.g. `GET /api/analysis/storage-estimate`) returning the
+- [x] Likely a requireAuth api endpoint (e.g. `GET /api/analysis/storage-estimate`) returning the
       projection + a frontend panel. Pure calculation logic should be unit-tested (node:test).
 Order: depends on retention config (already in the DB) and benefits from item 22's per-stream
 quality fields; most accurate if it uses measured `size_bytes` from the `recordings` table. Touches
 api + frontend. Sequence after item 22 (or build the measured-bytes version first and refine once
 item 22's per-stream quality exists).
+DONE (2026-10-23, branch `storage-estimate`, in review). Pure helper
+`src/api/services/storage-estimate.js` (`estimateStorage` + `theoreticalBytesPerHour`): per-stream
+bytes/hour = MEASURED mean `size_bytes` over complete recordings when available (`source:"measured"`),
+else THEORETICAL from the item-22 quality fields (`source:"estimated"`) — lossy = `bitrate_kbps *
+1000/8 * 3600`, FLAC = documented `FLAC_ESTIMATED_KBPS=900` scaled by bit depth — × the `log_retention`
+window, summed. requireAuth `GET /api/analysis/storage-estimate` (routes/analysis.js) also reports
+actual on-disk bytes; documented in openapi/spec.js. Frontend panel
+`src/frontend/src/settings/StorageEstimate.tsx` rendered after `<RecordingsAnalysis />` (human-readable
+total + retention window + actual + per-stream table with measured/estimated badges). Read-only: no
+schema change, no writes. api 223 node:test + frontend 45 vitest green, build clean. Evidence:
+`.agents/tasks/verification.md`.
 
 ### 24. Live auto-refresh of the currently-recording hour in the player (user wish, 2026-10-23)
 Problem: when the user opens the hour that is CURRENTLY being recorded, the player loads a snapshot —
