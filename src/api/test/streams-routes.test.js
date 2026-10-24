@@ -176,3 +176,94 @@ test('DELETE removes a stream; deleting an unknown id returns 404', async () => 
     const missing = await reqJson('DELETE', `/api/streams/${created.id}`);
     assert.strictEqual(missing.status, 404);
 });
+
+// --- PUT /api/streams/reorder --------------------------------------------
+
+function makeStream(suffix) {
+    return reqJson('POST', '/api/streams', {
+        country: 'NL',
+        name: `Stream ${suffix}`,
+        folder: `stream_${suffix}`,
+        url: `https://example.com/${suffix}`,
+    }).then((res) => res.body);
+}
+
+test('PUT /api/streams/reorder requires auth (401 anonymous)', async () => {
+    authenticated = false;
+    const res = await reqJson('PUT', '/api/streams/reorder', { order: [1] });
+    assert.strictEqual(res.status, 401);
+});
+
+test('PUT /api/streams/reorder rejects an id-set mismatch with 400 {field:order}', async () => {
+    const a = await makeStream('a');
+    await makeStream('b');
+
+    const res = await reqJson('PUT', '/api/streams/reorder', { order: [a.id] });
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.body.field, 'order');
+});
+
+test('PUT /api/streams/reorder rejects a non-array order with 400 {field:order}', async () => {
+    const res = await reqJson('PUT', '/api/streams/reorder', { order: 'nope' });
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.body.field, 'order');
+});
+
+test('PUT /api/streams/reorder persists the new order (subsequent GET reflects it)', async () => {
+    const a = await makeStream('a');
+    const b = await makeStream('b');
+    const c = await makeStream('c');
+
+    const res = await reqJson('PUT', '/api/streams/reorder', {
+        order: [c.id, a.id, b.id],
+    });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.ok, true);
+
+    const list = await reqJson('GET', '/api/streams');
+    assert.deepStrictEqual(
+        list.body.map((s) => s.id),
+        [c.id, a.id, b.id]
+    );
+});
+
+// --- PUT /api/app-config/default-stream + GET /api/app-config/public ------
+
+test('PUT /api/app-config/default-stream requires auth (401 anonymous)', async () => {
+    authenticated = false;
+    const res = await reqJson('PUT', '/api/app-config/default-stream', {
+        folder: 'stream_a',
+    });
+    assert.strictEqual(res.status, 401);
+});
+
+test('PUT /api/app-config/default-stream 400s on an unknown folder {field:folder}', async () => {
+    const res = await reqJson('PUT', '/api/app-config/default-stream', {
+        folder: 'does_not_exist',
+    });
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.body.field, 'folder');
+});
+
+test('PUT /api/app-config/default-stream sets a valid folder; public config reflects it; empty clears it', async () => {
+    await makeStream('a');
+
+    const set = await reqJson('PUT', '/api/app-config/default-stream', {
+        folder: 'stream_a',
+    });
+    assert.strictEqual(set.status, 200);
+    assert.strictEqual(set.body.default_stream_folder, 'stream_a');
+
+    const pub = await reqJson('GET', '/api/app-config/public');
+    assert.strictEqual(pub.status, 200);
+    assert.strictEqual(pub.body.default_stream_folder, 'stream_a');
+
+    const clear = await reqJson('PUT', '/api/app-config/default-stream', {
+        folder: '',
+    });
+    assert.strictEqual(clear.status, 200);
+    assert.strictEqual(clear.body.default_stream_folder, '');
+
+    const pubAfter = await reqJson('GET', '/api/app-config/public');
+    assert.strictEqual(pubAfter.body.default_stream_folder, '');
+});

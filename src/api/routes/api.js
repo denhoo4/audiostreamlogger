@@ -25,10 +25,13 @@ const { getJob } = require('../services/jobs');
 const {
     listStreams,
     getStream,
+    getStreamByFolder,
     createStream,
     updateStream,
     deleteStream,
+    reorderStreams,
     DuplicateFolderError,
+    ReorderMismatchError,
 } = require('../services/streams');
 
 // GET /api/settings (PUBLIC) — player selector; shaped like the old
@@ -62,14 +65,44 @@ router.get('/settings2', async (req, res) => {
 const DEFAULT_APP_TITLE = 'Dé radiologger';
 
 // GET /api/app-config/public (PUBLIC) — runtime branding the player reads
-// without a session (page title).
+// without a session (page title + preselected default stream folder).
 router.get('/app-config/public', (req, res) => {
     try {
         const title = getConfig('app_title') ?? DEFAULT_APP_TITLE;
-        res.json({ title });
+        const default_stream_folder = getConfig('default_stream_folder') ?? '';
+        res.json({ title, default_stream_folder });
     } catch (err) {
         console.error('Error reading public app-config:', err);
         res.status(500).json({ error: `Internal Server Error: ${err.message}` });
+    }
+});
+
+// PUT /api/app-config/default-stream (requireAuth) — set/clear the player's
+// preselected default stream folder. A non-empty folder must match a known
+// stream; the empty string clears the default.
+router.put('/app-config/default-stream', requireAuth, (req, res) => {
+    const body = req.body || {};
+    const folder = body.folder;
+
+    if (typeof folder !== 'string') {
+        return res
+            .status(400)
+            .json({ error: 'default_stream_folder must be a string', field: 'folder' });
+    }
+
+    if (folder !== '' && !getStreamByFolder(folder)) {
+        return res.status(400).json({ error: 'unknown folder', field: 'folder' });
+    }
+
+    try {
+        const default_stream_folder = setConfig('default_stream_folder', folder);
+        return res.json({ default_stream_folder });
+    } catch (err) {
+        if (err instanceof ConfigValidationError) {
+            return res.status(400).json({ error: err.error, field: 'folder' });
+        }
+        console.error('Error updating default_stream_folder:', err);
+        return res.status(500).json({ error: `Internal Server Error: ${err.message}` });
     }
 });
 
@@ -172,6 +205,37 @@ router.post('/streams/test-url', requireAuth, async (req, res) => {
         // shape rather than leaking a 500 for a non-critical helper.
         console.error('Error probing stream url:', err);
         return res.json({ reachable: false, detail: 'probe failed' });
+    }
+});
+
+// PUT /api/streams/reorder (requireAuth) — persist a new stream order.
+//
+// Registered BEFORE PUT /streams/:id so the literal `reorder` path is not
+// captured as an :id. Body `{ order }` must be an array of positive integers
+// listing every stream id exactly once; a mismatch returns 400.
+router.put('/streams/reorder', requireAuth, (req, res) => {
+    const body = req.body || {};
+    const { order } = body;
+
+    const valid =
+        Array.isArray(order) &&
+        order.every((id) => Number.isInteger(id) && id > 0);
+    if (!valid) {
+        return res.status(400).json({ error: 'invalid order', field: 'order' });
+    }
+
+    try {
+        reorderStreams(order);
+        return res.json({ ok: true });
+    } catch (err) {
+        if (err instanceof ReorderMismatchError) {
+            return res.status(400).json({
+                error: 'order must list every stream exactly once',
+                field: 'order',
+            });
+        }
+        console.error('Error reordering streams:', err);
+        return res.status(500).json({ error: `Internal Server Error: ${err.message}` });
     }
 });
 

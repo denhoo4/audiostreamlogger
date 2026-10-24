@@ -14,11 +14,18 @@ class DuplicateFolderError extends Error {
     }
 }
 
-/** List all streams with id + timestamps (admin view). */
+class ReorderMismatchError extends Error {
+    constructor(message = 'order must list every stream exactly once') {
+        super(message);
+        this.name = 'ReorderMismatchError';
+    }
+}
+
+/** List all streams with id + timestamps (admin view), ordered by sort_order. */
 function listStreams() {
     return db
         .prepare(
-            'SELECT id, country, name, folder, url, created_at, updated_at FROM streams ORDER BY id'
+            'SELECT id, country, name, folder, url, sort_order, created_at, updated_at FROM streams ORDER BY sort_order IS NULL, sort_order, id'
         )
         .all();
 }
@@ -27,7 +34,7 @@ function listStreams() {
 function getStream(id) {
     return db
         .prepare(
-            'SELECT id, country, name, folder, url, created_at, updated_at FROM streams WHERE id = ?'
+            'SELECT id, country, name, folder, url, sort_order, created_at, updated_at FROM streams WHERE id = ?'
         )
         .get(id);
 }
@@ -36,7 +43,7 @@ function getStream(id) {
 function getStreamByFolder(folder) {
     return db
         .prepare(
-            'SELECT id, country, name, folder, url, created_at, updated_at FROM streams WHERE folder = ?'
+            'SELECT id, country, name, folder, url, sort_order, created_at, updated_at FROM streams WHERE folder = ?'
         )
         .get(folder);
 }
@@ -55,7 +62,8 @@ function createStream({ country, name, folder, url }) {
 
     const result = db
         .prepare(
-            'INSERT INTO streams (country, name, folder, url) VALUES (?, ?, ?, ?)'
+            `INSERT INTO streams (country, name, folder, url, sort_order)
+             VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM streams))`
         )
         .run(country, name, folder, url);
     return getStream(Number(result.lastInsertRowid));
@@ -94,6 +102,50 @@ function deleteStream(id) {
     return result.changes > 0;
 }
 
+/**
+ * Reassign sort_order to every stream from the given ordered list of ids. The
+ * set of ids must exactly match the current full set of stream ids (same
+ * length, same members); any mismatch throws ReorderMismatchError and nothing
+ * is written. On success each id's sort_order is set to its index in the array
+ * inside a single transaction (rolled back on any error).
+ */
+function reorderStreams(orderedIds) {
+    const currentIds = db
+        .prepare('SELECT id FROM streams')
+        .all()
+        .map((r) => r.id);
+
+    if (!Array.isArray(orderedIds) || orderedIds.length !== currentIds.length) {
+        throw new ReorderMismatchError();
+    }
+
+    const currentSet = new Set(currentIds);
+    const orderedSet = new Set(orderedIds);
+    if (orderedSet.size !== orderedIds.length) {
+        // duplicate ids in the input
+        throw new ReorderMismatchError();
+    }
+    for (const id of orderedIds) {
+        if (!currentSet.has(id)) {
+            throw new ReorderMismatchError();
+        }
+    }
+
+    db.exec('BEGIN');
+    try {
+        const stmt = db.prepare(
+            "UPDATE streams SET sort_order = ?, updated_at = datetime('now') WHERE id = ?"
+        );
+        orderedIds.forEach((id, index) => {
+            stmt.run(index, id);
+        });
+        db.exec('COMMIT');
+    } catch (err) {
+        db.exec('ROLLBACK');
+        throw err;
+    }
+}
+
 module.exports = {
     listStreams,
     getStream,
@@ -101,5 +153,7 @@ module.exports = {
     createStream,
     updateStream,
     deleteStream,
+    reorderStreams,
     DuplicateFolderError,
+    ReorderMismatchError,
 };

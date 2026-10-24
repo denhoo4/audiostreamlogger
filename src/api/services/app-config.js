@@ -94,6 +94,20 @@ function validateConfig(key, value) {
         return;
     }
 
+    // default_stream_folder is the player's preselected stream folder; the empty
+    // string means "no default". Folder existence is checked in the route against
+    // the live streams table, keeping this validator DB-schema-agnostic — here we
+    // only require a string value.
+    if (key === 'default_stream_folder') {
+        if (typeof value !== 'string') {
+            throw new ConfigValidationError(
+                key,
+                'default_stream_folder must be a string'
+            );
+        }
+        return;
+    }
+
     // favicon_path / favicon_mime are written only by the api (after a validated
     // upload), so a non-empty string is the only constraint here.
     if (key === 'favicon_path' || key === 'favicon_mime') {

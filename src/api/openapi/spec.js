@@ -66,6 +66,7 @@ const StreamTestResult = z
 
 const Stream = StreamInput.extend({
     id: z.number().int(),
+    sort_order: z.number().int().nullable(),
     created_at: z.string(),
     updated_at: z.string(),
 }).openapi('Stream');
@@ -355,8 +356,30 @@ function buildOpenApiDocument() {
         responses: {
             200: {
                 description: 'public config',
-                content: json(z.object({ title: z.string() })),
+                content: json(
+                    z.object({
+                        title: z.string(),
+                        default_stream_folder: z.string(),
+                    })
+                ),
             },
+            ...serverErr,
+        },
+    });
+    registry.registerPath({
+        method: 'put',
+        path: '/api/app-config/default-stream',
+        tags: ['streams'],
+        summary: 'Set or clear the player default stream folder',
+        security: authed,
+        request: { body: { content: json(z.object({ folder: z.string() })) } },
+        responses: {
+            200: {
+                description: 'updated default stream folder',
+                content: json(z.object({ default_stream_folder: z.string() })),
+            },
+            ...validationErr,
+            ...authErr,
             ...serverErr,
         },
     });
@@ -438,6 +461,27 @@ function buildOpenApiDocument() {
             200: {
                 description: 'probe result (reachable true/false + detail)',
                 content: json(StreamTestResult),
+            },
+            ...validationErr,
+            ...authErr,
+            ...serverErr,
+        },
+    });
+    registry.registerPath({
+        method: 'put',
+        path: '/api/streams/reorder',
+        tags: ['streams'],
+        summary: 'Persist a new stream order (sort_order by array index)',
+        security: authed,
+        request: {
+            body: {
+                content: json(z.object({ order: z.array(z.number().int()) })),
+            },
+        },
+        responses: {
+            200: {
+                description: 'reordered',
+                content: json(z.object({ ok: z.literal(true) })),
             },
             ...validationErr,
             ...authErr,

@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS streams (
   name       TEXT NOT NULL,
   folder     TEXT NOT NULL UNIQUE,
   url        TEXT NOT NULL,
+  sort_order INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -107,8 +108,33 @@ const RECORDINGS_DATE_INDEX = `
 CREATE INDEX IF NOT EXISTS idx_recordings_date ON recordings (date);
 `;
 
+/**
+ * Guarded in-place migration for the additive `streams.sort_order` column.
+ *
+ * db/schema.js is otherwise 100% `CREATE TABLE IF NOT EXISTS`; this is the one
+ * migration helper. It reads `PRAGMA table_info(streams)` and only when a
+ * `sort_order` column is absent does it `ALTER TABLE streams ADD COLUMN
+ * sort_order INTEGER` and backfill `sort_order = id` for existing rows. A
+ * second call is a no-op (the column is present), so applySchema stays
+ * idempotent and an existing app.db migrates in place with zero row loss. It
+ * does NOT alter/drop any existing column and does NOT touch PRAGMA
+ * journal_mode.
+ */
+function migrateStreamsSortOrder(db) {
+    const hasSortOrder = db
+        .prepare('PRAGMA table_info(streams)')
+        .all()
+        .some((col) => col.name === 'sort_order');
+    if (hasSortOrder) {
+        return;
+    }
+    db.exec('ALTER TABLE streams ADD COLUMN sort_order INTEGER');
+    db.exec('UPDATE streams SET sort_order = id WHERE sort_order IS NULL');
+}
+
 function applySchema(db) {
     db.exec(STREAMS_TABLE);
+    migrateStreamsSortOrder(db);
     db.exec(USERS_TABLE);
     db.exec(JOBS_TABLE);
     db.exec(JOBS_STATUS_CREATED_INDEX);
@@ -120,4 +146,4 @@ function applySchema(db) {
     db.exec(RECORDINGS_DATE_INDEX);
 }
 
-module.exports = { applySchema };
+module.exports = { applySchema, migrateStreamsSortOrder };

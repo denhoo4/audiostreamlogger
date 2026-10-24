@@ -28,6 +28,8 @@ const REQUIRED_PATHS = [
     '/api/settings',
     '/api/streams',
     '/api/streams/{id}',
+    '/api/streams/reorder',
+    '/api/app-config/default-stream',
     '/api/jobs',
     '/api/jobs/schedules/{type}',
     '/api/jobs/config/log_retention',
@@ -52,6 +54,15 @@ test('buildOpenApiDocument() returns a valid-shaped OpenAPI 3 document', () => {
     for (const p of REQUIRED_PATHS) {
         assert.ok(doc.paths[p], `missing documented path: ${p}`);
     }
+    // The two FEAT-001 endpoints are documented as PUT operations.
+    assert.ok(
+        doc.paths['/api/streams/reorder'].put,
+        'missing PUT /api/streams/reorder'
+    );
+    assert.ok(
+        doc.paths['/api/app-config/default-stream'].put,
+        'missing PUT /api/app-config/default-stream'
+    );
     // The session-cookie security scheme is declared and used by authed routes.
     assert.ok(
         doc.components &&
