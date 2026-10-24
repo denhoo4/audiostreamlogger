@@ -82,7 +82,9 @@ The `/settings` route is a login-gated admin screen (same-origin session cookie,
 `api` under `/auth` and `/api`). From there you can:
 
 - sign in and change the admin password;
-- add, edit, and remove streams (country is picked from an ISO 3166-1 list);
+- add, edit, and remove streams (country is picked from an ISO 3166-1 list), reorder them with
+  per-row ▲/▼ controls, and mark one stream as the default the player preselects — the admin list is
+  grouped by country for easier scanning;
 - set the page title and upload a favicon (branding);
 - see the worker's liveness (alive/stale, last-seen age, current job);
 - see a stream-health overview that flags, at a glance, which streams are NOT working: each stream is
@@ -134,9 +136,11 @@ moved into the database and are managed from the admin screen.
 Everything that used to live in `settings.json` is now edited in the login-gated `/settings` screen
 and stored in the database:
 
-- **Streams** — each stream has a `country`, `name`, `folder`, and `url`; `folder` is the
-  subdirectory under `audio/` where that station's recordings go, and recording files are named
-  `<folder>/<folder>-YYYY-MM-DD-HH.mp3`.
+- **Streams** — each stream has a `country`, `name`, `folder`, `url`, and a `sort_order` that drives
+  the display order (set from the admin reorder controls); `folder` is the subdirectory under
+  `audio/` where that station's recordings go, and recording files are named
+  `<folder>/<folder>-YYYY-MM-DD-HH.mp3`. A `default_stream_folder` app-config key records which stream
+  the player preselects (empty falls back to the first stream).
 - **Schedules** — per job type (`cleaner`, `peakfilegenerator`, `reconcile`) an enable toggle and an
   hourly/daily/weekly schedule with the matching anchor (minute; hour+minute; day-of-week+hour+minute).
   A "Run now" button enqueues a one-off manual job.

@@ -1,26 +1,40 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (stream-ordering branch: item 17 — manual stream ordering + default stream
-+ country-grouped admin view — IN PROGRESS on `.worktrees/stream-ordering`: FEAT-001 backend
-(additive `streams.sort_order` column + idempotent in-place migration, `PUT /api/streams/reorder`,
-`default_stream_folder` app_config key on public config + `PUT /api/app-config/default-stream`) and
-FEAT-002 frontend (country-grouped StreamTable with ▲/▼ global reorder + Set-default control + badge,
-player preselects the default stream) both committed; api 177 / frontend 37 tests green in
-node:26-bookworm. Earlier: stream-url-validation branch: item 14 — non-blocking "Test" stream-URL
-reachability probe — implemented: `POST /api/streams/test-url` + a "Test" button in StreamTable;
-format validation stays the only save gate; api 158 / frontend 26 tests green in node:26-bookworm;
-in review. Earlier: stream-health branch: item 21 admin "which streams are NOT working" health
+Last updated: 2026-10-23 (item 17 DONE + MERGED to main: stream-ordering — manual stream ordering +
+default stream + country-grouped admin view. FEAT-001 backend (additive `streams.sort_order` column +
+idempotent in-place migration, sort_order-ordered reads, `PUT /api/streams/reorder`,
+`default_stream_folder` app_config key with public read + `PUT /api/app-config/default-stream` setter)
+and FEAT-002 frontend (country-grouped StreamTable with ▲/▼ global reorder + Set-default control +
+badge, player preselects the default stream) both committed. Semantic review APPROVED (one non-blocking
+`sort_order` TS-type note, an accepted trade-off) — verdict at
+`.agents/tasks/stream-ordering-2026-10-23/verdict.json`. api 177 / frontend 37 tests green in
+node:26-bookworm; fast-forward merged into `main` (main == 88fbf71). Earlier: item 14 DONE + MERGED to
+main (fast-forward == d7b1ed8) from branch `stream-url-validation` — a NON-BLOCKING admin "Test" button
++ `POST /api/streams/test-url` reachability probe, decided with the user; plan at
+`.agents/tasks/stream-url-validation-2026-10-23/plan.md`. Semantic review APPROVED (no blocking
+findings; one non-blocking SSRF-denylist note, an accepted trade-off) — review + verdict at
+`.agents/tasks/stream-url-validation-2026-10-23/review.md` / `review.json`. api 158 / frontend 26 tests
+green in node:26-bookworm; branch + worktree cleaned up. Earlier: stream-health branch: item 21 admin
+"which streams are NOT working" health
 panel implemented on `.worktrees/stream-health` — read-only, derived from existing recordings rows,
 api 139 / frontend 23 tests green; in review. Earlier: reconcile-job branch: FEAT-001 planner +
 FEAT-002 worker reconcile job landed — see item 18. ALL FIVE CHUNKS (A–E) + all big steps DONE, merged, and pushed to
 origin/main == d16304a. Full roadmap complete; see HANDOVER.md for a fresh-start briefing.
 Dependabot + GitHub Actions are now enabled on the repo; its first run opened 10 PRs (#3–#12) —
-see item 19 below for which are green/safe vs. red. Item 20 (API docs) is DECIDED + IMPLEMENTED on
-branch `api-openapi-docs` (OpenAPI 3 via zod + swagger-ui-express behind requireAuth), awaiting
-review/merge. Open feature items remaining: 17 (stream ordering / default stream / country
-grouping), 18 (recordings reconcile job), and 19 (Dependabot PR triage). Item 14 (stream URL
-reachability validation) is IMPLEMENTED on branch `stream-url-validation`, in review.)
+see item 19 below for which are green/safe vs. red. Item 20 (API docs) is DONE: OpenAPI 3 via zod +
+swagger-ui-express behind requireAuth, MERGED to main (fast-forward == a60165a). Item 19 is IN
+PROGRESS: the four GREEN PRs (#3 nginx, #5 jsdom, #7 github-actions, #9 argon2) are merged onto the
+`frontend-toolchain-upgrade` worktree branch, and the six RED interdependent frontend bumps
+(#4/#6/#8/#10/#11/#12 — react 19, vite 8, vitest 5, @vitejs/plugin-react 6) have been bundled into
+ONE coordinated upgrade on that worktree — CODED + VERIFIED GREEN in node:26-bookworm (build + 20/20
+vitest + report-only coverage + npm ci reproducibility), committed on `frontend-toolchain-upgrade`,
+and the semantic review is APPROVED (no blocking findings; gate review.json) — still NOT pushed/
+merged; the merge/finalize step merges it and closes the superseded PRs. Plan + evidence + review
+under `.agents/tasks/frontend-toolchain-upgrade-2026-10-23/`. Open feature items remaining: 19
+(Dependabot PR triage). Item 17 (stream ordering / default stream / country grouping) is now DONE +
+MERGED to main; items 18 (recordings reconcile job) and 21 (admin broken-stream health panel) were
+completed earlier.)
 
 STATUS SUMMARY (what is DONE + on origin/main):
 - Node 26 Docker stack, 4 services: recorder, worker, api, frontend (cleaner + peakfilegenerator
@@ -47,7 +61,7 @@ STATUS SUMMARY (what is DONE + on origin/main):
 
 ## Branches
 
-### `stream-ordering` — IN PROGRESS (item 17: manual stream ordering + default stream + country-grouped admin view; ADDITIVE schema change)
+### `stream-ordering` — MERGED + NOT PUSHED (item 17: manual stream ordering + default stream + country-grouped admin view; ADDITIVE schema change; fast-forward merged into main, main == 88fbf71, local only)
 Isolated git worktree at `.worktrees/stream-ordering` on branch `stream-ordering`. Task artifacts
 under `.agents/tasks/stream-ordering-2026-10-23/` (context.json + features/FEAT-001..002.json).
 Scope is `src/api/` + `src/frontend/` only — no recorder/worker/compose/nginx edits, no change to
@@ -76,7 +90,13 @@ Scope is `src/api/` + `src/frontend/` only — no recorder/worker/compose/nginx 
   vitest 26 → 37; App default-selection tested BOTH via a full jsdom App render AND the pure
   `pickInitialFolder` unit tests. Verified in node:26-bookworm:
   `npm ci && npm test -- --run && npm run build` green (exit 0).
-Next: review + merge.
+MERGE (2026-10-23): semantic review APPROVED (one non-blocking `sort_order` TS-type note — the
+frontend `StreamRecord.sort_order: number` is slightly looser than the backend's nullable column, but
+the migration backfills every row and `createStream` always assigns, so admin reads never return null;
+accepted as-is). Fast checks re-run green in node:26-bookworm (api 177, frontend 37, build exit 0). The
+rebase onto `main` (tip d7b1ed8) was a no-op — `stream-ordering` was already two commits on that tip —
+so `main` was fast-forwarded to `stream-ordering` (main == 88fbf71). NOT pushed to origin yet (merge
+committed locally only).
 
 ### `stream-url-validation` — IN REVIEW (item 14: NON-BLOCKING "Test" stream-URL reachability probe; NO schema change)
 Isolated git worktree at `.worktrees/stream-url-validation` on branch `stream-url-validation`.
@@ -967,12 +987,16 @@ existing startup catch-up, but triggered by a stream being ADDED rather than by 
 A cluster of related ordering/organization features for the stream list (the data-model parts can
 land before the later full frontend overhaul; the richer UI pieces pair with it):
 - [ ] Manual ORDER of the logger/stream list: let the user arrange the streams in a chosen order
-      (not just insertion/id order). Needs a `sort_order`/`position` column on the `streams` table
-      (+ migration), ordering applied in GET /api/settings / /api/streams, and a reorder UI in the
-      admin screen (drag-handle or up/down arrows) that persists the new order.
-- [ ] DEFAULT stream selectable from the dashboard: an app_config key (e.g. `default_stream_folder`)
-      + a control in the admin screen to pick it; the player preselects/loads that stream on open.
-      Validate the chosen folder still exists.
+      (not just insertion/id order). BACKEND DONE on branch `stream-ordering` (FEAT-001): additive
+      `sort_order` column + idempotent migration, ordering applied in GET /api/settings / /api/streams,
+      and a `PUT /api/streams/reorder` persistence endpoint. REMAINING (FEAT-002, frontend): the
+      reorder UI in the admin screen (drag-handle or up/down arrows) that calls the endpoint.
+- [ ] DEFAULT stream selectable from the dashboard: an app_config key `default_stream_folder` + a
+      control in the admin screen to pick it; the player preselects/loads that stream on open.
+      Validate the chosen folder still exists. BACKEND DONE on branch `stream-ordering` (FEAT-001):
+      key + validation, `GET /api/app-config/public` now returns `default_stream_folder`, and a
+      `PUT /api/app-config/default-stream` setter that validates the folder exists / clears on empty.
+      REMAINING (FEAT-002, frontend): the admin picker control + player preselect.
 - [ ] COUNTRY-GROUPED view: show the stream list grouped by country with the stations indented
       under each country. The user must be able to order the COUNTRIES themselves AND order the
       stations WITHIN each country. Data model: a country ordering + a per-country station ordering
@@ -1020,6 +1044,97 @@ into FEAT-001 (shared planner) + FEAT-002 (worker job type + UI + seed):
       + handler tests, `jobs-schema.test.js` now asserts 3 seeded schedules. The scheduler UI + job
       viewer are data-driven, so the card + Run-now surface automatically.
 
+### 21. Admin screen: overview of streams that are NOT working (user wish, 2026-10-23)
+The user wants the `/settings` admin screen to show, at a glance, which streams are currently
+failing / not recording — a health/status panel for broken streams. Scope to decide at build time:
+- [ ] Define "not working": no recording row for the current (or most recent expected) hour-slot,
+      a `partial`/`missing` status, repeated recorder restarts/backoff for that stream, or a stream
+      the recorder cannot connect to at all. The `recordings` table (Chunk C) + the recorder's
+      per-stream supervision/backoff state are the natural data sources.
+- [ ] Surface it in the admin screen as a dedicated panel (sits next to the existing
+      RecordingsAnalysis / WorkerStatus panels): list the problem streams with the symptom (last
+      successful hour, consecutive failures, last error) rather than only raw gap counts.
+- [ ] Decide the signal source: derive from the existing `recordings` rows + analysis gap logic
+      (no new backend state), and/or have the recorder persist a per-stream health/last-error field
+      (e.g. in `app_config` or a small `stream_health` table) that the api exposes behind requireAuth.
+- [ ] Likely a new requireAuth api endpoint (e.g. `GET /api/analysis/stream-health` or
+      `/api/streams/health`) + a frontend panel consuming it.
+Order: pairs with item 18 (reconcile) and item 8's analysis view — all read the `recordings` table.
+Touches api + frontend; sequence AFTER the OpenAPI work (item 20) and ideally alongside/after item 18
+so the health signal and reconcile share one view of recording state. Needs a build-time decision on
+how deep the "not working" detection goes (pure recordings-gap derivation vs. recorder-persisted
+health state).
+
+### 22. Per-stream recording quality: configurable codec, bitrate, and bit depth (user wish, 2026-10-23)
+The user wants to set the audio CODEC, BITRATE, and BIT DEPTH per stream, used by the recorder when
+capturing that stream. Today the recorder records with fixed ffmpeg settings; these become
+per-stream, admin-editable fields.
+- [ ] Data model: add per-stream recording-quality columns to the `streams` table (+ migration) —
+      e.g. `codec` (mp3/aac/opus/flac/pcm...), `bitrate` (kbps, for lossy codecs), `bit_depth`
+      (16/24, for PCM/lossless). Decide sensible defaults that match the current fixed behavior so
+      existing streams keep recording identically after the migration.
+- [ ] Validation: codec from an allowlist; bitrate/bit-depth constrained to values valid for the
+      chosen codec (bitrate is meaningless for lossless; bit depth is meaningless for lossy) — the
+      admin form should only offer the combinations that make sense per codec.
+- [ ] Recorder: map the per-stream fields to the ffmpeg args (currently execFileSync array args),
+      and reflect the codec in the OUTPUT FILE EXTENSION/container (today everything is `.mp3`; a
+      flac/opus/aac stream needs the right extension + the peak-file + browse/player paths updated
+      to not assume `.mp3`). This is the biggest ripple — the `.mp3` assumption is wired through the
+      recorder, worker peakfilegenerator, cleaner, recordings parser, and the frontend player. Audit
+      every `.mp3` assumption before changing the container.
+- [ ] Admin UI: codec/bitrate/bit-depth controls in the stream add/edit form.
+Order: touches recorder + worker + api + frontend + schema — a sizeable cross-cutting feature.
+Needs a build-time decision on which codecs/containers to support and how to handle the deep `.mp3`
+assumption. Sequence as its own workflow; coordinate with item 23 (storage estimate reads the same
+per-stream quality settings).
+
+### 23. Admin screen: storage estimate for current settings (user wish, 2026-10-23)
+The user wants to see an ESTIMATE of how much data the application will store given the current
+settings — a projected disk-usage figure shown in the admin screen.
+- [ ] Compute an estimate from: the number of streams, each stream's recording quality (codec +
+      bitrate + bit depth — see item 22; until that lands, use the current fixed encoding), and the
+      log-retention window (hours) that bounds how much is kept on disk at steady state. Roughly:
+      per-stream bytes/hour (derived from bitrate, or measured from existing recordings) × retention
+      hours, summed over all streams.
+- [ ] Show it in the admin screen (next to retention / the analysis panels): projected steady-state
+      total, ideally a per-stream breakdown, and optionally compare against actual current on-disk
+      usage (the `recordings` table already tracks `size_bytes`, so a measured bytes/hour per stream
+      is available as a more accurate basis than a theoretical bitrate calc).
+- [ ] Likely a requireAuth api endpoint (e.g. `GET /api/analysis/storage-estimate`) returning the
+      projection + a frontend panel. Pure calculation logic should be unit-tested (node:test).
+Order: depends on retention config (already in the DB) and benefits from item 22's per-stream
+quality fields; most accurate if it uses measured `size_bytes` from the `recordings` table. Touches
+api + frontend. Sequence after item 22 (or build the measured-bytes version first and refine once
+item 22's per-stream quality exists).
+
+### 24. Live auto-refresh of the currently-recording hour in the player (user wish, 2026-10-23)
+Problem: when the user opens the hour that is CURRENTLY being recorded, the player loads a snapshot —
+the mp3 and the peak `.json` as they were at open time — and never updates, so newly-recorded audio
+and the growing waveform don't appear without a manual reload.
+CHOSEN APPROACH (brainstormed with user, 2026-10-23): periodic refresh, NOT incremental peak append.
+- audiowaveform (BBC, what the worker uses) CANNOT append to / incrementally extend an existing peak
+  file — it builds the whole peak file in memory and writes it once (see bbc/audiowaveform issue #100,
+  which is about chunked WRITING for memory, not append). Rejected incremental-append and a custom
+  waveform-data.js DSP pipeline as over-engineering for hour-sized files (a full regen of one hour's
+  peaks is only tens of KB and cheap).
+- [ ] Backend: periodically REGENERATE the peak `.json` for the current-hour file only (e.g. every
+      30-60s) while that hour is still recording, overwriting the existing `.json`. Fits the existing
+      worker/job model (a lightweight current-hour peak refresh) or a small recorder-side tick. Stop
+      regenerating once the hour is finalized (the normal post-hour peakfilegenerator run produces the
+      final file).
+- [ ] Frontend: detect that the selected hour IS the current hour and poll/reload the source
+      periodically (reload the mp3 — it has grown — and the refreshed peak `.json`), plus a manual
+      "refresh" button as a fallback. Only poll for the live hour; past hours are static.
+- [ ] Edge cases to handle: the peak `.json` may not exist yet for the current hour (show the mp3 /
+      a partial or empty waveform gracefully, don't error); a mid-hour recorder restart writes
+      `.partN` SEGMENTS (recorder-resilience), so "the current hour" can be multiple files — decide
+      whether live refresh follows the primary file only or stitches segments; ensure cache headers
+      (api/nginx) don't serve a stale mp3/`.json` for the live hour.
+Order: mostly frontend + a small backend peak-refresh; reads the same recording-state as items 8/18/21.
+Touches recorder-or-worker + api/nginx (cache headers) + frontend. Needs a build-time decision on the
+regen cadence and the `.partN` segment handling. No new dependency (reuse audiowaveform via periodic
+regen).
+
 ### 19. Triage the first Dependabot PRs (opened 2026-10-23; user wants these picked up)
 Dependabot's first run opened 10 PRs. `gh` is installed and authenticated as `denhoo4`. CI
 (GitHub Actions) ran on each; status captured 2026-10-23:
@@ -1041,6 +1156,44 @@ Dependabot's first run opened 10 PRs. `gh` is installed and authenticated as `de
   #10) as ONE bundled frontend-toolchain upgrade: do it in a worktree, update all together, fix the
   vite 8 / vitest 5 config/API changes, get the frontend build + vitest green, then close the
   superseded individual Dependabot PRs.
+
+IN PROGRESS (2026-10-23): the GREEN PRs #3/#5/#7/#9 are merged onto branch
+`frontend-toolchain-upgrade` (worktree `.worktrees/frontend-toolchain-upgrade`). The bundled RED
+upgrade is planned at `.agents/tasks/frontend-toolchain-upgrade-2026-10-23/plan.md`: bump react/
+react-dom → ^19.3.1 (+ @types/react ^19.3.0, @types/react-dom ^19.1.0), @vitejs/plugin-react →
+^6.1.2, vite → ^8.3.4, vitest + @vitest/coverage-v8 → ^5.0.5, all in `src/frontend/package.json`,
+then `npm install` to regen the lockfile. Known breaking change found: React 19's `@types/react`
+makes `useRef<HTMLDivElement>(null)` return `RefObject<HTMLDivElement | null>`, so the
+`UseWavesurfer.containerRef` interface field in `src/frontend/src/useWavesurfer.ts` must widen to
+`RefObject<HTMLDivElement | null>`. The minimal vite/vitest configs are expected to carry over
+unchanged (public API shapes stable across these majors); build + `vitest --run` are the authority.
+All verification runs inside `node:26-bookworm` (host has no node); the superseded PRs are closed
+after merge.
+CODED + VERIFIED (2026-10-23) on branch `frontend-toolchain-upgrade`: all eight version ranges
+bumped in `src/frontend/package.json` and the lockfile regenerated via `npm install` (resolved
+react/react-dom 19.3.1, @types/react 19.3.0, @types/react-dom 19.3.0, vite 8.3.5,
+@vitejs/plugin-react 6.1.2, vitest + @vitest/coverage-v8 5.0.5; jsdom/wavesurfer/typescript/
+testing-library untouched). Two breaking changes fixed: (1) the anticipated React-19 ref widening of
+`UseWavesurfer.containerRef` to `RefObject<HTMLDivElement | null>` in `src/useWavesurfer.ts`; (2) an
+additional vitest-5 type break — `@testing-library/jest-dom` v6 only augments vitest's `Assertion`
+via its `./vitest` entrypoint, so `src/test/setup.ts` now imports `@testing-library/jest-dom/vitest`
+and `tsconfig.app.json`'s `types` lists `@testing-library/jest-dom/vitest` (fixes
+`toBeInTheDocument`/`toBeDisabled`/etc. "does not exist on Assertion" errors). The minimal vite/
+vitest configs carried over unchanged. All four verifications pass GREEN in `node:26-bookworm`:
+`npm install` exit 0, `npm run build` (tsc -b + vite 8) exit 0, `npm run test -- --run` 20/20 across
+7 files, `npm run test:coverage` (v8, report-only) exit 0, plus a `npm ci && build && test`
+reproducibility run exit 0. Evidence: `.agents/tasks/frontend-toolchain-upgrade-2026-10-23/verification.md`.
+Committed on the branch; NOT pushed/merged (handled by the merge/finalize step, which also closes the
+superseded Dependabot PRs #4/#6/#8/#10/#11/#12).
+REVIEW (2026-10-23): semantic review APPROVED — gate
+`.agents/tasks/frontend-toolchain-upgrade-2026-10-23/review.json` `verdict=APPROVED`, NO blocking
+findings. package.json + regenerated lockfile match the target matrix (all resolved versions inside
+their ranges, jsdom left at 30.1.3), the two breaking-change fixes (React-19 ref widening + jest-dom
+`/vitest` entrypoint re-wire) are sound, the minimal vite/vitest configs needed no migration (coverage
+stays v8 report-only), and the four GREEN verification commands are evidenced in verification.md
+(independently spot-checked the lockfile resolved versions only; suites not re-run per the review
+contract). Narrative: `.agents/tasks/frontend-toolchain-upgrade-2026-10-23/review.md`. Next: the
+merge/finalize step.
 APPROACH when resuming: `gh pr list`; for each GREEN PR fetch the branch, run the relevant
 service's `npm ci && npm test` (+ `docker compose build` for #3) in node:26-bookworm locally to
 confirm, then `gh pr merge --squash`. Merge order matters (shared frontend package.json/lockfile):
@@ -1049,7 +1202,7 @@ major but CI-green — still verify before merging.
 
 ### 20. Decision point: API docs — add OpenAPI/Swagger to Express vs. migrate api to FastAPI
 DECIDED (user, 2026-10-23): Option 1 (OpenAPI docs on the existing Express api), NOT a FastAPI rewrite.
-IMPLEMENTED on branch `api-openapi-docs` (worktree `.worktrees/api-openapi-docs`), awaiting review/merge.
+DONE + MERGED to main (fast-forward == a60165a) from branch `api-openapi-docs`.
 - [x] Option 1 (cheap, recommended if the goal is just docs/validation): add OpenAPI docs to the
       EXISTING Express api. Prefer a schema-first approach (e.g. `zod` + `zod-to-openapi`) so the
       spec stays in sync with the code (closest to the FastAPI feel), served via `swagger-ui-express`
@@ -1067,33 +1220,46 @@ IMPLEMENTED on branch `api-openapi-docs` (worktree `.worktrees/api-openapi-docs`
       integration). Verified in node:26-bookworm: 119 api tests pass (114 existing + 5 new), and a
       throwaway-container boot smoke on an ALTERNATE port confirmed anon `/api/docs.json` + `/api/docs`
       → 401 and `/healthz` → `{status:ok}`.
-- [ ] Option 2 (big, only with a broader motive): migrate the api service to FastAPI (Python), which
+- [ ] Option 2 (big, only with a broader motive) — REJECTED: migrate the api service to FastAPI (Python), which
       ships Swagger `/docs` + ReDoc `/redoc` automatically. This is a full rewrite of ONE service in
       another language (all routes incl. SSE, Argon2id auth + session store, the node:sqlite DB layer
       shared with the Node worker/recorder, ffmpeg call, Dockerfile, AND the api test suite). High
       effort/risk, no functionality gain — justified only if moving the backend to Python for other
       reasons (Python audio/data/ML ecosystem), NOT merely for docs.
 Recommendation: do NOT migrate just for docs — Option 1 (zod) gets ~80% of the FastAPI feel for a
-fraction of the effort. Decide deliberately before building; not started.
+fraction of the effort. DECIDED in favour of Option 1; DONE and MERGED to main (== a60165a).
 
 ### 14. Validate stream URLs are reachable/valid when setting them (user wish)
-Two levels — decide at build time how deep to go:
-- [ ] Format validation (already done in settings-db-core / stream CRUD: must be a valid http(s)
-      URL). Keep this.
-- [x] DONE on branch `stream-url-validation` (NON-BLOCKING "Test" button, NOT a save gate — user
-      decision): new `POST /api/streams/test-url` (requireAuth) in src/api/routes/api.js backed by
-      `src/api/lib/probe-stream-url.js`. It re-runs the EXISTING `validateUrl` (http(s) only → 400 on
-      malformed/non-http(s)), then probes via built-in node:http/node:https (NO ffprobe, NO child
-      process, NO shell — the untrusted URL goes through `new URL()` + the native request options,
-      never a command string) with a hard 6 s timeout and ≤3 http(s)-only redirect hops, reading only
-      status + headers. Returns `{reachable, status?, contentType?, detail}`; classifies 2xx+audio/
-      ICY/HLS → reachable, non-2xx / non-audio / DNS / timeout → reachable:false + short detail; never
-      500s for the advisory helper. Documented in src/api/openapi/spec.js. Frontend: typed
-      `testStreamUrl` client in src/frontend/src/api.ts + a `type="button"` "Test" button in
-      StreamTable.tsx with an `aria-live` result region (green "Reachable" / red "Not reachable:
-      <detail>"); it never saves and never gates the save path. Format validation stays the ONLY hard
-      gate on create/update. Verified in node:26-bookworm: api 158 node:test green (new probe + route
-      suites), frontend 26 vitest green + `tsc -b && vite build` clean. In review.
+DECIDED (user, 2026-10-23): NON-BLOCKING "Test" button, NOT a hard block on save — a stream can be
+temporarily down, so saving must never be blocked by a transient outage. FORMAT validation stays the
+only hard gate on create/update; reachability is a separate, explicit, admin-triggered probe.
+DONE + MERGED to main (fast-forward == d7b1ed8) from branch `stream-url-validation`; branch +
+worktree cleaned up. Implementation plan at
+`.agents/tasks/stream-url-validation-2026-10-23/plan.md`; semantic review APPROVED (no blocking
+findings — one non-blocking note: SSRF IP/CIDR denylist intentionally absent, an accepted admin-only
+trade-off) at `.agents/tasks/stream-url-validation-2026-10-23/review.md` / `review.json`. Verified in
+node:26-bookworm: api 158/158, frontend 26/26 + clean `tsc -b && vite build`.
+Scope is `src/api/` + `src/frontend/` only; no schema/recorder/worker/compose/nginx/journal_mode
+change, and the save path does NOT depend on reachability.
+- [x] Format validation (already done in stream CRUD: must be a valid http(s) URL). Kept as the only
+      hard save-gate — unchanged.
+- [x] NEW `POST /api/streams/test-url` (requireAuth): re-validates the url (reuse `validateUrl`,
+      400 on malformed/non-http(s)), then a BOUNDED HTTP(S) GET probe (built-in `node:http`/`https`,
+      6s hard timeout, ≤3 http(s)-only redirect hops) that inspects status + content-type/ICY headers
+      (audio/*, application/ogg, HLS mpegurl, icy-* → audio) and returns
+      `{reachable, status?, contentType?, detail}`. PROBE APPROACH DECISION: HTTP header inspection
+      over ffprobe (a live radio stream never hits EOF, so ffprobe must always be killed by timeout;
+      header inspection is cheaper, deterministic, and gives a clean injectable seam for unit tests).
+      ffmpeg/ffprobe IS in the api image but is not used here. SSRF: admin-only, so http/https +
+      bounded timeout + header-only read, no IP denylist (would break legit radio hosts). Probe logic
+      is an injectable module `src/api/lib/probe-stream-url.js` unit-tested with a FAKE transport (no
+      real network); route tested behind requireAuth (401 anon). Documented in `openapi/spec.js`.
+- [x] NEW frontend "Test" button next to the URL field in the add/edit form (`StreamTable.tsx`) that
+      calls a typed `testStreamUrl()` client in `api.ts`, shows a pending state, and renders the
+      result inline (green reachable / red not-reachable + detail) via an `aria-live` region —
+      WITHOUT blocking or auto-saving.
+Order: small-to-medium admin feature; built standalone on the `stream-url-validation` worktree,
+review APPROVED, MERGED to main (== d7b1ed8).
 
 ### 15. Stop replacing `_` with a space in stream names (user decision 2026-10-23)
 History: the project was originally built requiring stream names to use `_` instead of spaces
