@@ -130,44 +130,46 @@ export interface AnalysisGaps {
 }
 
 /**
- * One stream's health classification as returned inside
- * GET /api/analysis/stream-health (requireAuth). `status` summarises recent
- * recording coverage over the window: ok (every past slot complete), degraded
- * (recording something but with gaps/partials), down (nothing good recently),
- * never (no recordings ever). `lastSuccessfulSlot` is the most recent complete
- * hour-slot or null; `consecutiveMissing` is the trailing run of failing past
- * hours. See services/stream-health.js::deriveStreamHealth.
+ * One stream's TWO-SIGNAL health as returned inside
+ * GET /api/analysis/stream-health (requireAuth):
+ *   - `recordingNow`: is this stream recording the CURRENT Amsterdam-local
+ *     hour-slot (the green check). Decided ONLY from the current slot; the 24h
+ *     gap history does NOT affect it.
+ *   - `last24h`: a purely informational gap summary over the past 24h. `complete`
+ *     when there are no gaps; `gaps` lists the missing Amsterdam-local
+ *     {date, hour} slots (the in-progress current hour is excluded).
+ *   - `lastSlotStatus`: the current slot's row status (or null) — a small hint.
+ * See services/stream-health.js::deriveStreamHealth.
  */
 export interface StreamHealthEntry {
   folder: string;
   name: string;
-  status: "ok" | "degraded" | "down" | "never";
-  lastSuccessfulSlot: { date: string; hour: string } | null;
-  consecutiveMissing: number;
-  expectedInWindow: number;
-  presentInWindow: number;
+  recordingNow: boolean;
+  last24h: {
+    complete: boolean;
+    gapCount: number;
+    gaps: { date: string; hour: string }[];
+  };
+  lastSlotStatus: string | null;
 }
 
 /** Roll-up counts across all streams in a stream-health response. */
 export interface StreamHealthCounts {
   total: number;
-  unhealthy: number;
-  ok: number;
-  degraded: number;
-  down: number;
-  never: number;
+  recordingNow: number;
+  notRecording: number;
 }
 
 /**
  * Shape of GET /api/analysis/stream-health?windowHours=N (requireAuth):
- * per-stream health derived from recent recordings coverage plus an overall
- * unhealthy roll-up. `generated_slot` is the current local hour-slot the window
- * ends at; `window_hours` is the window length (default 24).
+ * per-stream two-signal health (recording-now check + last-24h gap summary)
+ * plus a roll-up of how many streams are recording right now. `generated_slot`
+ * is the current Amsterdam-local hour-slot the window ends at; `window_hours`
+ * is the window length (default 24).
  */
 export interface StreamHealthResponse {
   window_hours: number;
   generated_slot: { date: string; hour: string };
-  unhealthy_count: number;
   counts: StreamHealthCounts;
   streams: StreamHealthEntry[];
 }
@@ -784,10 +786,10 @@ export async function getAnalysisGaps(
 }
 
 /**
- * GET /api/analysis/stream-health?windowHours=N -> per-stream health
- * (ok|degraded|down|never) over a recent window plus an overall unhealthy
- * count. windowHours is optional (default 24, server-side range 1..168); throws
- * ApiError on a 400 validation failure.
+ * GET /api/analysis/stream-health?windowHours=N -> per-stream two-signal health
+ * (recording-now check + last-24h gap summary) over a recent window plus a
+ * recording-now roll-up. windowHours is optional (default 24, server-side range
+ * 1..168); throws ApiError on a 400 validation failure.
  */
 export async function getStreamHealth(
   windowHours?: number,

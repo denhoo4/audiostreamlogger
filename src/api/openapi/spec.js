@@ -183,13 +183,15 @@ const StreamHealth = z
     .object({
         folder: z.string(),
         name: z.string(),
-        status: z.enum(['ok', 'degraded', 'down', 'never']),
-        lastSuccessfulSlot: z
-            .object({ date: z.string(), hour: z.string() })
-            .nullable(),
-        consecutiveMissing: z.number().int(),
-        expectedInWindow: z.number().int(),
-        presentInWindow: z.number().int(),
+        recordingNow: z.boolean(),
+        last24h: z.object({
+            complete: z.boolean(),
+            gapCount: z.number().int(),
+            gaps: z.array(
+                z.object({ date: z.string(), hour: z.string() })
+            ),
+        }),
+        lastSlotStatus: z.string().nullable(),
     })
     .openapi('StreamHealth');
 
@@ -197,14 +199,10 @@ const StreamHealthResponse = z
     .object({
         window_hours: z.number().int(),
         generated_slot: z.object({ date: z.string(), hour: z.string() }),
-        unhealthy_count: z.number().int(),
         counts: z.object({
             total: z.number().int(),
-            unhealthy: z.number().int(),
-            ok: z.number().int(),
-            degraded: z.number().int(),
-            down: z.number().int(),
-            never: z.number().int(),
+            recordingNow: z.number().int(),
+            notRecording: z.number().int(),
         }),
         streams: z.array(StreamHealth),
     })
@@ -742,7 +740,8 @@ function buildOpenApiDocument() {
         method: 'get',
         path: '/api/analysis/stream-health',
         tags: ['analysis'],
-        summary: 'Per-stream health (ok|degraded|down|never) over a recent window',
+        summary:
+            'Per-stream two-signal health: recording-now check + last-24h gap summary',
         security: authed,
         request: {
             query: z.object({

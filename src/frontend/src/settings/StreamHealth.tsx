@@ -6,47 +6,29 @@ import {
   type StreamHealthResponse,
 } from "../api";
 
-// Order problem streams by severity so the worst offenders sit at the top.
-const STATUS_RANK: Record<StreamHealthEntry["status"], number> = {
-  down: 0,
-  degraded: 1,
-  never: 2,
-  ok: 3,
-};
-
-/** Human label for a status badge. */
-function statusLabel(status: StreamHealthEntry["status"]): string {
-  switch (status) {
-    case "down":
-      return "down";
-    case "degraded":
-      return "degraded";
-    case "never":
-      return "never recorded";
-    case "ok":
-      return "ok";
+/**
+ * Short, informational "Last 24h" gap summary for a stream: "complete" when
+ * there are no gaps, else the gap count plus the Amsterdam-local hour labels
+ * (HH:00) of the missing slots, e.g. "3 gaps: 02:00, 05:00, 06:00". The
+ * in-progress current hour is already excluded server-side.
+ */
+function formatLast24h(last24h: StreamHealthEntry["last24h"]): string {
+  if (last24h.complete) {
+    return "complete";
   }
-}
-
-/** 'YYYY-MM-DD HH:00' for a last-successful slot, or a dash when null. */
-function formatSlot(slot: { date: string; hour: string } | null): string {
-  if (!slot) return "—";
-  return `${slot.date} ${slot.hour}:00`;
-}
-
-/** "N missing hours" for a trailing failing run, or a dash when zero. */
-function formatMissing(count: number): string {
-  if (count <= 0) return "—";
-  return `${count} missing hour${count === 1 ? "" : "s"}`;
+  const labels = last24h.gaps.map((g) => `${g.hour}:00`).join(", ");
+  return `${last24h.gapCount} gap${last24h.gapCount === 1 ? "" : "s"}: ${labels}`;
 }
 
 /**
  * Stream health overview (TODO item 21). On mount it loads
- * GET /api/analysis/stream-health (default 24h window) and surfaces, at a
- * glance, which streams are NOT working. Problem streams (down/degraded/never)
- * are listed first with their symptom — a status badge, the trailing
- * consecutive-missing count, and the last successful hour (or "no recordings
- * yet" for a never-recorded stream). Healthy streams are summarised compactly.
+ * GET /api/analysis/stream-health (default 24h window) and shows, per stream,
+ * TWO independent signals in two columns:
+ *   - "Now": a green check when the stream is recording the CURRENT hour-slot,
+ *     else a "not recording" marker. Decided ONLY from the current hour — the
+ *     24h gap history never drives this column.
+ *   - "Last 24h": a short gap summary ("complete" or "N gaps: HH:00, …").
+ * Streams that are NOT recording now sort to the top so problems are visible.
  * Loading + ApiError states mirror WorkerStatus.tsx / RecordingsAnalysis.tsx.
  */
 export default function StreamHealth() {
@@ -78,12 +60,11 @@ export default function StreamHealth() {
     };
   }, []);
 
-  const problems =
+  // Not-recording streams sort to the top (recordingNow ascending: false first).
+  const streams =
     data?.streams
-      .filter((s) => s.status !== "ok")
       .slice()
-      .sort((a, b) => STATUS_RANK[a.status] - STATUS_RANK[b.status]) ?? [];
-  const okCount = data?.counts.ok ?? 0;
+      .sort((a, b) => Number(a.recordingNow) - Number(b.recordingNow)) ?? [];
 
   return (
     <section className="settings-section">
@@ -100,48 +81,54 @@ export default function StreamHealth() {
       ) : data ? (
         <>
           <p>
-            {data.unhealthy_count === 0
-              ? `All ${data.counts.total} streams OK`
-              : `${data.unhealthy_count} stream${
-                  data.unhealthy_count === 1 ? "" : "s"
-                } need attention (last ${data.window_hours}h)`}
+            {`${data.counts.recordingNow}/${data.counts.total} stream${
+              data.counts.total === 1 ? "" : "s"
+            } recording now (last ${data.window_hours}h)`}
           </p>
 
-          {problems.length > 0 && (
-            <ul className="stream-health-list">
-              {problems.map((s) => (
-                <li
-                  key={s.folder}
-                  className={`stream-health-item stream-health-item--${s.status}`}
-                >
-                  <span
-                    className={`health-badge health-badge--${s.status}`}
-                  >
-                    {statusLabel(s.status)}
-                  </span>{" "}
-                  <span className="stream-health-name">{s.name}</span>{" "}
-                  <span className="stream-health-folder">({s.folder})</span>
-                  {" — "}
-                  {s.status === "never" ? (
-                    <span className="stream-health-symptom">
-                      no recordings yet
-                    </span>
-                  ) : (
-                    <span className="stream-health-symptom">
-                      {formatMissing(s.consecutiveMissing)}, last success{" "}
-                      {formatSlot(s.lastSuccessfulSlot)}
-                    </span>
-                  )}
-                </li>
+          <table className="settings-table stream-health-table">
+            <thead>
+              <tr>
+                <th>Stream</th>
+                <th>Now</th>
+                <th>Last 24h</th>
+              </tr>
+            </thead>
+            <tbody>
+              {streams.map((s) => (
+                <tr key={s.folder} className="stream-health-row">
+                  <td className="stream-health-name">
+                    {s.name}{" "}
+                    <span className="stream-health-folder">({s.folder})</span>
+                  </td>
+                  <td className="stream-health-now">
+                    {s.recordingNow ? (
+                      <span
+                        className="stream-health-check"
+                        role="img"
+                        aria-label="recording now"
+                        title="recording now"
+                      >
+                        ✓
+                      </span>
+                    ) : (
+                      <span
+                        className="stream-health-nocheck"
+                        role="img"
+                        aria-label="not recording"
+                        title="not recording"
+                      >
+                        ✗
+                      </span>
+                    )}
+                  </td>
+                  <td className="stream-health-last24h">
+                    {formatLast24h(s.last24h)}
+                  </td>
+                </tr>
               ))}
-            </ul>
-          )}
-
-          {data.unhealthy_count > 0 && (
-            <p className="stream-health-ok-summary">
-              {okCount} stream{okCount === 1 ? "" : "s"} OK
-            </p>
-          )}
+            </tbody>
+          </table>
         </>
       ) : null}
     </section>

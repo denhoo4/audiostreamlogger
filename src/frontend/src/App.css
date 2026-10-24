@@ -169,3 +169,25 @@
 .job-badge-neutral {
   background-color: #888888;
 }
+
+/* Stream health two-signal table: Now (recording check) + Last 24h summary. */
+.stream-health-table .stream-health-now {
+  text-align: center;
+  white-space: nowrap;
+}
+
+.stream-health-folder {
+  color: #666666;
+}
+
+/* Green check when recording now; red marker otherwise. Both carry an
+   aria-label/title so the signal never relies on colour alone. */
+.stream-health-check {
+  color: #0a7a0a;
+  font-weight: bold;
+}
+
+.stream-health-nocheck {
+  color: #b00020;
+  font-weight: bold;
+}

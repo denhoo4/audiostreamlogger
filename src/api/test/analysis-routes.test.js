@@ -67,37 +67,33 @@ before(async () => {
     });
 
     // Seed streams for the stream-health route (it joins the `streams` table).
-    // nl_ok gets fresh "now"-relative complete rows so it is ok; nl_never has
-    // no recordings at all so it classifies as never. The ok stream uses its
-    // OWN folder (nl_ok) so the fixed-date summary/gaps assertions on nl_one
-    // above stay exact. Because the route derives its window from the server
-    // clock, seed the ok stream relative to new Date().
+    // nl_now gets a `recording` row at the Amsterdam-local CURRENT hour so it
+    // reads recordingNow=true; nl_idle has no current-slot row so it reads
+    // recordingNow=false; nl_utc models the timezone regression (see the
+    // stream-health test below). These use their OWN folders so the fixed-date
+    // summary/gaps assertions on nl_one stay exact.
     const streams = require('../services/streams');
     streams.createStream({
         country: 'NL',
-        name: 'NL OK',
-        folder: 'nl_ok',
-        url: 'https://example.com/nl_ok',
+        name: 'NL Now',
+        folder: 'nl_now',
+        url: 'https://example.com/nl_now',
     });
     streams.createStream({
         country: 'NL',
-        name: 'NL Never',
-        folder: 'nl_never',
-        url: 'https://example.com/nl_never',
+        name: 'NL Idle',
+        folder: 'nl_idle',
+        url: 'https://example.com/nl_idle',
     });
-    // nl_down models a stream that recorded in the past and then STOPPED: its
-    // only complete row is far older than any health window, so the route's
-    // window-scoped listRecentByDate never fetches it — but the all-time
-    // latestCompleteByFolder lookup does. It must classify `down`, NOT `never`.
-    // (This is the regression the reviewer flagged: stopped-and-down vs
-    // brand-new must be distinguishable through the REAL endpoint.) The old row
-    // itself is seeded inside the stream-health test, not here, so the
-    // fixed-date summary/gaps assertions on nl_one only (one folder) stay exact.
+    // nl_utc: its ONLY row is at the UTC current hour. When Amsterdam ≠ UTC
+    // (which it always is — CET +1 / CEST +2) that is NOT the Amsterdam current
+    // slot, so recordingNow must be false. Under the OLD UTC/getHours() logic it
+    // would wrongly read true — this is the timezone regression guard.
     streams.createStream({
         country: 'NL',
-        name: 'NL Down',
-        folder: 'nl_down',
-        url: 'https://example.com/nl_down',
+        name: 'NL Utc',
+        folder: 'nl_utc',
+        url: 'https://example.com/nl_utc',
     });
 
     const analysisRouter = require('../routes/analysis');
@@ -229,26 +225,39 @@ test('stream-health rejects out-of-range windowHours (400 {field})', async () =>
     assert.strictEqual(tooBig.body.field, 'windowHours');
 });
 
-test('authenticated stream-health returns per-stream health + roll-up', async () => {
+test('authenticated stream-health returns the two-signal shape + roll-up', async () => {
     authenticated = true;
 
-    // Seed the last 24h of complete rows for nl_ok so it is healthy right now.
-    // Done here (not in `before`) so the fixed-date summary/gaps assertions on
-    // nl_one are not affected by these now-relative rows.
+    // Seed rows relative to "now" so the route (which reads its own clock)
+    // classifies them. Done here (not in `before`) so the fixed-date
+    // summary/gaps assertions on nl_one are not affected by these rows. The
+    // route computes the current slot in EUROPE/AMSTERDAM via the SAME
+    // amsterdamSlot helper, so the test seeds against that helper (NOT the
+    // process-local clock) to be timezone-robust on any CI runner.
     const recordings = require('../services/recordings');
-    const pad = (n) => String(n).padStart(2, '0');
-    const localSlot = (d) => ({
-        date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-        hour: pad(d.getHours()),
+    const { amsterdamSlot } = require('../lib/amsterdam-slot');
+    const now = new Date();
+    const amsNow = amsterdamSlot(now);
+
+    // nl_now: a `recording` row at the Amsterdam CURRENT slot → recordingNow true.
+    // Also seed its past 24h complete so last24h is "complete".
+    recordings.upsertRecording(db, {
+        stream_folder: 'nl_now',
+        date: amsNow.date,
+        hour: amsNow.hour,
+        file_path: `/audio/nl_now/nl_now-${amsNow.date}-${amsNow.hour}.mp3`,
+        status: 'recording',
+        duration_seconds: null,
+        size_bytes: null,
+        segment_count: 1,
     });
-    const nowSeed = new Date();
     for (let i = 1; i <= 24; i += 1) {
-        const slot = localSlot(new Date(nowSeed.getTime() - i * 3600 * 1000));
+        const slot = amsterdamSlot(new Date(now.getTime() - i * 3600 * 1000));
         recordings.upsertRecording(db, {
-            stream_folder: 'nl_ok',
+            stream_folder: 'nl_now',
             date: slot.date,
             hour: slot.hour,
-            file_path: `/audio/nl_ok/nl_ok-${slot.date}-${slot.hour}.mp3`,
+            file_path: `/audio/nl_now/nl_now-${slot.date}-${slot.hour}.mp3`,
             status: 'complete',
             duration_seconds: 3600,
             size_bytes: 1000,
@@ -256,62 +265,91 @@ test('authenticated stream-health returns per-stream health + roll-up', async ()
         });
     }
 
-    // nl_down: a single complete row far older than any window, so
-    // listRecentByDate won't fetch it but latestCompleteByFolder will → down.
-    recordings.upsertRecording(db, {
-        stream_folder: 'nl_down',
-        date: '2020-01-01',
-        hour: '00',
-        file_path: '/audio/nl_down/nl_down-2020-01-01-00.mp3',
-        status: 'complete',
-        duration_seconds: 3600,
-        size_bytes: 1000,
-        segment_count: 1,
-    });
-
     const res = await getJson('/api/analysis/stream-health');
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.window_hours, 24);
     assert.ok(res.body.generated_slot && res.body.generated_slot.date);
     assert.ok(Array.isArray(res.body.streams));
-    assert.strictEqual(res.body.streams.length, 3); // nl_ok + nl_never + nl_down
+    assert.strictEqual(res.body.streams.length, 3); // nl_now + nl_idle + nl_utc
 
-    const valid = new Set(['ok', 'degraded', 'down', 'never']);
     for (const s of res.body.streams) {
-        assert.deepStrictEqual(
-            Object.keys(s).sort(),
-            [
-                'consecutiveMissing',
-                'expectedInWindow',
-                'folder',
-                'lastSuccessfulSlot',
-                'name',
-                'presentInWindow',
-                'status',
-            ]
-        );
-        assert.ok(valid.has(s.status), `bad status ${s.status}`);
+        assert.deepStrictEqual(Object.keys(s).sort(), [
+            'folder',
+            'last24h',
+            'lastSlotStatus',
+            'name',
+            'recordingNow',
+        ]);
+        assert.strictEqual(typeof s.recordingNow, 'boolean');
+        assert.strictEqual(typeof s.last24h.complete, 'boolean');
+        assert.strictEqual(typeof s.last24h.gapCount, 'number');
+        assert.ok(Array.isArray(s.last24h.gaps));
     }
 
     const byFolder = Object.fromEntries(
         res.body.streams.map((s) => [s.folder, s])
     );
-    assert.strictEqual(byFolder.nl_ok.status, 'ok');
-    assert.strictEqual(byFolder.nl_never.status, 'never');
-    // The long-stopped stream (only an out-of-window complete) must be `down`,
-    // NOT `never` — proving the all-time last-complete signal flows through the
-    // real route, not just the hand-injected pure-helper test.
-    assert.strictEqual(byFolder.nl_down.status, 'down');
-    assert.notStrictEqual(byFolder.nl_down.lastSuccessfulSlot, null);
-    assert.deepStrictEqual(byFolder.nl_down.lastSuccessfulSlot, {
-        date: '2020-01-01',
-        hour: '00',
+    // nl_now has a recording row at the Amsterdam current slot → green check.
+    assert.strictEqual(byFolder.nl_now.recordingNow, true);
+    assert.strictEqual(byFolder.nl_now.last24h.complete, true);
+    // nl_idle has no rows at all → not recording, and every past slot is a gap.
+    assert.strictEqual(byFolder.nl_idle.recordingNow, false);
+    assert.strictEqual(byFolder.nl_idle.last24h.complete, false);
+
+    // Counts roll up to {total, recordingNow, notRecording}.
+    assert.strictEqual(res.body.counts.total, 3);
+    assert.strictEqual(res.body.counts.recordingNow, 1); // only nl_now
+    assert.strictEqual(res.body.counts.notRecording, 2); // nl_idle + nl_utc
+    assert.strictEqual(res.body.unhealthy_count, undefined);
+});
+
+test('stream-health computes the current slot in Amsterdam time, not UTC (regression)', async () => {
+    authenticated = true;
+
+    const recordings = require('../services/recordings');
+    const { amsterdamSlot } = require('../lib/amsterdam-slot');
+    const now = new Date();
+    const amsNow = amsterdamSlot(now);
+
+    // The UTC current slot. Amsterdam is always ahead of UTC (CET +1 / CEST +2),
+    // so the UTC hour is a DIFFERENT, earlier slot than the Amsterdam hour.
+    const pad = (n) => String(n).padStart(2, '0');
+    const utcSlot = {
+        date: `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(
+            now.getUTCDate()
+        )}`,
+        hour: pad(now.getUTCHours()),
+    };
+
+    // Only seed nl_utc if the UTC slot really differs from the Amsterdam slot
+    // (it always does given the offset, but guard defensively). Its only row is
+    // a `recording` row at the UTC current hour.
+    assert.notDeepStrictEqual(
+        utcSlot,
+        amsNow,
+        'Amsterdam and UTC current slots must differ for this regression guard'
+    );
+    recordings.upsertRecording(db, {
+        stream_folder: 'nl_utc',
+        date: utcSlot.date,
+        hour: utcSlot.hour,
+        file_path: `/audio/nl_utc/nl_utc-${utcSlot.date}-${utcSlot.hour}.mp3`,
+        status: 'recording',
+        duration_seconds: null,
+        size_bytes: null,
+        segment_count: 1,
     });
 
-    // Counts roll up; unhealthy_count == down + degraded + never (non-ok).
-    assert.strictEqual(res.body.counts.total, 3);
-    assert.strictEqual(res.body.counts.ok, 1);
-    assert.strictEqual(res.body.counts.never, 1);
-    assert.strictEqual(res.body.counts.down, 1);
-    assert.strictEqual(res.body.unhealthy_count, 2);
+    const res = await getJson('/api/analysis/stream-health');
+    assert.strictEqual(res.status, 200);
+    // generated_slot must be the AMSTERDAM slot, not the UTC slot.
+    assert.deepStrictEqual(res.body.generated_slot, amsNow);
+
+    const byFolder = Object.fromEntries(
+        res.body.streams.map((s) => [s.folder, s])
+    );
+    // The stream whose only row is at the UTC hour is NOT recording the
+    // Amsterdam current hour → recordingNow false. Under the OLD UTC/getHours()
+    // logic this would have been true: that is the bug this test guards.
+    assert.strictEqual(byFolder.nl_utc.recordingNow, false);
 });

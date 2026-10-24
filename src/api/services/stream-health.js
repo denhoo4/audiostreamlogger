@@ -1,15 +1,22 @@
 /**
- * Pure stream-health derivation — TODO item 21 (admin "what's not working" panel).
+ * Pure stream-health derivation — TODO item 21 (admin "what's working" panel, v2).
  *
- * This module classifies each stream's recent recording coverage into
- * ok | degraded | down | never, derived PURELY from the existing recordings
- * rows + the existing expectedHourSlots/missingSlots helpers. No schema change,
- * no recorder-persisted health state: everything here reads the rows the
- * recorder already writes.
+ * The panel is split into TWO INDEPENDENT signals per stream:
+ *   1. "Now" (green check) — is this stream recording RIGHT NOW. Decided ONLY
+ *      from the row for the CURRENT (in-progress) hour-slot. A current-slot row
+ *      with status `recording` (defensively also `complete`/`partial`, i.e. the
+ *      hour just finalized) → recordingNow = true; no current-slot row → false.
+ *      NO 24h gap count may affect this signal. The in-progress current hour is
+ *      NEVER a "missing" failure.
+ *   2. "Last 24h" — a short, purely informational gap summary over the window's
+ *      PAST slots (strictly before the current slot). It does NOT affect the
+ *      green check. `complete` when there are no gaps, else the list of missing
+ *      Amsterdam-local {date, hour} slots. The in-progress current hour is
+ *      EXCLUDED from the gap list (it is not a gap yet).
  *
  * `deriveStreamHealth` is PURE — no DB, no fs, no Date.now(). The caller
  * (routes/analysis.js) is the single place that reads the server clock and
- * formats the local-time `currentSlot`; the helper walks back `windowHours`
+ * formats the Amsterdam-local `currentSlot`; the helper walks back `windowHours`
  * slots from that injected slot, so node:test covers it deterministically and
  * timezone-independently.
  *
@@ -18,26 +25,10 @@
  * helper can be required and tested without any DB. The window slot walk below
  * mirrors recordings.js::expectedHourSlots exactly (UTC-walked, DST-safe).
  *
- * Boundaries (per stream, over the last `windowHours` slots ending at
- * `currentSlot` inclusive):
- *   - never    — the stream has NO complete recording ever and no rows at all
- *                in the injected set (brand-new stream that never recorded).
- *                "ever" is decided from the injected `lastCompleteByFolder`
- *                all-time signal when provided, NOT from the in-window rows —
- *                this is what keeps a long-stopped stream (which contributes
- *                zero in-window rows) classified `down`, not `never`.
- *   - down     — not never, and NO complete/live-recording slot anywhere in the
- *                recent window (was recording before, nothing good recently).
- *   - degraded — at least one healthy-present slot in the window AND at least
- *                one failure slot (intermittent gaps/partials).
- *   - ok       — every PAST expected slot in the window is healthy-present.
- * Precedence: never > down > degraded > ok.
- *
- * Current-hour grace: the current (in-progress) slot is EXPECTED but legitimately
- * not yet `complete` (status `recording`). It counts toward
- * expectedInWindow/presentInWindow but is NEVER counted as a failure for the
- * down decision or the consecutive-missing streak — only slots STRICTLY BEFORE
- * the current hour can be failures.
+ * Gap definition (encoded in the helper tests): a past window slot is a GAP when
+ * it has NO `complete` row — no row at all, or only a `partial` row. `complete`
+ * = filled; everything else (partial, missing) = gap, matching the user's ask
+ * for "gaps qua opname-tijden".
  */
 /** 'YYYY-MM-DD-HH' key for a {date, hour} slot (stable string compare order). */
 function slotKey(slot) {
@@ -100,7 +91,7 @@ function windowSlots(currentSlot, windowHours) {
 }
 
 /**
- * Per-stream health array derived from recent rows.
+ * Per-stream two-signal health array derived from recent rows.
  *
  * @param {object} args
  * @param {Array<{folder:string, name?:string}>} args.streams
@@ -109,180 +100,85 @@ function windowSlots(currentSlot, windowHours) {
  * @param {Array<{stream_folder:string, date:string, hour:string, status:string}>} args.rows
  *   Recent recordings rows across all folders (the route fetches these once).
  * @param {{date:string, hour:string}} args.currentSlot
- *   The current (in-progress) local hour-slot, injected by the caller.
+ *   The current (in-progress) Amsterdam-local hour-slot, injected by the caller.
  * @param {number} [args.windowHours=24]  Window length in hours.
- * @param {Object<string,string>|Map<string,string>} [args.lastCompleteByFolder]
- *   ALL-TIME latest complete slot key ('YYYY-MM-DD-HH') per folder, independent
- *   of the window. Supplied by the route from a `MAX(date||'-'||hour)` lookup
- *   over every complete row so that `never` means "no complete row EVER" and a
- *   stream that stopped before the window still classifies `down` (not `never`).
- *   When omitted the helper falls back to the latest complete it sees in `rows`,
- *   which only covers the window — so the route MUST pass this for correctness.
- * @returns {Array<{folder, name, status, lastSuccessfulSlot, consecutiveMissing, expectedInWindow, presentInWindow}>}
+ * @returns {Array<{folder, name, recordingNow, last24h:{complete, gapCount, gaps:[{date,hour}]}, lastSlotStatus}>}
+ *   - recordingNow: decided ONLY from the current slot's row status.
+ *   - last24h: gap summary over the PAST slots in the window (current slot
+ *     excluded). `complete` is true when `gapCount === 0`; `gaps` lists the
+ *     missing {date, hour} slots in chronological order.
+ *   - lastSlotStatus: the current slot's row status (or null) — a small hint
+ *     of the stream's current state.
  */
-function deriveStreamHealth({
-    streams,
-    rows,
-    currentSlot,
-    windowHours = 24,
-    lastCompleteByFolder,
-}) {
+function deriveStreamHealth({ streams, rows, currentSlot, windowHours = 24 }) {
     const slots = windowSlots(currentSlot, windowHours);
     const currentKey = slotKey(currentSlot);
 
-    // Normalize the injected all-time last-complete signal into a lookup that
-    // accepts either a Map or a plain object keyed by folder.
-    const allTimeLastComplete = (folder) => {
-        if (!lastCompleteByFolder) {
-            return undefined;
-        }
-        if (lastCompleteByFolder instanceof Map) {
-            return lastCompleteByFolder.get(folder);
-        }
-        return lastCompleteByFolder[folder];
-    };
-
-    // Group rows by folder → Map(slotKey -> status) + track the latest complete.
+    // Group rows by folder → Map(slotKey -> status).
     const byFolder = new Map();
     for (const row of rows || []) {
-        let entry = byFolder.get(row.stream_folder);
-        if (!entry) {
-            entry = { statusBySlot: new Map(), lastComplete: null };
-            byFolder.set(row.stream_folder, entry);
+        let statusBySlot = byFolder.get(row.stream_folder);
+        if (!statusBySlot) {
+            statusBySlot = new Map();
+            byFolder.set(row.stream_folder, statusBySlot);
         }
-        const key = `${row.date}-${row.hour}`;
-        entry.statusBySlot.set(key, row.status);
-        if (row.status === 'complete') {
-            if (entry.lastComplete === null || key > entry.lastComplete) {
-                entry.lastComplete = key;
-            }
-        }
+        statusBySlot.set(`${row.date}-${row.hour}`, row.status);
     }
 
     return (streams || []).map((stream) => {
         const folder = stream.folder;
-        const entry = byFolder.get(folder);
-        const statusBySlot = entry ? entry.statusBySlot : new Map();
-        const inWindowLastComplete = entry ? entry.lastComplete : null;
+        const statusBySlot = byFolder.get(folder) || new Map();
 
-        // Prefer the all-time signal when supplied; otherwise fall back to the
-        // latest complete seen in the (window-scoped) rows. Keep the later of
-        // the two so an in-window complete newer than the stale signal still
-        // wins (defensive; they should agree in practice).
-        const allTime = allTimeLastComplete(folder);
-        let lastCompleteKey = allTime ?? null;
-        if (
-            inWindowLastComplete !== null &&
-            (lastCompleteKey === null || inWindowLastComplete > lastCompleteKey)
-        ) {
-            lastCompleteKey = inWindowLastComplete;
-        }
+        // "Now" signal: decided ONLY from the current slot's row status. A row
+        // with status `recording` (or defensively `complete`/`partial` for the
+        // hour that just finalized) means the stream is recording this hour.
+        const currentStatus = statusBySlot.get(currentKey) ?? null;
+        const recordingNow =
+            currentStatus === 'recording' ||
+            currentStatus === 'complete' ||
+            currentStatus === 'partial';
 
-        // A slot is healthy-present when a row exists and it is complete or (for
-        // the live current hour) recording. Everything else — partial/missing
-        // status or no row at all — is a failure, but only PAST slots count.
-        const isHealthyPresent = (key) => {
-            const st = statusBySlot.get(key);
-            return st === 'complete' || st === 'recording';
-        };
-
-        let expectedInWindow = 0;
-        let presentInWindow = 0;
-        let healthyPastCount = 0;
-        let failurePastCount = 0;
-
+        // "Last 24h" signal: list the PAST window slots (strictly before the
+        // current slot) that have no `complete` row. The in-progress current
+        // slot is excluded — it is never a gap.
+        const gaps = [];
         for (const slot of slots) {
             const key = slotKey(slot);
-            expectedInWindow += 1;
-            const present = isHealthyPresent(key);
-            if (present) {
-                presentInWindow += 1;
-            }
-            // The current in-progress slot is graced: never a failure.
-            if (key < currentKey) {
-                if (present) {
-                    healthyPastCount += 1;
-                } else {
-                    failurePastCount += 1;
-                }
-            }
-        }
-
-        // consecutiveMissing: trailing run of failure slots ending at the most
-        // recent PAST slot (walk backward, stop at the first healthy-present).
-        let consecutiveMissing = 0;
-        for (let i = slots.length - 1; i >= 0; i -= 1) {
-            const key = slotKey(slots[i]);
             if (key >= currentKey) {
-                continue; // skip the graced current (and any future) slot
+                continue; // skip the in-progress current (and any future) slot
             }
-            if (isHealthyPresent(key)) {
-                break;
+            if (statusBySlot.get(key) !== 'complete') {
+                gaps.push({ date: slot.date, hour: slot.hour });
             }
-            consecutiveMissing += 1;
-        }
-
-        const lastSuccessfulSlot =
-            lastCompleteKey === null
-                ? null
-                : {
-                      date: lastCompleteKey.slice(0, 10),
-                      hour: lastCompleteKey.slice(11),
-                  };
-
-        // Classify (precedence never > down > degraded > ok).
-        //
-        // `never` requires BOTH no complete recording EVER (lastCompleteKey is
-        // null — decided from the all-time signal, not just the window) AND no
-        // rows at all in the injected set. A stream that recorded before and
-        // then stopped has a non-null all-time lastCompleteKey, so it skips
-        // `never` and lands in `down` below — this is the stopped-vs-brand-new
-        // distinction the feature requires.
-        let status;
-        const hasAnyRow = statusBySlot.size > 0;
-        if (!hasAnyRow && lastCompleteKey === null) {
-            status = 'never';
-        } else if (healthyPastCount === 0 && failurePastCount > 0) {
-            status = 'down';
-        } else if (failurePastCount > 0) {
-            status = 'degraded';
-        } else {
-            status = 'ok';
         }
 
         return {
             folder,
             name: stream.name ?? folder,
-            status,
-            lastSuccessfulSlot,
-            consecutiveMissing,
-            expectedInWindow,
-            presentInWindow,
+            recordingNow,
+            last24h: {
+                complete: gaps.length === 0,
+                gapCount: gaps.length,
+                gaps,
+            },
+            lastSlotStatus: currentStatus,
         };
     });
 }
 
 /**
  * Roll-up counts for the endpoint headline.
- * @param {Array<{status:string}>} healthArray
- * @returns {{total, unhealthy, ok, degraded, down, never}}
+ * @param {Array<{recordingNow:boolean}>} healthArray
+ * @returns {{total, recordingNow, notRecording}}
  */
 function summarizeHealth(healthArray) {
-    const counts = {
-        total: 0,
-        unhealthy: 0,
-        ok: 0,
-        degraded: 0,
-        down: 0,
-        never: 0,
-    };
+    const counts = { total: 0, recordingNow: 0, notRecording: 0 };
     for (const h of healthArray || []) {
         counts.total += 1;
-        if (h.status in counts) {
-            counts[h.status] += 1;
-        }
-        if (h.status !== 'ok') {
-            counts.unhealthy += 1;
+        if (h.recordingNow) {
+            counts.recordingNow += 1;
+        } else {
+            counts.notRecording += 1;
         }
     }
     return counts;

@@ -13,83 +13,74 @@ vi.mock("../api", () => ({
   getStreamHealth: () => getStreamHealth(),
 }));
 
+// A mix of recording-now / not-recording streams with varied 24h summaries.
 const MIXED: StreamHealthResponse = {
   window_hours: 24,
   generated_slot: { date: "2026-10-23", hour: "12" },
-  unhealthy_count: 3,
-  counts: { total: 4, unhealthy: 3, ok: 1, degraded: 1, down: 1, never: 1 },
+  counts: { total: 3, recordingNow: 2, notRecording: 1 },
   streams: [
     {
-      folder: "nl_ok",
-      name: "NL OK",
-      status: "ok",
-      lastSuccessfulSlot: { date: "2026-10-23", hour: "11" },
-      consecutiveMissing: 0,
-      expectedInWindow: 24,
-      presentInWindow: 24,
+      // Recording now, 24h complete.
+      folder: "nl_now",
+      name: "NL Now",
+      recordingNow: true,
+      last24h: { complete: true, gapCount: 0, gaps: [] },
+      lastSlotStatus: "recording",
     },
     {
-      folder: "nl_degraded",
-      name: "NL Degraded",
-      status: "degraded",
-      lastSuccessfulSlot: { date: "2026-10-23", hour: "10" },
-      consecutiveMissing: 2,
-      expectedInWindow: 24,
-      presentInWindow: 20,
+      // Recording now BUT has historical gaps — proves the gap count does not
+      // drive the Now column.
+      folder: "nl_gappy",
+      name: "NL Gappy",
+      recordingNow: true,
+      last24h: {
+        complete: false,
+        gapCount: 3,
+        gaps: [
+          { date: "2026-10-23", hour: "02" },
+          { date: "2026-10-23", hour: "05" },
+          { date: "2026-10-23", hour: "06" },
+        ],
+      },
+      lastSlotStatus: "recording",
     },
     {
-      folder: "nl_down",
-      name: "NL Down",
-      status: "down",
-      lastSuccessfulSlot: { date: "2026-10-22", hour: "08" },
-      consecutiveMissing: 23,
-      expectedInWindow: 24,
-      presentInWindow: 0,
-    },
-    {
-      folder: "nl_never",
-      name: "NL Never",
-      status: "never",
-      lastSuccessfulSlot: null,
-      consecutiveMissing: 0,
-      expectedInWindow: 24,
-      presentInWindow: 0,
+      // Not recording now — must show the no-check marker regardless of its 24h
+      // summary (which here is complete).
+      folder: "nl_idle",
+      name: "NL Idle",
+      recordingNow: false,
+      last24h: { complete: true, gapCount: 0, gaps: [] },
+      lastSlotStatus: null,
     },
   ],
 };
 
-const ALL_OK: StreamHealthResponse = {
+const ALL_RECORDING: StreamHealthResponse = {
   window_hours: 24,
   generated_slot: { date: "2026-10-23", hour: "12" },
-  unhealthy_count: 0,
-  counts: { total: 3, unhealthy: 0, ok: 3, degraded: 0, down: 0, never: 0 },
+  counts: { total: 3, recordingNow: 3, notRecording: 0 },
   streams: [
     {
       folder: "a",
       name: "A",
-      status: "ok",
-      lastSuccessfulSlot: { date: "2026-10-23", hour: "11" },
-      consecutiveMissing: 0,
-      expectedInWindow: 24,
-      presentInWindow: 24,
+      recordingNow: true,
+      last24h: { complete: true, gapCount: 0, gaps: [] },
+      lastSlotStatus: "recording",
     },
     {
       folder: "b",
       name: "B",
-      status: "ok",
-      lastSuccessfulSlot: { date: "2026-10-23", hour: "11" },
-      consecutiveMissing: 0,
-      expectedInWindow: 24,
-      presentInWindow: 24,
+      recordingNow: true,
+      last24h: { complete: true, gapCount: 0, gaps: [] },
+      lastSlotStatus: "recording",
     },
     {
       folder: "c",
       name: "C",
-      status: "ok",
-      lastSuccessfulSlot: { date: "2026-10-23", hour: "11" },
-      consecutiveMissing: 0,
-      expectedInWindow: 24,
-      presentInWindow: 24,
+      recordingNow: true,
+      last24h: { complete: true, gapCount: 0, gaps: [] },
+      lastSlotStatus: "recording",
     },
   ],
 };
@@ -100,49 +91,54 @@ describe("StreamHealth", () => {
     vi.clearAllMocks();
   });
 
-  it("lists problem streams first with their symptom", async () => {
+  it("renders the two columns: a Now check and a 24h gap summary", async () => {
     getStreamHealth.mockResolvedValue(MIXED);
     render(<StreamHealth />);
 
-    // Wait for the panel to resolve.
-    await screen.findByText("3 streams need attention (last 24h)");
+    await screen.findByText("2/3 streams recording now (last 24h)");
 
-    // Only the three non-ok streams render as problem rows, worst first:
-    // down > degraded > never.
-    const items = document.querySelectorAll(".stream-health-item");
-    expect(items.length).toBe(3);
-    const order = Array.from(items).map((el) =>
-      el.className.replace("stream-health-item stream-health-item--", ""),
-    );
-    expect(order).toEqual(["down", "degraded", "never"]);
+    // Every stream renders a row with a Now cell.
+    const rows = document.querySelectorAll(".stream-health-row");
+    expect(rows.length).toBe(3);
 
-    // The down stream shows its status badge + consecutive-missing + last
-    // successful hour formatted.
-    expect(screen.getByText("down")).toBeInTheDocument();
+    // Two streams recording now → two green checks; one not → one red marker.
+    expect(screen.getAllByLabelText("recording now").length).toBe(2);
+    expect(screen.getAllByLabelText("not recording").length).toBe(1);
+
+    // The gappy stream renders its gap-count + Amsterdam hour labels.
     expect(
-      screen.getByText(/23 missing hours, last success 2026-10-22 08:00/),
+      screen.getByText("3 gaps: 02:00, 05:00, 06:00"),
     ).toBeInTheDocument();
 
-    // The degraded stream shows its trailing missing run.
-    expect(screen.getByText("degraded")).toBeInTheDocument();
-    expect(
-      screen.getByText(/2 missing hours, last success 2026-10-23 10:00/),
-    ).toBeInTheDocument();
-
-    // The never stream shows "no recordings yet" instead of a last-success time.
-    expect(screen.getByText("never recorded")).toBeInTheDocument();
-    expect(screen.getByText("no recordings yet")).toBeInTheDocument();
-
-    // The healthy summary reflects the ok count.
-    expect(screen.getByText("1 stream OK")).toBeInTheDocument();
+    // "complete" shows for streams with no gaps (nl_now + nl_idle).
+    expect(screen.getAllByText("complete").length).toBe(2);
   });
 
-  it("renders no problem rows and an all-ok summary when every stream is ok", async () => {
-    getStreamHealth.mockResolvedValue(ALL_OK);
+  it("shows the no-check marker for a not-recording stream even when its 24h is complete", async () => {
+    getStreamHealth.mockResolvedValue(MIXED);
     render(<StreamHealth />);
 
-    await screen.findByText("All 3 streams OK");
-    expect(document.querySelectorAll(".stream-health-item").length).toBe(0);
+    await screen.findByText("2/3 streams recording now (last 24h)");
+
+    // nl_idle is the not-recording stream; its row shows the "not recording"
+    // marker and a "complete" 24h summary — so the Now column is independent
+    // of the gap count.
+    const idleName = screen.getByText("NL Idle");
+    const idleRow = idleName.closest("tr");
+    expect(idleRow).not.toBeNull();
+    expect(
+      idleRow?.querySelector('[aria-label="not recording"]'),
+    ).not.toBeNull();
+    expect(idleRow?.textContent).toContain("complete");
+  });
+
+  it("renders an all-recording header summary", async () => {
+    getStreamHealth.mockResolvedValue(ALL_RECORDING);
+    render(<StreamHealth />);
+
+    await screen.findByText("3/3 streams recording now (last 24h)");
+    expect(screen.getAllByLabelText("recording now").length).toBe(3);
+    expect(screen.queryByLabelText("not recording")).toBeNull();
   });
 
   it("shows an error alert when the request fails", async () => {
@@ -154,6 +150,6 @@ describe("StreamHealth", () => {
       const alert = screen.getByRole("alert");
       expect(alert).toBeInTheDocument();
     });
-    expect(document.querySelectorAll(".stream-health-item").length).toBe(0);
+    expect(document.querySelectorAll(".stream-health-row").length).toBe(0);
   });
 });

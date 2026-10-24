@@ -13,7 +13,6 @@ const {
     summarize,
     listByStreamAndRange,
     listRecentByDate,
-    latestCompleteByFolder,
     expectedHourSlots,
     missingSlots,
 } = require('../services/recordings');
@@ -22,6 +21,7 @@ const {
     deriveStreamHealth,
     summarizeHealth,
 } = require('../services/stream-health');
+const { amsterdamSlot } = require('../lib/amsterdam-slot');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -30,24 +30,6 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DEFAULT_WINDOW_HOURS = 24;
 const MIN_WINDOW_HOURS = 1;
 const MAX_WINDOW_HOURS = 168;
-
-/** Zero-pad a 0..59 integer to the two-char 'HH'/'MM' strings used in slots. */
-function pad2(n) {
-    return String(n).padStart(2, '0');
-}
-
-/**
- * The current LOCAL hour-slot {date:'YYYY-MM-DD', hour:'HH'} for a Date. The
- * recorder names files in local time and the recordings.date/hour rows are
- * those local slot keys, so health must derive the window from the same local
- * clock — NOT UTC.
- */
-function toLocalSlot(now) {
-    const date = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(
-        now.getDate()
-    )}`;
-    return { date, hour: pad2(now.getHours()) };
-}
 
 // GET /api/analysis/summary (requireAuth) — per-stream + overall roll-up of
 // recording storage/duration/coverage. Shape: { per_stream: [...], overall: {...} }.
@@ -116,12 +98,15 @@ router.get('/gaps', requireAuth, (req, res) => {
 });
 
 // GET /api/analysis/stream-health?windowHours=N (requireAuth) — per-stream
-// health classification (ok|degraded|down|never) derived from recent recordings
-// coverage, with an overall unhealthy roll-up. Shape:
-//   { window_hours, generated_slot:{date,hour}, unhealthy_count,
-//     counts:{total,unhealthy,ok,degraded,down,never},
-//     streams:[{folder,name,status,lastSuccessfulSlot,consecutiveMissing,
-//               expectedInWindow,presentInWindow}] }
+// TWO-SIGNAL health: "Now" (is the stream recording the CURRENT Amsterdam-local
+// hour-slot) + "Last 24h" (an informational gap summary over the window's past
+// slots). The current slot + window are computed in EUROPE/AMSTERDAM time via
+// amsterdamSlot (DST-correct), matching the recorder's local-time hour stamps.
+// Shape:
+//   { window_hours, generated_slot:{date,hour},
+//     counts:{total,recordingNow,notRecording},
+//     streams:[{folder,name,recordingNow,
+//               last24h:{complete,gapCount,gaps:[{date,hour}]},lastSlotStatus}] }
 // windowHours is optional (default 24), an integer in [1,168]; invalid → 400.
 router.get('/stream-health', requireAuth, (req, res) => {
     let windowHours = DEFAULT_WINDOW_HOURS;
@@ -144,33 +129,30 @@ router.get('/stream-health', requireAuth, (req, res) => {
 
     try {
         const now = new Date();
-        const currentSlot = toLocalSlot(now);
-        // The window's earliest calendar date: windowHours-1 hours back. Pad one
-        // extra calendar day earlier so a DST transition inside the window can
-        // never make the fetched date range narrower than the UTC-walked slots
-        // the helper enumerates — the helper slices to the exact window, so the
-        // extra day's rows are harmless (they fall outside windowSlots()).
+        // Current slot + window start computed in Europe/Amsterdam (DST-correct
+        // via Intl), matching the recorder's local-time hour stamps — NOT UTC
+        // and NOT the ambient process TZ.
+        const currentSlot = amsterdamSlot(now);
+        // The window's earliest calendar date: windowHours-1 hours back. The
+        // same amsterdamSlot runs on the start instant, so a DST transition
+        // inside the window can never narrow the fetched date range (the helper
+        // slices to the exact window, so extra rows are harmless).
         const startMs = now.getTime() - windowHours * 3600 * 1000;
-        const startDate = toLocalSlot(new Date(startMs)).date;
+        const startDate = amsterdamSlot(new Date(startMs)).date;
 
         const rows = listRecentByDate(startDate, currentSlot.date);
         const streams = listStreams();
-        // All-time last-complete per folder decides never-vs-down independent of
-        // the window (a long-stopped stream has no in-window rows but IS down).
-        const lastCompleteByFolder = latestCompleteByFolder();
         const health = deriveStreamHealth({
             streams,
             rows,
             currentSlot,
             windowHours,
-            lastCompleteByFolder,
         });
         const counts = summarizeHealth(health);
 
         return res.json({
             window_hours: windowHours,
             generated_slot: currentSlot,
-            unhealthy_count: counts.unhealthy,
             counts,
             streams: health,
         });
