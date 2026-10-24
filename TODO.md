@@ -1,7 +1,14 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (item 23 storage-estimate DONE + MERGED to main AND pushed to origin/main:
+Last updated: 2026-10-23 (item 24 live-hour-refresh FEAT-001 DONE + committed locally on branch
+`live-hour-refresh`, NOT pushed: a new worker handler `src/worker/handlers/currenthourpeaks.js` driven
+by an independent `setInterval(CURRENT_HOUR_PEAK_MS)` (default 30s) in `worker.js`, decoupled from the
+job busy lock, that full-rebuilds + overwrites only the PRIMARY current-hour peak `<base>.json` per
+stream (per-stream codec ext; `.partN` out of scope); the existing peakfilegenerator current-hour SKIP
+stays. worker node:test 56 → 63 green in node:26-bookworm + `docker build -f Dockerfile.worker`
+succeeds. FEAT-002 frontend live-poll + cache-busting still pending. Earlier this day: item 23
+storage-estimate DONE + MERGED to main AND pushed to origin/main:
 requireAuth `GET /api/analysis/storage-estimate` + a StorageEstimate admin panel projecting
 steady-state disk use from measured/estimated per-stream bytes/hour × the retention window, plus
 actual on-disk bytes; read-only, api 223 + frontend 45 tests green. Review APPROVED; fast-forward
@@ -104,6 +111,37 @@ STATUS SUMMARY (what is DONE + on origin/main):
 ---
 
 ## Branches
+
+### `live-hour-refresh` — IN PROGRESS (item 24: live auto-refresh of the currently-recording hour; FEAT-001 worker current-hour peak regen DONE + committed locally, NOT pushed; FEAT-002 frontend still pending)
+Isolated git worktree at `.worktrees/live-hour-refresh` on branch `live-hour-refresh`. Task artifacts
+under `.agents/tasks/` (context.json + features/FEAT-001..N.json). Scope so far is `src/worker/` only —
+no SQLite schema change, no `journal_mode` change.
+- **FEAT-001 — worker-side current-hour peak regen (DONE, committed locally).** New handler
+  `src/worker/handlers/currenthourpeaks.js` exporting
+  `regenerateCurrentHourPeaks(db, { now = new Date(), run = defaultRun } = {})`. For each
+  `SELECT folder, codec FROM streams` row it builds the PRIMARY current-hour audio path
+  `AUDIO_DIR/<folder>/<folder>-<stamp>.<ext>` (ext = `codec || 'mp3'`, FEAT-002; stamp via
+  `currentHourStamp(now)` imported from `./peakfilegenerator`) and, if that file exists, FULLY
+  regenerates + OVERWRITES its `<base>.json` peak file (same base, `.json` ext) via the injected `run`
+  (default `execFileSync('audiowaveform', audiowaveformArgs(audioPath, jsonPath))`). `.partN` segments
+  are ignored entirely (primary only — documented out-of-scope follow-up). A per-folder
+  missing-file/audiowaveform failure is caught, logged via `./log` and counted, NEVER thrown (mirrors
+  peakfilegenerator's per-file handling); it returns a short summary string. `worker.js` adds
+  `const CURRENT_HOUR_PEAK_MS = Number(process.env.CURRENT_HOUR_PEAK_MS) || 30000;` and a SECOND
+  INDEPENDENT `setInterval(CURRENT_HOUR_PEAK_MS)` in `start()` — separate from the heartbeat interval
+  and the `setTimeout` poll loop, NOT routed through the job busy lock — that calls
+  `regenerateCurrentHourPeaks(db)` wrapped in try/catch so a failure only logs and never crashes the
+  worker; `CURRENT_HOUR_PEAK_MS` + `regenerateCurrentHourPeaks` are exported for testability. The
+  existing peakfilegenerator current-hour SKIP, `tickOnce`, and the job loop are UNCHANGED. The new
+  handler ships via the existing `COPY src/worker/ ./` (no Dockerfile.worker edit). Verified in
+  node:26-bookworm: worker node:test 56 → 63 (new `src/worker/test/currenthourpeaks.test.js`: overwrite
+  an existing current-hour primary, skip a folder with no current-hour file, honor the per-stream codec
+  ext, ignore a `.partN`-only folder, catch+count an injected-run throw while other folders still
+  process, stamp from the injected `now`, and null-codec → mp3 default) all green; `docker build -f
+  Dockerfile.worker` succeeds.
+- **FEAT-002 — frontend live-poll + cache-busting (PENDING).** Detect the selected hour IS the current
+  Amsterdam hour, periodically reload the source + refreshed peak `.json`, add a manual refresh button,
+  and cache-bust the live `/audio` URLs client-side. Consumes the json FEAT-001 regenerates.
 
 ### `stream-quality` — MERGED (item 22: per-stream codec/bitrate/bit-depth; ADDITIVE schema change; FEAT-001 api backend + FEAT-002 recorder/worker/api de-.mp3 + FEAT-003 frontend DONE; cross-FEAT integration PASSED (opus sample-rate fix), semantic review APPROVED, fast-forward merged into main)
 Isolated git worktree at `.worktrees/stream-quality` on branch `stream-quality`. Task artifacts under
@@ -1307,11 +1345,17 @@ CHOSEN APPROACH (brainstormed with user, 2026-10-23): periodic refresh, NOT incr
   which is about chunked WRITING for memory, not append). Rejected incremental-append and a custom
   waveform-data.js DSP pipeline as over-engineering for hour-sized files (a full regen of one hour's
   peaks is only tens of KB and cheap).
-- [ ] Backend: periodically REGENERATE the peak `.json` for the current-hour file only (e.g. every
+- [x] Backend: periodically REGENERATE the peak `.json` for the current-hour file only (e.g. every
       30-60s) while that hour is still recording, overwriting the existing `.json`. Fits the existing
       worker/job model (a lightweight current-hour peak refresh) or a small recorder-side tick. Stop
       regenerating once the hour is finalized (the normal post-hour peakfilegenerator run produces the
-      final file).
+      final file). DONE on `live-hour-refresh` (FEAT-001): a NEW worker handler
+      `src/worker/handlers/currenthourpeaks.js` driven by an INDEPENDENT `setInterval(CURRENT_HOUR_PEAK_MS)`
+      (default 30s, env-overridable) in `worker.js`, decoupled from the single-job busy lock. It full-
+      rebuilds + OVERWRITES only the PRIMARY `<folder>-<stamp>.<ext>` current-hour peak `<base>.json`
+      per stream (ext = per-stream codec, FEAT-002); `.partN` segments are out of scope (primary only).
+      The existing peakfilegenerator current-hour SKIP stays. Decided cadence constant:
+      `CURRENT_HOUR_PEAK_MS`. Still needed for item 24: FEAT-002 frontend live-poll + cache-busting.
 - [ ] Frontend: detect that the selected hour IS the current hour and poll/reload the source
       periodically (reload the mp3 — it has grown — and the refreshed peak `.json`), plus a manual
       "refresh" button as a fallback. Only poll for the live hour; past hours are static.

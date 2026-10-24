@@ -20,10 +20,14 @@ const { planTick, applyPlan } = require('./claim');
 const { runCleaner } = require('./handlers/cleaner');
 const { runPeakfileGenerator } = require('./handlers/peakfilegenerator');
 const { runReconcile } = require('./handlers/reconcile');
+const { regenerateCurrentHourPeaks } = require('./handlers/currenthourpeaks');
 
 const HEARTBEAT = '/tmp/heartbeat';
 const HEARTBEAT_MS = 5000;
 const POLL_MS = 3000;
+// Cadence of the independent current-hour peak regenerator (FEAT-001). Decoupled
+// from the job busy lock; env-overridable, default 30s.
+const CURRENT_HOUR_PEAK_MS = Number(process.env.CURRENT_HOUR_PEAK_MS) || 30000;
 const OUTPUT_CAP_BYTES = 65536; // 64 KiB
 const TERMINAL_MAX_ATTEMPTS = 5;
 const TERMINAL_SLEEP_MS = 200;
@@ -194,6 +198,18 @@ function start() {
         });
     }, HEARTBEAT_MS);
 
+    // Independent current-hour peak regenerator (FEAT-001) — separate from the
+    // heartbeat interval and the poll loop, NOT routed through the job busy lock
+    // so it never blocks scheduled jobs. A failure only logs and never crashes
+    // the worker.
+    setInterval(() => {
+        try {
+            regenerateCurrentHourPeaks(db);
+        } catch (err) {
+            log.error('worker: current-hour peak regen error:', err.message);
+        }
+    }, CURRENT_HOUR_PEAK_MS);
+
     // Non-overlapping poll loop.
     function loop() {
         try {
@@ -220,4 +236,6 @@ module.exports = {
     tickOnce,
     writeWorkerStatus,
     OUTPUT_CAP_BYTES,
+    CURRENT_HOUR_PEAK_MS,
+    regenerateCurrentHourPeaks,
 };
