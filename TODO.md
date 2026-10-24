@@ -1,10 +1,11 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (item 23 storage-estimate DONE on branch `storage-estimate`, in review:
+Last updated: 2026-10-23 (item 23 storage-estimate DONE + MERGED to main AND pushed to origin/main:
 requireAuth `GET /api/analysis/storage-estimate` + a StorageEstimate admin panel projecting
 steady-state disk use from measured/estimated per-stream bytes/hour × the retention window, plus
-actual on-disk bytes; read-only, api 223 + frontend 45 tests green. Earlier this day: item 21 v2 DONE
+actual on-disk bytes; read-only, api 223 + frontend 45 tests green. Review APPROVED; fast-forward
+merged into `main`. Earlier this day: item 21 v2 DONE
 + MERGED to main (== b06db8b) AND pushed to origin/main,
 review APPROVED: the first Stream Health panel was WRONG in practice — a TZ bug (route used ambient
 `getHours()`/UTC while the recorder stamps Amsterdam-local slots) plus the `ok/degraded/down/never`
@@ -1283,7 +1284,8 @@ Order: depends on retention config (already in the DB) and benefits from item 22
 quality fields; most accurate if it uses measured `size_bytes` from the `recordings` table. Touches
 api + frontend. Sequence after item 22 (or build the measured-bytes version first and refine once
 item 22's per-stream quality exists).
-DONE (2026-10-23, branch `storage-estimate`, in review). Pure helper
+DONE + MERGED to main AND pushed to origin/main (2026-10-23, branch `storage-estimate`, review
+APPROVED, fast-forward merge). Pure helper
 `src/api/services/storage-estimate.js` (`estimateStorage` + `theoreticalBytesPerHour`): per-stream
 bytes/hour = MEASURED mean `size_bytes` over complete recordings when available (`source:"measured"`),
 else THEORETICAL from the item-22 quality fields (`source:"estimated"`) — lossy = `bitrate_kbps *
