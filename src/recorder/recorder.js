@@ -6,9 +6,15 @@ const log = require('./log');
 const { secondsUntilNextHour, currentHourStamp } = require('./time-helpers');
 const { readStreams, readRecorderMinute } = require('./streams-db');
 const { backoffDelayMs, shouldRestartWithinHour, segmentOutputName } = require('./backoff-helpers');
+const { isValidFolder, isContainedPath } = require('./folder-utils');
 const { streamsNeedingCatchup } = require('./catchup-helpers');
 const recordingsDb = require('./recordings-db');
 const { resolveEncoding, outputOptionsFor } = require('./encoding');
+
+// The on-disk root under which every stream's audio folder lives. Defined once
+// so the folder-containment guard (folder-utils.isContainedPath) checks against
+// the same base the path-build sites interpolate `folder` into.
+const AUDIO_BASE = path.join(__dirname, 'audio');
 
 // The recorder's OWN scoped read-write DB handle (FEAT-002), opened once at
 // module load like streams-db is used per-read. recordings writes go through it
@@ -111,6 +117,10 @@ let currentMinute = readRecorderMinute();
 // unrecognised/NULL codec clamps to mp3 defensively and logs a greppable warn.
 function recordStream(item, durationSeconds = 3600, attempt = 0) {
     const { name, folder, url } = item;
+    if (!isValidFolder(folder) || !isContainedPath(AUDIO_BASE, folder)) {
+        log.error(`recorder: skipping stream ${name}: invalid folder ${JSON.stringify(folder)}`);
+        return;
+    }
     const enc = resolveEncoding(item);
     if (enc.clamped && typeof item.codec !== 'undefined' && item.codec !== null) {
         log.error(`recorder: unknown codec ${item.codec} for ${folder}, falling back to mp3`);
@@ -152,6 +162,11 @@ function recordStream(item, durationSeconds = 3600, attempt = 0) {
 // failure never kills or disturbs another stream's recording (deliverable 1).
 function superviseStream(item, attempt) {
     if (shuttingDown) {
+        return;
+    }
+
+    if (!isValidFolder(item.folder) || !isContainedPath(AUDIO_BASE, item.folder)) {
+        log.error(`recorder: skipping stream ${item.name}: invalid folder ${JSON.stringify(item.folder)}`);
         return;
     }
 
@@ -435,6 +450,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // `<folder>-<stamp>.<ext>` where ext is the stream's resolved codec extension
 // (defaults to 'mp3' for a field-less/legacy row).
 function hasCurrentHourRecording(folder, stamp, ext = 'mp3') {
+    if (!isValidFolder(folder)) {
+        return false;
+    }
     const outputPath = path.join(__dirname, `./audio/${folder}/${folder}-${stamp}.${ext}`);
     return fs.existsSync(outputPath);
 }
