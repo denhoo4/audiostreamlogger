@@ -112,10 +112,48 @@ function startServer() {
     // the scheduler reads schedules fresh each tick so a UI change takes effect
     // without a restart (design §3.1, FR-3.4).
     const { startScheduler } = require('./scheduler');
-    startScheduler(db);
+    const schedulerTimer = startScheduler(db);
 
     // (9) Start the server.
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
         log.info(`API service is running on port ${PORT}`);
     });
+
+    // (10) Graceful shutdown (FEAT-002) — mirrors the recorder's handler shape.
+    // ALL wiring stays INSIDE startServer() (the guarded real-boot path): index.js
+    // opens the DB at top-level require and is never imported by tests, so adding
+    // top-level handlers would leak process-wide state into the api suite. On
+    // SIGTERM/SIGINT: stop the scheduler, stop accepting connections with
+    // server.close(), then close the DB handle and exit 0. A bounded force-exit
+    // guarantees shutdown cannot hang on a lingering keep-alive connection.
+    let shuttingDown = false;
+    function shutdown(signal) {
+        if (shuttingDown) {
+            return;
+        }
+        shuttingDown = true;
+        log.info(`api: received ${signal}, shutting down`);
+
+        if (schedulerTimer) {
+            clearInterval(schedulerTimer);
+        }
+
+        server.close(() => {
+            try {
+                db.close();
+            } catch {
+                // already closed / closing failed — safe to ignore on shutdown.
+            }
+            log.info('api: shutdown complete, exiting 0');
+            process.exit(0);
+        });
+
+        // Bounded fallback: a keep-alive connection could keep server.close()'s
+        // callback from firing, so force-exit after a grace window. unref() so
+        // this timer never keeps the process alive on its own.
+        setTimeout(() => process.exit(0), 5000).unref();
+    }
+
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
 }

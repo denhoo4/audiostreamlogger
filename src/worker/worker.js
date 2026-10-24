@@ -181,6 +181,57 @@ function tickOnce(db) {
     runClaimedJob(db, job);
 }
 
+// --- Graceful shutdown (FEAT-002) -------------------------------------------
+// Module-level timer handles + a `stopping` flag, captured in start() so the
+// signal handler can clear them. The poll loop checks `stopping` at the top and
+// skips re-arming in its finally once shutdown has begun, so no new tick runs
+// after a signal. A clean SIGTERM is processed only between synchronous ticks,
+// so an in-flight runClaimedJob always finishes before shutdownWorker runs —
+// boot reclaimStaleRunning stays the crash backstop for a hard kill.
+let heartbeatTimer = null;
+let currentHourPeakTimer = null;
+let pollTimer = null;
+let stopping = false;
+let shuttingDown = false;
+
+/**
+ * Graceful shutdown mirroring the recorder's shutdown() shape: idempotent guard,
+ * stop scheduling, clear every timer (each guarded so a double signal never
+ * throws), close the RW handle (guarded so an already-closed handle is safe),
+ * then exit 0. The synchronous in-flight job (if any) has already finished
+ * because a signal is only processed between ticks.
+ */
+function shutdownWorker(db, signal) {
+    if (shuttingDown) {
+        return;
+    }
+    shuttingDown = true;
+    stopping = true;
+    log.info(`worker: received ${signal}, shutting down`);
+
+    if (heartbeatTimer) {
+        clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+    }
+    if (currentHourPeakTimer) {
+        clearInterval(currentHourPeakTimer);
+        currentHourPeakTimer = null;
+    }
+    if (pollTimer) {
+        clearTimeout(pollTimer);
+        pollTimer = null;
+    }
+
+    try {
+        db.close();
+    } catch {
+        // already closed / closing failed — safe to ignore during shutdown.
+    }
+
+    log.info('worker: shutdown complete, exiting 0');
+    process.exit(0);
+}
+
 function start() {
     writeHeartbeat();
     const db = openDb();
@@ -190,7 +241,7 @@ function start() {
     // Independent heartbeat timer — never coupled to the tick body. It writes
     // the /tmp/heartbeat file (compose healthcheck) AND a best-effort app_config
     // status row (status derived from whether a job is currently running).
-    setInterval(() => {
+    heartbeatTimer = setInterval(() => {
         writeHeartbeat();
         writeWorkerStatus(db, {
             status: currentJobId === null ? 'idle' : 'running',
@@ -202,7 +253,7 @@ function start() {
     // heartbeat interval and the poll loop, NOT routed through the job busy lock
     // so it never blocks scheduled jobs. A failure only logs and never crashes
     // the worker.
-    setInterval(() => {
+    currentHourPeakTimer = setInterval(() => {
         try {
             regenerateCurrentHourPeaks(db);
         } catch (err) {
@@ -212,15 +263,25 @@ function start() {
 
     // Non-overlapping poll loop.
     function loop() {
+        if (stopping) {
+            return;
+        }
         try {
             tickOnce(db);
         } catch (err) {
             log.error('worker: tick error:', err.message);
         } finally {
-            setTimeout(loop, POLL_MS);
+            if (!stopping) {
+                pollTimer = setTimeout(loop, POLL_MS);
+            }
         }
     }
     loop();
+
+    // Register signal handlers only on real boot (inside start()), so requiring
+    // the module in tests registers none.
+    process.on('SIGTERM', () => shutdownWorker(db, 'SIGTERM'));
+    process.on('SIGINT', () => shutdownWorker(db, 'SIGINT'));
 }
 
 // Only auto-start when run as the entrypoint; requiring the module (tests) does not.
@@ -235,6 +296,7 @@ module.exports = {
     runClaimedJob,
     tickOnce,
     writeWorkerStatus,
+    shutdownWorker,
     OUTPUT_CAP_BYTES,
     CURRENT_HOUR_PEAK_MS,
     regenerateCurrentHourPeaks,
