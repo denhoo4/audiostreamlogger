@@ -15,22 +15,6 @@ items below are genuinely open.
 
 ## Open items
 
-### Dependabot frontend-toolchain upgrade — awaiting merge/finalize
-The bundled React 19 / Vite 8 / Vitest 5 / `@vitejs/plugin-react` 6 upgrade is
-coded, verified green in `node:26-bookworm`, and the semantic review is approved on
-branch `frontend-toolchain-upgrade`. It is NOT yet merged. The merge/finalize step
-merges it and closes the superseded individual Dependabot PRs
-(#4/#6/#8/#10/#11/#12). The four green standalone PRs (#3 nginx, #5 jsdom, #7
-github-actions, #9 argon2) are already merged onto that branch.
-
-### Wavesurfer: scroll-to-zoom at the cursor (item 13)
-Mouse-wheel scroll on the waveform should zoom in/out centered on the point under
-the cursor (zoom toward the pointer, not a global zoom). Frontend-only, touches the
-`useWavesurfer` hook. In progress on the `wavesurfer-zoom` worktree: keep the legacy
-direction/step/clamp (5 px/sec per event, deltaY sign only, lower-clamp 0, no upper
-clamp, `zoom(minPxPerSec)` units) but add cursor-x anchoring via the v7 scroll math,
-with a pure `nextZoom(current, deltaY)` helper so step/clamp stay unit-testable.
-
 ### Full frontend UI/UX overhaul — DEFERRED
 The user explicitly wants a proper UI/UX pass later, not now. Styling has been kept
 intentionally minimal (including the 4-tab admin layout) until this is picked up.
