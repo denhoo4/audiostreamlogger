@@ -1,19 +1,20 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (item 24 live-hour-refresh FEAT-001 + FEAT-002 DONE + committed locally on
-branch `live-hour-refresh`, NOT pushed; cross-FEAT integration verification PASSED. Backend: a new
-worker handler `src/worker/handlers/currenthourpeaks.js` driven by an independent
+Last updated: 2026-10-23 (item 24 live-hour-refresh DONE + MERGED to main (fast-forward, main ==
+live-hour-refresh == 39b701f), NOT pushed to origin — left merged locally. Backend: a new worker
+handler `src/worker/handlers/currenthourpeaks.js` driven by an independent
 `setInterval(CURRENT_HOUR_PEAK_MS)` (default 30s) in `worker.js`, decoupled from the job busy lock,
 that full-rebuilds + overwrites only the PRIMARY current-hour peak `<base>.json` per stream (per-stream
 codec ext; `.partN` out of scope); the existing peakfilegenerator current-hour SKIP stays. Frontend:
 `currentAmsterdamSlot`/`isLiveHour` (TZ-safe `Intl`) in `api.ts` + an optional `cacheBust` query param
 on `audioUrl`/`audioJsonUrl`; `App.tsx` detects the live hour and polls a cache-busted reload every 30s
 (matching the worker cadence) plus an always-present 'Ververs' button, preserving the graceful
-`ws.load(mediaUrl)` fallback for a missing/partial peak. `nginx.conf` untouched. Cross-FEAT seam
-verified: the worker's `SELECT folder, codec FROM streams` matches the api-owned `codec` column
-(`TEXT NOT NULL DEFAULT 'mp3'`) and the json path shape the frontend consumes. ALL suites green in
-node:26-bookworm: worker 63 node:test, api 223 node:test (no regression), frontend 55 vitest +
+`ws.load(mediaUrl)` fallback for a missing/partial peak. `nginx.conf` untouched. Semantic review
+APPROVED (gate `.agents/tasks/review.json` verdict=APPROVED). Cross-FEAT seam verified: the worker's
+`SELECT folder, codec FROM streams` matches the api-owned `codec` column (`TEXT NOT NULL DEFAULT 'mp3'`)
+and the json path shape the frontend consumes. ALL suites re-run green in node:26-bookworm at merge
+time: worker 63 node:test, api 223 node:test (no regression), frontend 55 vitest +
 `tsc -b && vite build`, and `docker build -f Dockerfile.worker` succeeds. Earlier this day: item 23
 storage-estimate DONE + MERGED to main AND pushed to origin/main:
 requireAuth `GET /api/analysis/storage-estimate` + a StorageEstimate admin panel projecting
@@ -119,7 +120,7 @@ STATUS SUMMARY (what is DONE + on origin/main):
 
 ## Branches
 
-### `live-hour-refresh` — IN PROGRESS (item 24: live auto-refresh of the currently-recording hour; FEAT-001 worker current-hour peak regen + FEAT-002 frontend live-poll DONE + committed locally, NOT pushed; cross-FEAT integration verification PASSED; awaiting semantic review + merge)
+### `live-hour-refresh` — DONE + MERGED to main (item 24: live auto-refresh of the currently-recording hour; FEAT-001 worker current-hour peak regen + FEAT-002 frontend live-poll; cross-FEAT integration PASSED, semantic review APPROVED, fast-forward merged into main (main == live-hour-refresh == 39b701f), NOT pushed to origin)
 Isolated git worktree at `.worktrees/live-hour-refresh` on branch `live-hour-refresh`. Task artifacts
 under `.agents/tasks/` (context.json + features/FEAT-001..N.json). Scope is `src/worker/` +
 `src/frontend/` only — no SQLite schema change, no `journal_mode` change, `nginx.conf` untouched.
