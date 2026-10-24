@@ -894,9 +894,9 @@ out-of-band, a missed event). Add a periodic FULL SYNC that reconciles both dire
 - [x] Expose it in the admin scheduler UI as a schedulable type with a "Run now" button.
 Order: AFTER Chunk C lands (needs the recordings table + job model). Natural follow-on; could fold
 into Chunk C follow-ups or be its own small workflow.
-IN PROGRESS on branch `reconcile-job` (worktree `.worktrees/reconcile-job`), decomposed into
-FEAT-001 (shared planner) + FEAT-002 (worker job type + UI + seed):
-- [x] FEAT-001 DONE (not yet merged): generalized the startup-backfill reconcile logic into a
+DONE + merged to main from branch `reconcile-job` (worktree `.worktrees/reconcile-job`), decomposed
+into FEAT-001 (shared planner) + FEAT-002 (worker job type + UI + seed):
+- [x] FEAT-001 DONE (merged to main): generalized the startup-backfill reconcile logic into a
       SHARED PURE two-way planner `src/api/services/reconcile-planner.js` —
       `reconcilePlan(existingRows, scannedFiles, options) -> { inserts, removes, updates }` (no fs,
       no DB). It folds `.partN` segments per (folder,date,hour) slot, plans inserts (disk-only
@@ -908,7 +908,7 @@ FEAT-001 (shared planner) + FEAT-002 (worker job type + UI + seed):
       guard + idempotency) plus the updated `recordings-backfill.test.js`; api suite green (127
       tests) in node:26-bookworm. FEAT-002 ports this planner byte-for-byte into
       `src/worker/reconcile-planner.js`.
-- [x] FEAT-002 DONE (not yet merged): worker "reconcile" job type — ported the planner byte-for-byte
+- [x] FEAT-002 DONE (merged to main): worker "reconcile" job type — ported the planner byte-for-byte
       into `src/worker/reconcile-planner.js`, added `src/worker/handlers/reconcile.js` (two-level
       AUDIO_DIR walk, applies inserts/updates/removes over the worker RW handle in withBusyRetry,
       summary line with added/removed/fixed counts), registered `reconcile` in the worker HANDLERS
