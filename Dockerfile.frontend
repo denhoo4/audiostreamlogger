@@ -12,7 +12,7 @@ COPY src/frontend/ .
 RUN npm run build
 
 # ---- Stage 2: serve the SPA with nginx + reverse-proxy to the api service ----
-FROM nginx:1.27-bookworm
+FROM nginx:1.29-bookworm
 
 # curl is not in the base nginx image but is needed by the compose healthcheck.
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
