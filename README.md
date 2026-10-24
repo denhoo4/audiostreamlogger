@@ -87,9 +87,11 @@ The `/settings` route is a login-gated admin screen (same-origin session cookie,
   grouped by country for easier scanning;
 - set the page title and upload a favicon (branding);
 - see the worker's liveness (alive/stale, last-seen age, current job);
-- see a stream-health overview that flags, at a glance, which streams are NOT working: each stream is
-  classified `ok`/`degraded`/`down`/`never` from its recent recording coverage, with problem streams
-  listed first alongside their last successful hour and consecutive-missing count (backed by
+- see a stream-health overview with two independent signals per stream: a **Now** column showing a
+  green check when the stream is recording in the current hour-slot (computed in Europe/Amsterdam, the
+  recorder's timezone, so the in-progress hour is never flagged as missing), and a separate
+  informational **Last 24h** column summarizing recording-time gaps over the past day (e.g. "complete"
+  or "3 gaps: 02:00, 05:00, 06:00", current hour excluded) without affecting the green check (backed by
   `GET /api/analysis/stream-health`, read-only, derived from the existing `recordings` rows);
 - review a recordings analysis built from the `recordings` table: a per-stream summary (total
   captured hours, stored bytes, recording count, average duration, earliest–latest range) and a

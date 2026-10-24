@@ -1,7 +1,17 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (item 22 DONE + MERGED to main: per-stream recording
+Last updated: 2026-10-23 (item 21 v2 DONE + MERGED to main (== b06db8b) AND pushed to origin/main,
+review APPROVED: the first Stream Health panel was WRONG in practice — a TZ bug (route used ambient
+`getHours()`/UTC while the recorder stamps Amsterdam-local slots) plus the `ok/degraded/down/never`
+24h-gap model made the recorder-running case read "0 streams OK". Rebuilt as a TWO-SIGNAL design — a
+**Now** green-check column (current Amsterdam hour-slot has a `recording` row) + a separate
+informational **Last 24h** gap-summary column — with the TZ fixed via a new pure
+`src/api/lib/amsterdam-slot.js` using `Intl.DateTimeFormat(timeZone:'Europe/Amsterdam', hourCycle:'h23')`.
+Fast-forward merged into `main` and pushed. Re-verified green in node:26-bookworm: api 212 node:test
+(incl. an Amsterdam-vs-UTC route regression) + frontend 42 vitest + clean build; the v1 `stream-health`
+branch is superseded.
+Earlier: item 22 DONE + MERGED to main: per-stream recording
 quality — FEAT-001 api backend + FEAT-002 recorder/worker/api de-`.mp3`-ification + FEAT-003 frontend
 (player per-codec extension + admin codec/bitrate/bit-depth controls) all landed; cross-FEAT
 integration verification PASSED (one fix: opus pinned to 48000 Hz — libopus rejects 44100), semantic
@@ -251,7 +261,34 @@ only — no recorder/worker/compose/nginx/schema/journal_mode edits.
   Test-is-non-submit / no createStream, api.ts client MOCKED). Verified in node:26-bookworm: api green,
   frontend vitest + `tsc -b && vite build` green.
 
-### `stream-health` — IN REVIEW (item 21: admin "which streams are NOT working" health panel; READ-ONLY, derived from existing recordings rows, NO schema change)
+### `stream-health-redesign` — DONE + MERGED to main (== b06db8b) + pushed (item 21 v2: two-signal health model; READ-ONLY, NO schema change)
+Built on branch `stream-health-redesign` (based on main == 580ad18), review APPROVED, fast-forward
+merged into `main` and pushed to origin. Plan: `.agents/tasks/plan.md`. The first version (merged to main) showed almost
+every stream "degraded" / "0 streams OK" even with the recorder running fine. Two root causes: (1) the
+health route computes the current hour-slot via ambient `getHours()` (UTC when the API process is not
+Amsterdam) while the recorder stamps slots in `Europe/Amsterdam` local time — a 1–2h offset makes the
+in-progress/just-finished hour read as "missing"; (2) the `ok/degraded/down/never` model is driven by a
+24h missing-hour gap count, so any recent gap marks a stream unhealthy. The user re-specified a
+TWO-SIGNAL design: a **Now** column (green check = the CURRENT Amsterdam hour-slot has a `recording`
+row, the ONLY thing that drives the check; no gap count may affect it) and a separate informational
+**Last 24h** column (a short gap summary — "complete" or "N gaps: HH:00, …", current hour excluded).
+Fix the TZ by computing Amsterdam Y-M-D-HH with `Intl.DateTimeFormat(timeZone:'Europe/Amsterdam',
+hourCycle:'h23')` (DST-safe, never a hardcoded +2). Reshape `deriveStreamHealth` to
+`{recordingNow, last24h:{complete,gapCount,gaps[]}}` + a `{total,recordingNow,notRecording}` roll-up;
+update `openapi/spec.js` + `api.ts` to the new shape; rework `StreamHealth.tsx` into the two-column
+table. Tests: two-signal helper cases, a route-level Amsterdam-timezone regression test, two-column
+frontend tests. Scope is `src/api/` + `src/frontend/` only — no recorder/worker/compose/nginx/schema
+edits. Confirmed recorder status values (from `src/recorder/recordings-db.js`): `recording` on start,
+`partial` on mid-hour restart, `complete` on finalize. DONE (merged to main, pushed): pure two-signal `deriveStreamHealth`
+(`{recordingNow, last24h:{complete,gapCount,gaps[]}, lastSlotStatus}`) with a
+`{total,recordingNow,notRecording}` roll-up; new pure `src/api/lib/amsterdam-slot.js` computing the
+Amsterdam slot via `Intl.DateTimeFormat(timeZone:'Europe/Amsterdam', hourCycle:'h23')` (route now uses
+it instead of ambient `getHours()`); `openapi/spec.js` + `api.ts` reshaped; `StreamHealth.tsx` is now a
+two-column (Now check + Last-24h summary) table. Tests green in node:26-bookworm — api 212 node:test
+(incl. two-signal helper cases + an Amsterdam-vs-UTC route regression) and frontend 42 vitest + clean
+`tsc -b && vite build`. Evidence: `.agents/tasks/verification.md`.
+
+### `stream-health` — SUPERSEDED by `stream-health-redesign` (item 21 v1: admin "which streams are NOT working" health panel; READ-ONLY, derived from existing recordings rows, NO schema change)
 Isolated git worktree at `.worktrees/stream-health` on branch `stream-health` (based on main == 6d865f1).
 Plan: `.agents/tasks/audiostreamlogger-stream-health-2026-10-23/plan.md`; verification evidence:
 `.agents/tasks/audiostreamlogger-stream-health-2026-10-23/verification.md`. Scope is `src/api/` +
@@ -1168,26 +1205,34 @@ into FEAT-001 (shared planner) + FEAT-002 (worker job type + UI + seed):
       + handler tests, `jobs-schema.test.js` now asserts 3 seeded schedules. The scheduler UI + job
       viewer are data-driven, so the card + Run-now surface automatically.
 
-### 21. Admin screen: overview of streams that are NOT working (user wish, 2026-10-23)
-The user wants the `/settings` admin screen to show, at a glance, which streams are currently
-failing / not recording — a health/status panel for broken streams. Scope to decide at build time:
-- [ ] Define "not working": no recording row for the current (or most recent expected) hour-slot,
-      a `partial`/`missing` status, repeated recorder restarts/backoff for that stream, or a stream
-      the recorder cannot connect to at all. The `recordings` table (Chunk C) + the recorder's
-      per-stream supervision/backoff state are the natural data sources.
-- [ ] Surface it in the admin screen as a dedicated panel (sits next to the existing
-      RecordingsAnalysis / WorkerStatus panels): list the problem streams with the symptom (last
-      successful hour, consecutive failures, last error) rather than only raw gap counts.
-- [ ] Decide the signal source: derive from the existing `recordings` rows + analysis gap logic
-      (no new backend state), and/or have the recorder persist a per-stream health/last-error field
-      (e.g. in `app_config` or a small `stream_health` table) that the api exposes behind requireAuth.
-- [ ] Likely a new requireAuth api endpoint (e.g. `GET /api/analysis/stream-health` or
-      `/api/streams/health`) + a frontend panel consuming it.
+### 21. Admin screen: stream health panel (user wish, 2026-10-23) — DONE (v2 two-signal, merged to main == b06db8b + pushed)
+First version MERGED to main (== dda1412): a `/settings` StreamHealth panel + requireAuth
+`GET /api/analysis/stream-health`, deriving ok/degraded/down/never per stream from the `recordings`
+rows over a 24h window.
+
+REDESIGN (user, 2026-10-23) — DONE, merged to main and pushed. The first version was WRONG in practice: with the recorder running fine
+it showed almost every stream "degraded" and "0 streams OK", because the 24h missing-hour gap count
+drove the status AND the current slot was computed in UTC while the recorder names hour-slots in
+Europe/Amsterdam (a 2h CEST offset), so the in-progress/just-finished hour was counted as missing.
+The user wants health split into TWO INDEPENDENT signals, shown as two columns:
+- [x] **"Now" (green check)** — is this stream recording RIGHT NOW, yes/no. This is the ONLY thing
+      that decides the green check. Derive it from the `recordings` table for the CURRENT hour-slot
+      computed in **Europe/Amsterdam** time (the recorder's timezone): the current hour has status
+      `recording` (or a fresh/complete row for the current slot) → green; otherwise → not OK. The
+      in-progress current hour must NEVER be treated as a "missing" failure. Do NOT let any 24h gap
+      count affect this column.
+- [x] **"Last 24h" (separate column)** — a short summary of recording-time gaps over the past 24h,
+      purely informational (does NOT affect the green check). E.g. "complete" or "3 gaps: 02:00,
+      05:00, 06:00" (Amsterdam-local hour labels). This is where the old gap logic lives, fixed for
+      the Amsterdam timezone and excluding the in-progress current hour.
+- [x] Fix the TIMEZONE bug at its root: the api route must build "now"/the current slot in
+      Europe/Amsterdam (matching how the recorder names files), not UTC. The pure helper already
+      expects a local-time currentSlot — the bug is in the caller (`src/api/routes/analysis.js`).
+- [x] Keep the endpoint requireAuth + OpenAPI-documented; the frontend `StreamHealth.tsx` becomes a
+      two-column table (Now check + 24h summary) instead of the current "problem streams" list.
 Order: pairs with item 18 (reconcile) and item 8's analysis view — all read the `recordings` table.
-Touches api + frontend; sequence AFTER the OpenAPI work (item 20) and ideally alongside/after item 18
-so the health signal and reconcile share one view of recording state. Needs a build-time decision on
-how deep the "not working" detection goes (pure recordings-gap derivation vs. recorder-persisted
-health state).
+Touches api (route timezone fix + helper split) + frontend (two-column panel). The green check is a
+live "recording now" signal; the 24h gap summary is separate and informational.
 
 ### 22. Per-stream recording quality: configurable codec, bitrate, and bit depth (user wish, 2026-10-23)
 The user wants to set the audio CODEC, BITRATE, and BIT DEPTH per stream, used by the recorder when
