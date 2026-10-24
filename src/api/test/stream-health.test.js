@@ -53,23 +53,25 @@ test('healthy stream with a complete row for every past slot → ok', () => {
     assert.strictEqual(h.name, 'NL One');
 });
 
-test('stopped stream (last complete older than the window) → down', () => {
+test('stopped stream (no in-window rows, only an all-time last-complete) → down', () => {
     const date = '2026-10-23';
     const currentSlot = { date, hour: '12' };
     const windowHours = 6; // past slots 06..11 (6 slots incl current 12)
-    // The only row we hand in is an OLD complete on the previous day: it sets
-    // lastSuccessfulSlot but falls outside the recent window slots.
-    const rows = [
-        { stream_folder: 'nl_down', date: '2026-10-22', hour: '03', status: 'complete' },
-    ];
-
+    // This models EXACTLY what the route hands the helper for a long-stopped
+    // stream: the window-scoped `rows` are EMPTY (the recorder stopped before
+    // the window, so listRecentByDate returns nothing for it), and the
+    // never-vs-down distinction comes solely from the injected all-time
+    // lastCompleteByFolder signal (MAX complete slot over ALL history).
     const [h] = deriveStreamHealth({
         streams: [{ folder: 'nl_down', name: 'NL Down' }],
-        rows,
+        rows: [],
         currentSlot,
         windowHours,
+        lastCompleteByFolder: { nl_down: '2026-10-22-03' },
     });
 
+    // Had a complete once (all-time signal) but nothing good in the window →
+    // down, NOT never. This is the regression the review flagged.
     assert.strictEqual(h.status, 'down');
     // past slots 06..11 are all missing → 5 slots before current (12 is graced).
     assert.strictEqual(h.consecutiveMissing, windowHours - 1);
@@ -78,6 +80,28 @@ test('stopped stream (last complete older than the window) → down', () => {
         date: '2026-10-22',
         hour: '03',
     });
+    assert.strictEqual(h.presentInWindow, 0);
+});
+
+test('stopped stream with an in-window complete newer than the all-time signal keeps the newer slot', () => {
+    // Defensive: if the window rows carry a complete newer than a stale all-time
+    // signal, lastSuccessfulSlot reflects the newer one.
+    const date = '2026-10-23';
+    const currentSlot = { date, hour: '12' };
+    const windowHours = 8; // past slots 05..11
+    const rows = [
+        { stream_folder: 'nl_mix', date, hour: '05', status: 'complete' },
+    ];
+
+    const [h] = deriveStreamHealth({
+        streams: [{ folder: 'nl_mix', name: 'NL Mix' }],
+        rows,
+        currentSlot,
+        windowHours,
+        lastCompleteByFolder: { nl_mix: '2026-10-20-00' }, // stale, older
+    });
+
+    assert.deepStrictEqual(h.lastSuccessfulSlot, { date, hour: '05' });
 });
 
 test('intermittent partials/missing → degraded', () => {
@@ -107,13 +131,16 @@ test('intermittent partials/missing → degraded', () => {
     assert.deepStrictEqual(h.lastSuccessfulSlot, { date, hour: '11' });
 });
 
-test('brand-new stream with zero rows → never', () => {
+test('brand-new stream with zero rows and no all-time complete → never', () => {
     const currentSlot = { date: '2026-10-23', hour: '12' };
+    // No rows AND no entry in lastCompleteByFolder → the stream never recorded
+    // a single complete slot in all history → never (distinct from down).
     const [h] = deriveStreamHealth({
         streams: [{ folder: 'brand_new', name: 'Brand New' }],
         rows: [],
         currentSlot,
         windowHours: 24,
+        lastCompleteByFolder: {}, // nothing ever completed for any folder
     });
 
     assert.strictEqual(h.status, 'never');

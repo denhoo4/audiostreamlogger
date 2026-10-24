@@ -53,15 +53,21 @@ Plan: `.agents/tasks/audiostreamlogger-stream-health-2026-10-23/plan.md`; verifi
   `recordings.listRecentByDate(start, end)`, joins `listStreams()`, and returns
   `{window_hours, generated_slot, unhealthy_count, counts, streams[]}`. `windowHours` validated to an
   int in [1,168] (400 `{field:'windowHours'}`). Documented in `openapi/spec.js` (StreamHealthResponse).
+- **never-vs-down distinction (review fix):** the route also passes the helper an ALL-TIME
+  last-complete signal from the new `recordings.latestCompleteByFolder()` (`MAX(date||'-'||hour)` over
+  every complete row, window-independent). So `never` means "no complete recording EVER", and a stream
+  that recorded before but has nothing good in the window classifies `down` (not `never`) even though
+  `listRecentByDate` returns zero in-window rows for it.
 - **Frontend** `src/frontend/src/settings/StreamHealth.tsx` (rendered in SettingsPage between
   WorkerStatus and RecordingsAnalysis): problem streams (down→degraded→never) listed first with their
   symptom — status badge, consecutive-missing count, last successful hour (or "no recordings yet");
   healthy streams summarised ("N streams OK"). Loading + ApiError states mirror WorkerStatus. Typed
   client `getStreamHealth()` + interfaces added to `api.ts`.
-- **Tests:** api node:test 139 (new `stream-health.test.js` pure-helper cases: ok/down/degraded/never/
-  consecutive-missing/current-hour grace + `analysis-routes.test.js` route cases: 401, windowHours 400s,
-  authenticated shape with an ok + a never stream); frontend vitest 23 (new `StreamHealth.test.tsx`:
-  problem ordering + symptoms, all-ok summary, error alert).
+- **Tests:** api node:test 140 (new `stream-health.test.js` pure-helper cases: ok/down (empty
+  in-window rows + injected all-time signal)/degraded/never/consecutive-missing/current-hour grace +
+  `analysis-routes.test.js` route cases: 401, windowHours 400s, authenticated shape with an ok, a
+  never, AND a long-stopped `down` stream); frontend vitest 23 (new `StreamHealth.test.tsx`: problem
+  ordering + symptoms, all-ok summary, error alert).
 
 ### `testing-ci` — MERGED + PUSHED (CHUNK E: testing strategy + CI + dependency automation + architecture docs; tests/config/docs ONLY, NO runtime behavior change; fast-forward merged into main AND pushed to origin/main, main == testing-ci == bad6177)
 Isolated git worktree at `.worktrees/testing-ci` on branch `testing-ci`. Plan:

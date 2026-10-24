@@ -20,8 +20,12 @@
  *
  * Boundaries (per stream, over the last `windowHours` slots ending at
  * `currentSlot` inclusive):
- *   - never    — zero recordings rows anywhere in the injected set AND no
- *                complete slot ever (brand-new stream that never recorded).
+ *   - never    — the stream has NO complete recording ever and no rows at all
+ *                in the injected set (brand-new stream that never recorded).
+ *                "ever" is decided from the injected `lastCompleteByFolder`
+ *                all-time signal when provided, NOT from the in-window rows —
+ *                this is what keeps a long-stopped stream (which contributes
+ *                zero in-window rows) classified `down`, not `never`.
  *   - down     — not never, and NO complete/live-recording slot anywhere in the
  *                recent window (was recording before, nothing good recently).
  *   - degraded — at least one healthy-present slot in the window AND at least
@@ -107,11 +111,36 @@ function windowSlots(currentSlot, windowHours) {
  * @param {{date:string, hour:string}} args.currentSlot
  *   The current (in-progress) local hour-slot, injected by the caller.
  * @param {number} [args.windowHours=24]  Window length in hours.
+ * @param {Object<string,string>|Map<string,string>} [args.lastCompleteByFolder]
+ *   ALL-TIME latest complete slot key ('YYYY-MM-DD-HH') per folder, independent
+ *   of the window. Supplied by the route from a `MAX(date||'-'||hour)` lookup
+ *   over every complete row so that `never` means "no complete row EVER" and a
+ *   stream that stopped before the window still classifies `down` (not `never`).
+ *   When omitted the helper falls back to the latest complete it sees in `rows`,
+ *   which only covers the window — so the route MUST pass this for correctness.
  * @returns {Array<{folder, name, status, lastSuccessfulSlot, consecutiveMissing, expectedInWindow, presentInWindow}>}
  */
-function deriveStreamHealth({ streams, rows, currentSlot, windowHours = 24 }) {
+function deriveStreamHealth({
+    streams,
+    rows,
+    currentSlot,
+    windowHours = 24,
+    lastCompleteByFolder,
+}) {
     const slots = windowSlots(currentSlot, windowHours);
     const currentKey = slotKey(currentSlot);
+
+    // Normalize the injected all-time last-complete signal into a lookup that
+    // accepts either a Map or a plain object keyed by folder.
+    const allTimeLastComplete = (folder) => {
+        if (!lastCompleteByFolder) {
+            return undefined;
+        }
+        if (lastCompleteByFolder instanceof Map) {
+            return lastCompleteByFolder.get(folder);
+        }
+        return lastCompleteByFolder[folder];
+    };
 
     // Group rows by folder → Map(slotKey -> status) + track the latest complete.
     const byFolder = new Map();
@@ -134,7 +163,20 @@ function deriveStreamHealth({ streams, rows, currentSlot, windowHours = 24 }) {
         const folder = stream.folder;
         const entry = byFolder.get(folder);
         const statusBySlot = entry ? entry.statusBySlot : new Map();
-        const lastCompleteKey = entry ? entry.lastComplete : null;
+        const inWindowLastComplete = entry ? entry.lastComplete : null;
+
+        // Prefer the all-time signal when supplied; otherwise fall back to the
+        // latest complete seen in the (window-scoped) rows. Keep the later of
+        // the two so an in-window complete newer than the stale signal still
+        // wins (defensive; they should agree in practice).
+        const allTime = allTimeLastComplete(folder);
+        let lastCompleteKey = allTime ?? null;
+        if (
+            inWindowLastComplete !== null &&
+            (lastCompleteKey === null || inWindowLastComplete > lastCompleteKey)
+        ) {
+            lastCompleteKey = inWindowLastComplete;
+        }
 
         // A slot is healthy-present when a row exists and it is complete or (for
         // the live current hour) recording. Everything else — partial/missing
@@ -189,6 +231,13 @@ function deriveStreamHealth({ streams, rows, currentSlot, windowHours = 24 }) {
                   };
 
         // Classify (precedence never > down > degraded > ok).
+        //
+        // `never` requires BOTH no complete recording EVER (lastCompleteKey is
+        // null — decided from the all-time signal, not just the window) AND no
+        // rows at all in the injected set. A stream that recorded before and
+        // then stopped has a non-null all-time lastCompleteKey, so it skips
+        // `never` and lands in `down` below — this is the stopped-vs-brand-new
+        // distinction the feature requires.
         let status;
         const hasAnyRow = statusBySlot.size > 0;
         if (!hasAnyRow && lastCompleteKey === null) {

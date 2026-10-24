@@ -85,6 +85,20 @@ before(async () => {
         folder: 'nl_never',
         url: 'https://example.com/nl_never',
     });
+    // nl_down models a stream that recorded in the past and then STOPPED: its
+    // only complete row is far older than any health window, so the route's
+    // window-scoped listRecentByDate never fetches it — but the all-time
+    // latestCompleteByFolder lookup does. It must classify `down`, NOT `never`.
+    // (This is the regression the reviewer flagged: stopped-and-down vs
+    // brand-new must be distinguishable through the REAL endpoint.) The old row
+    // itself is seeded inside the stream-health test, not here, so the
+    // fixed-date summary/gaps assertions on nl_one only (one folder) stay exact.
+    streams.createStream({
+        country: 'NL',
+        name: 'NL Down',
+        folder: 'nl_down',
+        url: 'https://example.com/nl_down',
+    });
 
     const analysisRouter = require('../routes/analysis');
     const app = express();
@@ -242,12 +256,25 @@ test('authenticated stream-health returns per-stream health + roll-up', async ()
         });
     }
 
+    // nl_down: a single complete row far older than any window, so
+    // listRecentByDate won't fetch it but latestCompleteByFolder will → down.
+    recordings.upsertRecording(db, {
+        stream_folder: 'nl_down',
+        date: '2020-01-01',
+        hour: '00',
+        file_path: '/audio/nl_down/nl_down-2020-01-01-00.mp3',
+        status: 'complete',
+        duration_seconds: 3600,
+        size_bytes: 1000,
+        segment_count: 1,
+    });
+
     const res = await getJson('/api/analysis/stream-health');
     assert.strictEqual(res.status, 200);
     assert.strictEqual(res.body.window_hours, 24);
     assert.ok(res.body.generated_slot && res.body.generated_slot.date);
     assert.ok(Array.isArray(res.body.streams));
-    assert.strictEqual(res.body.streams.length, 2); // nl_one + nl_never
+    assert.strictEqual(res.body.streams.length, 3); // nl_ok + nl_never + nl_down
 
     const valid = new Set(['ok', 'degraded', 'down', 'never']);
     for (const s of res.body.streams) {
@@ -271,10 +298,20 @@ test('authenticated stream-health returns per-stream health + roll-up', async ()
     );
     assert.strictEqual(byFolder.nl_ok.status, 'ok');
     assert.strictEqual(byFolder.nl_never.status, 'never');
+    // The long-stopped stream (only an out-of-window complete) must be `down`,
+    // NOT `never` — proving the all-time last-complete signal flows through the
+    // real route, not just the hand-injected pure-helper test.
+    assert.strictEqual(byFolder.nl_down.status, 'down');
+    assert.notStrictEqual(byFolder.nl_down.lastSuccessfulSlot, null);
+    assert.deepStrictEqual(byFolder.nl_down.lastSuccessfulSlot, {
+        date: '2020-01-01',
+        hour: '00',
+    });
 
     // Counts roll up; unhealthy_count == down + degraded + never (non-ok).
-    assert.strictEqual(res.body.counts.total, 2);
+    assert.strictEqual(res.body.counts.total, 3);
     assert.strictEqual(res.body.counts.ok, 1);
     assert.strictEqual(res.body.counts.never, 1);
-    assert.strictEqual(res.body.unhealthy_count, 1);
+    assert.strictEqual(res.body.counts.down, 1);
+    assert.strictEqual(res.body.unhealthy_count, 2);
 });

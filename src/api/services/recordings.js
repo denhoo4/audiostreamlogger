@@ -203,6 +203,32 @@ function listRecentByDate(startDate, endDate) {
 }
 
 /**
+ * ALL-TIME latest complete hour-slot per folder, as a plain object
+ *   { [stream_folder]: 'YYYY-MM-DD-HH' }
+ * computed from a `MAX(date || '-' || hour)` over every `status = 'complete'`
+ * row (not scoped to any window). The stream-health endpoint feeds this to
+ * deriveStreamHealth so `never` means "no complete recording EVER" and a stream
+ * that stopped before the recent window is still classified `down`, not `never`.
+ */
+function latestCompleteByFolder() {
+    const rows = db
+        .prepare(
+            `SELECT stream_folder, MAX(date || '-' || hour) AS last_complete
+             FROM recordings
+             WHERE status = 'complete'
+             GROUP BY stream_folder`
+        )
+        .all();
+    const out = {};
+    for (const row of rows) {
+        if (row.last_complete) {
+            out[row.stream_folder] = row.last_complete;
+        }
+    }
+    return out;
+}
+
+/**
  * Indexed SQL aggregates grouped by stream_folder plus an overall roll-up:
  *   { per_stream: [{ stream_folder, total_hours, storage_bytes,
  *                    recording_count, avg_duration_seconds, earliest, latest }],
@@ -254,5 +280,6 @@ module.exports = {
     listAll,
     listByStreamAndRange,
     listRecentByDate,
+    latestCompleteByFolder,
     summarize,
 };

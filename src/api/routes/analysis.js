@@ -13,6 +13,7 @@ const {
     summarize,
     listByStreamAndRange,
     listRecentByDate,
+    latestCompleteByFolder,
     expectedHourSlots,
     missingSlots,
 } = require('../services/recordings');
@@ -144,17 +145,25 @@ router.get('/stream-health', requireAuth, (req, res) => {
     try {
         const now = new Date();
         const currentSlot = toLocalSlot(now);
-        // The window's earliest calendar date: windowHours-1 hours back.
-        const startMs = now.getTime() - (windowHours - 1) * 3600 * 1000;
+        // The window's earliest calendar date: windowHours-1 hours back. Pad one
+        // extra calendar day earlier so a DST transition inside the window can
+        // never make the fetched date range narrower than the UTC-walked slots
+        // the helper enumerates — the helper slices to the exact window, so the
+        // extra day's rows are harmless (they fall outside windowSlots()).
+        const startMs = now.getTime() - windowHours * 3600 * 1000;
         const startDate = toLocalSlot(new Date(startMs)).date;
 
         const rows = listRecentByDate(startDate, currentSlot.date);
         const streams = listStreams();
+        // All-time last-complete per folder decides never-vs-down independent of
+        // the window (a long-stopped stream has no in-window rows but IS down).
+        const lastCompleteByFolder = latestCompleteByFolder();
         const health = deriveStreamHealth({
             streams,
             rows,
             currentSlot,
             windowHours,
+            lastCompleteByFolder,
         });
         const counts = summarizeHealth(health);
 
