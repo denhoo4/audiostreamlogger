@@ -1,7 +1,10 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (stream-health branch: item 21 admin "which streams are NOT working" health
+Last updated: 2026-10-23 (stream-url-validation branch: item 14 — non-blocking "Test" stream-URL
+reachability probe — implemented: `POST /api/streams/test-url` + a "Test" button in StreamTable;
+format validation stays the only save gate; api 158 / frontend 26 tests green in node:26-bookworm;
+in review. Earlier: stream-health branch: item 21 admin "which streams are NOT working" health
 panel implemented on `.worktrees/stream-health` — read-only, derived from existing recordings rows,
 api 139 / frontend 23 tests green; in review. Earlier: reconcile-job branch: FEAT-001 planner +
 FEAT-002 worker reconcile job landed — see item 18. ALL FIVE CHUNKS (A–E) + all big steps DONE, merged, and pushed to
@@ -9,9 +12,9 @@ origin/main == d16304a. Full roadmap complete; see HANDOVER.md for a fresh-start
 Dependabot + GitHub Actions are now enabled on the repo; its first run opened 10 PRs (#3–#12) —
 see item 19 below for which are green/safe vs. red. Item 20 (API docs) is DECIDED + IMPLEMENTED on
 branch `api-openapi-docs` (OpenAPI 3 via zod + swagger-ui-express behind requireAuth), awaiting
-review/merge. Open feature items remaining: 14 (stream URL reachability validation), 17 (stream
-ordering / default stream / country grouping), 18 (recordings reconcile job), and 19 (Dependabot PR
-triage).)
+review/merge. Open feature items remaining: 17 (stream ordering / default stream / country
+grouping), 18 (recordings reconcile job), and 19 (Dependabot PR triage). Item 14 (stream URL
+reachability validation) is IMPLEMENTED on branch `stream-url-validation`, in review.)
 
 STATUS SUMMARY (what is DONE + on origin/main):
 - Node 26 Docker stack, 4 services: recorder, worker, api, frontend (cleaner + peakfilegenerator
@@ -37,6 +40,35 @@ STATUS SUMMARY (what is DONE + on origin/main):
 ---
 
 ## Branches
+
+### `stream-url-validation` — IN REVIEW (item 14: NON-BLOCKING "Test" stream-URL reachability probe; NO schema change)
+Isolated git worktree at `.worktrees/stream-url-validation` on branch `stream-url-validation`.
+Plan: `.agents/tasks/stream-url-validation-2026-10-23/plan.md`; verification evidence:
+`.agents/tasks/stream-url-validation-2026-10-23/verification.md`. Scope is `src/api/` + `src/frontend/`
+only — no recorder/worker/compose/nginx/schema/journal_mode edits.
+- **Probe helper** `src/api/lib/probe-stream-url.js`: `probeStreamUrl(url, {request, now})` +
+  the pure `classifyResponse({status, headers})` + `ProbeInputError`. Re-runs the EXISTING
+  `validateUrl` (http(s) only) first, then probes via built-in node:http/node:https (NO ffprobe, NO
+  child process, NO shell — the untrusted URL goes through `new URL()` + native request options, never
+  a command string), hard 6 s timeout, ≤3 http(s)-only redirect hops, headers-only read. Classifies
+  2xx+audio/ICY/HLS → reachable; non-2xx / non-audio / DNS / timeout → reachable:false + short detail.
+  INJECTABLE `request` seam → unit-tested with a fake (no real network).
+- **Endpoint** `POST /api/streams/test-url` (requireAuth) in `routes/api.js`: `ProbeInputError → 400
+  {field:'url'}`; any other throw → 200 `{reachable:false, detail:'probe failed'}` (never 500 for the
+  advisory helper). create/update/delete + the format gate UNCHANGED. Documented in `openapi/spec.js`
+  (StreamTestUrlInput + StreamTestResult).
+- **Frontend** `src/frontend/src/settings/StreamTable.tsx`: a `type="button"` "Test" button beside the
+  URL field (never submits, disabled while probing / url empty) + an `aria-live="polite"` `role=status`
+  region rendering green "Reachable" / red "Not reachable: <detail>". Clears on url change / resetForm
+  / startEdit. Typed `testStreamUrl()` + `StreamTestResult` added to `api.ts`. The probe NEVER saves
+  and NEVER gates the save path.
+- **Tests:** api node:test 158 (new `probe-stream-url.test.js` classifier/mapping with a fake request:
+  2xx+audio/ICY/HLS reachable, non-audio/404/ENOTFOUND/timeout not reachable, redirect chain, non-
+  http(s) redirect, too-many-redirects, malformed + `file:` → ProbeInputError with transport asserted
+  NOT called; `test-url-route.test.js` 401 anon / reachable / not-reachable / 400 ProbeInputError /
+  advisory-throw). frontend 26 vitest (StreamTable.test.tsx +3: Test→Reachable, Test→Not reachable,
+  Test-is-non-submit / no createStream, api.ts client MOCKED). Verified in node:26-bookworm: api green,
+  frontend vitest + `tsc -b && vite build` green.
 
 ### `stream-health` — IN REVIEW (item 21: admin "which streams are NOT working" health panel; READ-ONLY, derived from existing recordings rows, NO schema change)
 Isolated git worktree at `.worktrees/stream-health` on branch `stream-health` (based on main == 6d865f1).
@@ -1011,14 +1043,20 @@ fraction of the effort. Decide deliberately before building; not started.
 Two levels — decide at build time how deep to go:
 - [ ] Format validation (already done in settings-db-core / stream CRUD: must be a valid http(s)
       URL). Keep this.
-- [ ] NEW: actually CHECK the stream URL is reachable / is a real audio stream when the user
-      saves it in the admin screen — i.e. a server-side test request (HEAD/GET with a short
-      timeout, check status + content-type looks like audio, maybe read a few bytes), returning a
-      clear pass/fail to the admin UI. Consider: do it on save (block invalid) vs. a "Test" button
-      next to the field (non-blocking). Network-dependent, so handle timeouts/unreachable
-      gracefully and don't hang the request. Likely a small api endpoint + a button in the stream
-      form. Decide blocking-on-save vs. test-button with the user when building.
-Order: small-to-medium admin feature; fold into the admin-screen work or a follow-up to Chunk A.
+- [x] DONE on branch `stream-url-validation` (NON-BLOCKING "Test" button, NOT a save gate — user
+      decision): new `POST /api/streams/test-url` (requireAuth) in src/api/routes/api.js backed by
+      `src/api/lib/probe-stream-url.js`. It re-runs the EXISTING `validateUrl` (http(s) only → 400 on
+      malformed/non-http(s)), then probes via built-in node:http/node:https (NO ffprobe, NO child
+      process, NO shell — the untrusted URL goes through `new URL()` + the native request options,
+      never a command string) with a hard 6 s timeout and ≤3 http(s)-only redirect hops, reading only
+      status + headers. Returns `{reachable, status?, contentType?, detail}`; classifies 2xx+audio/
+      ICY/HLS → reachable, non-2xx / non-audio / DNS / timeout → reachable:false + short detail; never
+      500s for the advisory helper. Documented in src/api/openapi/spec.js. Frontend: typed
+      `testStreamUrl` client in src/frontend/src/api.ts + a `type="button"` "Test" button in
+      StreamTable.tsx with an `aria-live` result region (green "Reachable" / red "Not reachable:
+      <detail>"); it never saves and never gates the save path. Format validation stays the ONLY hard
+      gate on create/update. Verified in node:26-bookworm: api 158 node:test green (new probe + route
+      suites), frontend 26 vitest green + `tsc -b && vite build` clean. In review.
 
 ### 15. Stop replacing `_` with a space in stream names (user decision 2026-10-23)
 History: the project was originally built requiring stream names to use `_` instead of spaces

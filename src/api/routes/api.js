@@ -11,6 +11,10 @@ const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../auth/middleware');
 const { validateStream } = require('../lib/validate-stream');
+const {
+    probeStreamUrl,
+    ProbeInputError,
+} = require('../lib/probe-stream-url');
 const { buildSettings2 } = require('../services/browse');
 const {
     getConfig,
@@ -141,6 +145,33 @@ router.post('/streams', requireAuth, (req, res) => {
         }
         console.error('Error creating stream:', err);
         return res.status(500).json({ error: `Internal Server Error: ${err.message}` });
+    }
+});
+
+// POST /api/streams/test-url (requireAuth) — advisory reachability probe.
+//
+// NON-BLOCKING "Test" helper: it does NOT persist anything and is NOT a gate on
+// create/update (the format validator stays the only save-path gate). It runs
+// the SAME validateUrl rule first (http(s) only, well-formed) and 400s on bad
+// input, then probes whether the URL answers like a reachable audio stream,
+// bounded by a hard timeout. It never 500s on a probe failure — a DNS/timeout/
+// non-2xx/non-audio outcome is reported as {reachable:false, detail}. SSRF
+// reasoning is documented in lib/probe-stream-url.js (admin-only, http(s)-only,
+// bounded timeout, headers-only read, no shell interpolation of the URL).
+router.post('/streams/test-url', requireAuth, async (req, res) => {
+    const body = req.body || {};
+    try {
+        const result = await probeStreamUrl(body.url);
+        return res.json(result);
+    } catch (err) {
+        if (err instanceof ProbeInputError) {
+            return res.status(400).json({ error: err.message, field: 'url' });
+        }
+        // Defensive: the probe is designed never to throw for network failures,
+        // but if something unexpected happens we still return the advisory
+        // shape rather than leaking a 500 for a non-critical helper.
+        console.error('Error probing stream url:', err);
+        return res.json({ reachable: false, detail: 'probe failed' });
     }
 });
 

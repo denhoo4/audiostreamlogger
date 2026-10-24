@@ -19,6 +19,7 @@ const getStreams = vi.fn<() => Promise<StreamRecord[]>>();
 const createStream = vi.fn<(body: StreamInput) => Promise<StreamRecord>>();
 const updateStream = vi.fn();
 const deleteStream = vi.fn();
+const testStreamUrl = vi.fn();
 
 vi.mock("../api", () => ({
   ApiError: class ApiError extends Error {},
@@ -26,6 +27,7 @@ vi.mock("../api", () => ({
   createStream: (body: StreamInput) => createStream(body),
   updateStream: (id: number, body: StreamInput) => updateStream(id, body),
   deleteStream: (id: number) => deleteStream(id),
+  testStreamUrl: (url: string) => testStreamUrl(url),
 }));
 
 const ROWS: StreamRecord[] = [
@@ -98,5 +100,78 @@ describe("StreamTable", () => {
       folder: "radio_one",
       url: "https://example.com/one",
     });
+  });
+
+  it("clicking Test with a filled url calls testStreamUrl and shows 'Reachable'", async () => {
+    getStreams.mockResolvedValue([]);
+    testStreamUrl.mockResolvedValue({
+      reachable: true,
+      status: 200,
+      contentType: "audio/mpeg",
+      detail: "reachable audio stream",
+    });
+    render(<StreamTable />);
+    await screen.findByText("No streams yet.");
+
+    const textboxes = screen.getAllByRole("textbox");
+    // Order in the form: Name, Folder, URL.
+    fireEvent.change(textboxes[2], {
+      target: { value: "https://example.com/one" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+
+    await waitFor(() => {
+      expect(testStreamUrl).toHaveBeenCalledWith("https://example.com/one");
+    });
+    expect(await screen.findByText(/Reachable/)).toBeInTheDocument();
+  });
+
+  it("shows 'Not reachable: <detail>' when the probe resolves reachable:false", async () => {
+    getStreams.mockResolvedValue([]);
+    testStreamUrl.mockResolvedValue({
+      reachable: false,
+      status: 404,
+      detail: "server returned HTTP 404",
+    });
+    render(<StreamTable />);
+    await screen.findByText("No streams yet.");
+
+    const textboxes = screen.getAllByRole("textbox");
+    fireEvent.change(textboxes[2], {
+      target: { value: "https://example.com/missing" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+
+    expect(
+      await screen.findByText(/Not reachable: server returned HTTP 404/),
+    ).toBeInTheDocument();
+  });
+
+  it("the Test button is a non-submit button and does NOT call createStream", async () => {
+    getStreams.mockResolvedValue([]);
+    testStreamUrl.mockResolvedValue({
+      reachable: true,
+      status: 200,
+      detail: "reachable audio stream",
+    });
+    render(<StreamTable />);
+    await screen.findByText("No streams yet.");
+
+    const textboxes = screen.getAllByRole("textbox");
+    fireEvent.change(textboxes[2], {
+      target: { value: "https://example.com/one" },
+    });
+
+    const testButton = screen.getByRole("button", { name: "Test" });
+    expect(testButton).toHaveAttribute("type", "button");
+
+    fireEvent.click(testButton);
+
+    await waitFor(() => {
+      expect(testStreamUrl).toHaveBeenCalledTimes(1);
+    });
+    expect(createStream).not.toHaveBeenCalled();
   });
 });

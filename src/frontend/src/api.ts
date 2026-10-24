@@ -507,6 +507,38 @@ export async function deleteStream(id: number): Promise<void> {
   }
 }
 
+/**
+ * Result of the advisory reachability probe (POST /api/streams/test-url).
+ * `reachable` is the headline; `detail` is a short human reason shown inline.
+ * `status`/`contentType` are present when the probe got a response.
+ */
+export interface StreamTestResult {
+  reachable: boolean;
+  status?: number;
+  contentType?: string;
+  detail: string;
+}
+
+/**
+ * POST /api/streams/test-url {url} -> advisory reachability probe (requireAuth).
+ * NON-BLOCKING "Test" helper: it never persists anything. A reachable/
+ * not-reachable outcome comes back as a 200 StreamTestResult; a malformed /
+ * non-http(s) url surfaces the backend's 400 {error, field:'url'} as an
+ * ApiError (same pattern as createStream/putTitle).
+ */
+export async function testStreamUrl(url: string): Promise<StreamTestResult> {
+  const res = await fetch(`${window.location.origin}/api/streams/test-url`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+  });
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as StreamTestResult;
+}
+
 // --- Job-queue admin client (/api/jobs + /api/schedules + /api/config) ----
 // All behind requireAuth; same-origin credentials carry the session cookie.
 

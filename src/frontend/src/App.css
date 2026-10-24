@@ -83,6 +83,11 @@
   margin: 4px 0;
 }
 
+.settings-url-test {
+  margin: 4px 0;
+  min-height: 1.2em;
+}
+
 /* Live job viewer (JobViewer.tsx) */
 .job-list {
   list-style: none;

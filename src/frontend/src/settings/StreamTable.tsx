@@ -4,9 +4,11 @@ import {
   createStream,
   deleteStream,
   getStreams,
+  testStreamUrl,
   updateStream,
   type StreamInput,
   type StreamRecord,
+  type StreamTestResult,
 } from "../api";
 import { COUNTRIES_BY_NAME, countryName } from "./countries";
 
@@ -36,6 +38,19 @@ export default function StreamTable() {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Advisory URL reachability "Test" state. Independent of the save path:
+  // `testing` drives the pending label, `testResult` holds the probe outcome,
+  // and `testError` holds an ApiError message (e.g. the backend's 400 on a
+  // malformed url). None of these gate create/update.
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<StreamTestResult | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+
+  function clearTest() {
+    setTestResult(null);
+    setTestError(null);
+  }
+
   async function refresh() {
     setLoading(true);
     setListError(null);
@@ -58,6 +73,7 @@ export default function StreamTable() {
     setEditingId(null);
     setForm(EMPTY_FORM);
     setFormError(null);
+    clearTest();
   }
 
   function startEdit(stream: StreamRecord) {
@@ -69,6 +85,27 @@ export default function StreamTable() {
       url: stream.url,
     });
     setFormError(null);
+    clearTest();
+  }
+
+  /**
+   * Run the advisory reachability probe for the current url. NON-BLOCKING:
+   * this never saves and never blocks the submit button; it only shows an
+   * inline reachable / not-reachable result. Guards against an empty url.
+   */
+  async function handleTest() {
+    if (form.url.trim() === "") return;
+    setTesting(true);
+    clearTest();
+    try {
+      setTestResult(await testStreamUrl(form.url));
+    } catch (err) {
+      setTestError(
+        err instanceof ApiError ? err.message : "Could not test the URL",
+      );
+    } finally {
+      setTesting(false);
+    }
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -190,9 +227,39 @@ export default function StreamTable() {
           <input
             type="text"
             value={form.url}
-            onChange={(e) => setForm({ ...form, url: e.target.value })}
+            onChange={(e) => {
+              setForm({ ...form, url: e.target.value });
+              clearTest();
+            }}
           />
         </label>
+        <div className="settings-form-actions">
+          <button
+            type="button"
+            onClick={handleTest}
+            disabled={testing || form.url.trim() === ""}
+          >
+            {testing ? "Testing…" : "Test"}
+          </button>
+        </div>
+        <p className="settings-url-test" role="status" aria-live="polite">
+          {testError ? (
+            <span className="settings-error">Not reachable: {testError}</span>
+          ) : testResult ? (
+            testResult.reachable ? (
+              <span className="settings-success">
+                Reachable
+                {testResult.contentType
+                  ? ` (${testResult.contentType})`
+                  : ""}
+              </span>
+            ) : (
+              <span className="settings-error">
+                Not reachable: {testResult.detail}
+              </span>
+            )
+          ) : null}
+        </p>
         {formError && (
           <p className="settings-error" role="alert">
             {formError}

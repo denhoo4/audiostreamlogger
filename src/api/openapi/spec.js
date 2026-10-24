@@ -49,6 +49,21 @@ const StreamInput = z
     })
     .openapi('StreamInput');
 
+const StreamTestUrlInput = z
+    .object({
+        url: z.string().openapi({ example: 'https://example.com/stream' }),
+    })
+    .openapi('StreamTestUrlInput');
+
+const StreamTestResult = z
+    .object({
+        reachable: z.boolean(),
+        status: z.number().int().optional(),
+        contentType: z.string().optional(),
+        detail: z.string().openapi({ example: 'reachable audio stream' }),
+    })
+    .openapi('StreamTestResult');
+
 const Stream = StreamInput.extend({
     id: z.number().int(),
     created_at: z.string(),
@@ -401,6 +416,31 @@ function buildOpenApiDocument() {
                 description: 'folder already in use',
                 content: json(ErrorResponse),
             },
+            ...serverErr,
+        },
+    });
+    registry.registerPath({
+        method: 'post',
+        path: '/api/streams/test-url',
+        tags: ['streams'],
+        summary:
+            'Advisory reachability probe for a stream URL (non-blocking "Test")',
+        description:
+            'Admin-only helper that checks whether a URL answers like a ' +
+            'reachable audio stream. It does NOT persist anything and is NOT a ' +
+            'gate on create/update. Validates http(s) URL first (400 on ' +
+            'malformed/non-http(s) input), then probes with a bounded timeout; ' +
+            'network/timeout/non-2xx/non-audio outcomes return 200 with ' +
+            'reachable:false and a short detail.',
+        security: authed,
+        request: { body: { content: json(StreamTestUrlInput) } },
+        responses: {
+            200: {
+                description: 'probe result (reachable true/false + detail)',
+                content: json(StreamTestResult),
+            },
+            ...validationErr,
+            ...authErr,
             ...serverErr,
         },
     });
