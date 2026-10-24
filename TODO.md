@@ -3,8 +3,9 @@
 Living document tracking the modernization/cleanup of the project.
 Last updated: 2026-10-23 (item 22 IN PROGRESS on branch `stream-quality`: per-stream recording
 quality — FEAT-001 api backend + FEAT-002 recorder/worker/api de-`.mp3`-ification + FEAT-003 frontend
-(player per-codec extension + admin codec/bitrate/bit-depth controls) all landed; the branch's coding
-is complete (integration/review still to run). FEAT-001:
+(player per-codec extension + admin codec/bitrate/bit-depth controls) all landed; cross-FEAT
+integration verification PASSED (one fix: opus pinned to 48000 Hz — libopus rejects 44100) and review
+is next. FEAT-001:
 additive `codec`/`bitrate_kbps`/`bit_depth` columns + idempotent in-place migration, authoritative
 server-side quality validation, service persistence with the behaviour-preserving mp3@160 default,
 the three write call-sites forwarding the fields, a `codec` field on the public `/settings`
@@ -15,7 +16,7 @@ per-stream codec (output name + ffmpeg output-option array + recordings-row file
 de-`.mp3`-ification across recorder/worker/api (filename parsers return the ext; worker
 peakgen/reconcile scan `.mp3/.opus/.flac` and `upsertRecordingMeta` builds the real-ext file_path;
 cleaner row-match via the widened parser; api browse lists opus/flac hours + selection-export gained
-an `ext` field). recorder node:test 53 / worker 56 / api 211 green in node:26-bookworm, and
+an `ext` field). recorder node:test 54 / worker 56 / api 211 green in node:26-bookworm, and
 `docker build -f Dockerfile.recorder` succeeds with the new module. FEAT-003: `api.ts` gains a `Codec`
 type + codec/bitrate_kbps/bit_depth on Stream/StreamRecord/StreamInput, `audioMp3Url` renamed to
 `audioUrl(...,ext)`, and an optional `ext` on the selection-export body; `App.tsx` derives the player
@@ -84,9 +85,22 @@ STATUS SUMMARY (what is DONE + on origin/main):
 
 ## Branches
 
-### `stream-quality` — IN PROGRESS (item 22: per-stream codec/bitrate/bit-depth; ADDITIVE schema change; FEAT-001 api backend + FEAT-002 recorder/worker/api de-.mp3 + FEAT-003 frontend DONE; integration/review still to run)
+### `stream-quality` — IN PROGRESS (item 22: per-stream codec/bitrate/bit-depth; ADDITIVE schema change; FEAT-001 api backend + FEAT-002 recorder/worker/api de-.mp3 + FEAT-003 frontend DONE; cross-FEAT integration PASSED (opus sample-rate fix), review next)
 Isolated git worktree at `.worktrees/stream-quality` on branch `stream-quality`. Task artifacts under
-`.agents/tasks/stream-quality-2026-10-23/` (context.json + design.md + features/FEAT-001..N.json).
+`.agents/tasks/stream-quality-2026-10-23/` (context.json + design.md + features/FEAT-001..N.json +
+verification.md).
+
+**Cross-FEAT integration (2026-10-23) — PASSED with one fix.** All four suites green in
+node:26-bookworm (api 211, frontend 41, worker 56, recorder 54); all four images `docker compose
+build`; real per-codec e2e smoke (throwaway `--rm` worker image, no ports/host mounts) confirmed
+mp3→mp3, opus→ogg, flac→flac containers each peak-readable via real `audiowaveform` and recognised by
+both filename parsers + the cleaner row-match (aac excluded — clamped to mp3 and parsed to null);
+cold-data compose stack healthy on alt port 9789 + torn down clean (9703 never bound, real volumes
+cold). Fix: FEAT-002's `encoding.js` hard-coded `-ar 44100` for opus, but libopus only accepts
+8k/12k/16k/24k/48k Hz and errors out on 44100 — i.e. **every opus recording would have crashed the
+recorder**. The design table (§6) and §4 probe missed it (the probe let ffmpeg pick opus' default
+48000). Fixed by pinning opus to its native 48000 Hz (`OPUS_SAMPLE_RATE`); mp3/flac keep 44100. No
+user-facing change (sample rate is not a configurable control). See verification.md §2/§4.
 Resolved codec allowlist: `mp3` / `opus` / `flac` (aac excluded — the worker image's audiowaveform
 1.10.2 cannot read the AAC/M4A container; a documented follow-up). Schema change is ADDITIVE ONLY and
 `journal_mode` stays DELETE.
@@ -110,8 +124,9 @@ Resolved codec allowlist: `mp3` / `opus` / `flac` (aac excluded — the worker i
   `src/recorder/encoding.js`: `resolveEncoding(row)` clamps an unrecognised/NULL codec to the
   behaviour-preserving mp3@160 default (and reports `clamped`) and returns `{codec,ext,bitrate_kbps,
   bit_depth}`; `outputOptionsFor(enc)` returns the ffmpeg OUTPUT option **ARRAY** (never a shell
-  string — NFR-3): mp3 `-c:a libmp3lame -b:a <n>k -ar 44100`, opus `-c:a libopus -b:a <n>k -ar 44100`,
-  flac `-c:a flac -ar 44100` + `-sample_fmt s16` (16-bit) / `-sample_fmt s32 -bits_per_raw_sample 24`
+  string — NFR-3): mp3 `-c:a libmp3lame -b:a <n>k -ar 44100`, opus `-c:a libopus -b:a <n>k -ar 48000`
+  (libopus rejects 44100 — see the integration note below), flac `-c:a flac -ar 44100` + `-sample_fmt
+  s16` (16-bit) / `-sample_fmt s32 -bits_per_raw_sample 24`
   (24-bit). `ext === codec`. `Dockerfile.recorder` gains the MANDATORY `COPY src/recorder/encoding.js
   ./` (the recorder image copies by name; built + boot-required-module confirmed). `backoff-helpers.js`
   `segmentOutputName(folder,stamp,attempt,ext='mp3')` builds `.<ext>` / `.partN.<ext>`. `recorder.js`

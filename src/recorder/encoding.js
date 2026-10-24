@@ -22,8 +22,15 @@
 const DEFAULT_CODEC = 'mp3';
 const DEFAULT_BITRATE_KBPS = 160;
 
-// Fixed output sample rate, preserved for every codec (today's `-ar 44100`).
+// Fixed output sample rate, preserved for mp3/flac (today's `-ar 44100`).
 const SAMPLE_RATE = 44100;
+
+// libopus only accepts 8000/12000/16000/24000/48000 Hz and rejects 44100 with
+// "Specified sample rate 44100 is not supported" — which would crash the
+// recorder on every opus capture. Opus is internally 48 kHz, so we pin opus
+// output to its native 48000 Hz. (The browser/HTMLAudioElement resamples on
+// playback; sample rate is not a user-facing control — design §"Non-goals".)
+const OPUS_SAMPLE_RATE = 48000;
 
 // Allowlist mirrors src/api/lib/validate-stream.js CODECS (value domain owned by
 // the api; duplicated here as a trivial constant like the other cross-service
@@ -71,14 +78,15 @@ function resolveEncoding(row) {
 
 // Build the ffmpeg OUTPUT option ARRAY for a resolved encoding (design §6):
 //   mp3  -> -c:a libmp3lame -b:a <n>k -ar 44100
-//   opus -> -c:a libopus    -b:a <n>k -ar 44100
+//   opus -> -c:a libopus    -b:a <n>k -ar 48000  (libopus rejects 44100)
 //   flac -> -c:a flac -ar 44100  (+ -sample_fmt s16  for 16-bit
 //                                 | -sample_fmt s32 -bits_per_raw_sample 24  for 24-bit)
 // Returns a flat array of args (never a shell string — NFR-3).
 function outputOptionsFor(enc) {
     const e = enc || resolveEncoding(null);
     if (e.codec === 'opus') {
-        return ['-c:a', 'libopus', '-b:a', `${e.bitrate_kbps}k`, '-ar', String(SAMPLE_RATE)];
+        // libopus rejects 44100 Hz; pin to its native 48000 Hz (see OPUS_SAMPLE_RATE).
+        return ['-c:a', 'libopus', '-b:a', `${e.bitrate_kbps}k`, '-ar', String(OPUS_SAMPLE_RATE)];
     }
     if (e.codec === 'flac') {
         const opts = ['-c:a', 'flac', '-ar', String(SAMPLE_RATE)];
@@ -100,4 +108,5 @@ module.exports = {
     DEFAULT_CODEC,
     DEFAULT_BITRATE_KBPS,
     SAMPLE_RATE,
+    OPUS_SAMPLE_RATE,
 };

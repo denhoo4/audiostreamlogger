@@ -28,12 +28,24 @@ test('outputOptionsFor: mp3 honours an in-set non-default bitrate', () => {
     ]);
 });
 
-test('outputOptionsFor: opus maps to libopus with its bitrate', () => {
+test('outputOptionsFor: opus maps to libopus at 48000 Hz (libopus rejects 44100)', () => {
     const enc = resolveEncoding({ codec: 'opus', bitrate_kbps: 128, bit_depth: null });
     assert.strictEqual(enc.ext, 'opus');
+    // libopus only accepts 8k/12k/16k/24k/48k; 44100 fails to open the encoder
+    // and would crash the recorder on every opus capture (caught by the e2e
+    // smoke, plan item 23). Opus is internally 48 kHz, so we pin 48000.
     assert.deepStrictEqual(outputOptionsFor(enc), [
-        '-c:a', 'libopus', '-b:a', '128k', '-ar', '44100',
+        '-c:a', 'libopus', '-b:a', '128k', '-ar', '48000',
     ]);
+});
+
+test('outputOptionsFor: opus never emits -ar 44100 (regression: libopus rejects it)', () => {
+    for (const bitrate of [64, 96, 128, 160, 192]) {
+        const opts = outputOptionsFor(resolveEncoding({ codec: 'opus', bitrate_kbps: bitrate }));
+        const arIdx = opts.indexOf('-ar');
+        assert.notStrictEqual(arIdx, -1, 'opus args must set an explicit -ar');
+        assert.strictEqual(opts[arIdx + 1], '48000');
+    }
 });
 
 test('outputOptionsFor: flac 16-bit sets sample_fmt s16, no bitrate', () => {
