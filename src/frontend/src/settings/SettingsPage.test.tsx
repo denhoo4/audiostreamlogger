@@ -57,6 +57,21 @@ function stubFetch(authState: { authenticated: boolean; username?: string }) {
             stream_count: 0,
           },
         });
+      if (url.includes("/api/analysis/stream-health"))
+        return json({
+          window_hours: 24,
+          generated_slot: { date: "2026-10-23", hour: "12" },
+          unhealthy_count: 0,
+          counts: {
+            total: 0,
+            unhealthy: 0,
+            ok: 0,
+            degraded: 0,
+            down: 0,
+            never: 0,
+          },
+          streams: [],
+        });
       // Default: an empty object is safe for the remaining GETs.
       return json({});
     }),

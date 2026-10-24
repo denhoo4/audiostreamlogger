@@ -186,6 +186,23 @@ function listByStreamAndRange(folder, start, end) {
 }
 
 /**
+ * All recording rows whose `date` falls in the inclusive range [start, end]
+ * ('YYYY-MM-DD'), across every folder, ordered by stream then slot. Used by the
+ * stream-health endpoint, whose window may straddle two calendar dates; reuses
+ * the idx_recordings_date index. (listByStreamAndRange is single-folder, so a
+ * cross-folder date-range reader is the minimal addition here.)
+ */
+function listRecentByDate(startDate, endDate) {
+    return db
+        .prepare(
+            `SELECT ${RECORDING_COLUMNS} FROM recordings
+             WHERE date >= ? AND date <= ?
+             ORDER BY stream_folder, date, hour`
+        )
+        .all(startDate, endDate);
+}
+
+/**
  * Indexed SQL aggregates grouped by stream_folder plus an overall roll-up:
  *   { per_stream: [{ stream_folder, total_hours, storage_bytes,
  *                    recording_count, avg_duration_seconds, earliest, latest }],
@@ -236,5 +253,6 @@ module.exports = {
     upsertRecording,
     listAll,
     listByStreamAndRange,
+    listRecentByDate,
     summarize,
 };

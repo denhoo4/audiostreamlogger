@@ -7,6 +7,7 @@ import JobViewer from "./JobViewer";
 import ChangePasswordForm from "./ChangePasswordForm";
 import BrandingSettings from "./BrandingSettings";
 import WorkerStatus from "./WorkerStatus";
+import StreamHealth from "./StreamHealth";
 import RecordingsAnalysis from "./RecordingsAnalysis";
 import BackupSettings from "./BackupSettings";
 import { useAppTitle } from "../useAppTitle";
@@ -86,6 +87,7 @@ export default function SettingsPage() {
       <StreamTable />
       <SchedulerConfig />
       <WorkerStatus />
+      <StreamHealth />
       <RecordingsAnalysis />
       <JobViewer />
       <BackupSettings />

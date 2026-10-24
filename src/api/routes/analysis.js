@@ -12,11 +12,41 @@ const { requireAuth } = require('../auth/middleware');
 const {
     summarize,
     listByStreamAndRange,
+    listRecentByDate,
     expectedHourSlots,
     missingSlots,
 } = require('../services/recordings');
+const { listStreams } = require('../services/streams');
+const {
+    deriveStreamHealth,
+    summarizeHealth,
+} = require('../services/stream-health');
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+// Window bounds for the stream-health endpoint: 1 hour .. 7 days (168h), the
+// same ceiling the retention config uses. Default 24h.
+const DEFAULT_WINDOW_HOURS = 24;
+const MIN_WINDOW_HOURS = 1;
+const MAX_WINDOW_HOURS = 168;
+
+/** Zero-pad a 0..59 integer to the two-char 'HH'/'MM' strings used in slots. */
+function pad2(n) {
+    return String(n).padStart(2, '0');
+}
+
+/**
+ * The current LOCAL hour-slot {date:'YYYY-MM-DD', hour:'HH'} for a Date. The
+ * recorder names files in local time and the recordings.date/hour rows are
+ * those local slot keys, so health must derive the window from the same local
+ * clock — NOT UTC.
+ */
+function toLocalSlot(now) {
+    const date = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(
+        now.getDate()
+    )}`;
+    return { date, hour: pad2(now.getHours()) };
+}
 
 // GET /api/analysis/summary (requireAuth) — per-stream + overall roll-up of
 // recording storage/duration/coverage. Shape: { per_stream: [...], overall: {...} }.
@@ -78,6 +108,65 @@ router.get('/gaps', requireAuth, (req, res) => {
         });
     } catch (err) {
         console.error('Error building analysis gaps:', err);
+        return res
+            .status(500)
+            .json({ error: `Internal Server Error: ${err.message}` });
+    }
+});
+
+// GET /api/analysis/stream-health?windowHours=N (requireAuth) — per-stream
+// health classification (ok|degraded|down|never) derived from recent recordings
+// coverage, with an overall unhealthy roll-up. Shape:
+//   { window_hours, generated_slot:{date,hour}, unhealthy_count,
+//     counts:{total,unhealthy,ok,degraded,down,never},
+//     streams:[{folder,name,status,lastSuccessfulSlot,consecutiveMissing,
+//               expectedInWindow,presentInWindow}] }
+// windowHours is optional (default 24), an integer in [1,168]; invalid → 400.
+router.get('/stream-health', requireAuth, (req, res) => {
+    let windowHours = DEFAULT_WINDOW_HOURS;
+    if (req.query.windowHours !== undefined) {
+        const raw = req.query.windowHours;
+        const n = Number(raw);
+        if (
+            !/^\d+$/.test(String(raw)) ||
+            !Number.isInteger(n) ||
+            n < MIN_WINDOW_HOURS ||
+            n > MAX_WINDOW_HOURS
+        ) {
+            return res.status(400).json({
+                error: `windowHours must be an integer in [${MIN_WINDOW_HOURS}, ${MAX_WINDOW_HOURS}]`,
+                field: 'windowHours',
+            });
+        }
+        windowHours = n;
+    }
+
+    try {
+        const now = new Date();
+        const currentSlot = toLocalSlot(now);
+        // The window's earliest calendar date: windowHours-1 hours back.
+        const startMs = now.getTime() - (windowHours - 1) * 3600 * 1000;
+        const startDate = toLocalSlot(new Date(startMs)).date;
+
+        const rows = listRecentByDate(startDate, currentSlot.date);
+        const streams = listStreams();
+        const health = deriveStreamHealth({
+            streams,
+            rows,
+            currentSlot,
+            windowHours,
+        });
+        const counts = summarizeHealth(health);
+
+        return res.json({
+            window_hours: windowHours,
+            generated_slot: currentSlot,
+            unhealthy_count: counts.unhealthy,
+            counts,
+            streams: health,
+        });
+    } catch (err) {
+        console.error('Error building stream health:', err);
         return res
             .status(500)
             .json({ error: `Internal Server Error: ${err.message}` });

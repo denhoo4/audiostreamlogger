@@ -125,6 +125,37 @@ const AnalysisGaps = z
     })
     .openapi('AnalysisGaps');
 
+const StreamHealth = z
+    .object({
+        folder: z.string(),
+        name: z.string(),
+        status: z.enum(['ok', 'degraded', 'down', 'never']),
+        lastSuccessfulSlot: z
+            .object({ date: z.string(), hour: z.string() })
+            .nullable(),
+        consecutiveMissing: z.number().int(),
+        expectedInWindow: z.number().int(),
+        presentInWindow: z.number().int(),
+    })
+    .openapi('StreamHealth');
+
+const StreamHealthResponse = z
+    .object({
+        window_hours: z.number().int(),
+        generated_slot: z.object({ date: z.string(), hour: z.string() }),
+        unhealthy_count: z.number().int(),
+        counts: z.object({
+            total: z.number().int(),
+            unhealthy: z.number().int(),
+            ok: z.number().int(),
+            degraded: z.number().int(),
+            down: z.number().int(),
+            never: z.number().int(),
+        }),
+        streams: z.array(StreamHealth),
+    })
+    .openapi('StreamHealthResponse');
+
 const BackupImport = z
     .object({
         streams: z.array(StreamInput).optional(),
@@ -580,6 +611,33 @@ function buildOpenApiDocument() {
         },
         responses: {
             200: { description: 'gap analysis', content: json(AnalysisGaps) },
+            ...validationErr,
+            ...authErr,
+            ...serverErr,
+        },
+    });
+    registry.registerPath({
+        method: 'get',
+        path: '/api/analysis/stream-health',
+        tags: ['analysis'],
+        summary: 'Per-stream health (ok|degraded|down|never) over a recent window',
+        security: authed,
+        request: {
+            query: z.object({
+                windowHours: z.coerce
+                    .number()
+                    .int()
+                    .min(1)
+                    .max(168)
+                    .optional()
+                    .openapi({ description: 'default 24', example: 24 }),
+            }),
+        },
+        responses: {
+            200: {
+                description: 'stream health',
+                content: json(StreamHealthResponse),
+            },
             ...validationErr,
             ...authErr,
             ...serverErr,

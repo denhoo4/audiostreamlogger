@@ -66,6 +66,26 @@ before(async () => {
         segment_count: 1,
     });
 
+    // Seed streams for the stream-health route (it joins the `streams` table).
+    // nl_ok gets fresh "now"-relative complete rows so it is ok; nl_never has
+    // no recordings at all so it classifies as never. The ok stream uses its
+    // OWN folder (nl_ok) so the fixed-date summary/gaps assertions on nl_one
+    // above stay exact. Because the route derives its window from the server
+    // clock, seed the ok stream relative to new Date().
+    const streams = require('../services/streams');
+    streams.createStream({
+        country: 'NL',
+        name: 'NL OK',
+        folder: 'nl_ok',
+        url: 'https://example.com/nl_ok',
+    });
+    streams.createStream({
+        country: 'NL',
+        name: 'NL Never',
+        folder: 'nl_never',
+        url: 'https://example.com/nl_never',
+    });
+
     const analysisRouter = require('../routes/analysis');
     const app = express();
     app.use(express.json());
@@ -167,4 +187,94 @@ test('gaps returns the documented shape on success', async () => {
         Object.keys(res.body.missing[0]).sort(),
         ['date', 'hour']
     );
+});
+
+test('stream-health is 401 when anonymous', async () => {
+    authenticated = false;
+    assert.strictEqual(
+        (await getJson('/api/analysis/stream-health')).status,
+        401
+    );
+    authenticated = true;
+});
+
+test('stream-health rejects a non-integer windowHours (400 {field})', async () => {
+    authenticated = true;
+    const res = await getJson('/api/analysis/stream-health?windowHours=abc');
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.body.field, 'windowHours');
+});
+
+test('stream-health rejects out-of-range windowHours (400 {field})', async () => {
+    authenticated = true;
+    const zero = await getJson('/api/analysis/stream-health?windowHours=0');
+    assert.strictEqual(zero.status, 400);
+    assert.strictEqual(zero.body.field, 'windowHours');
+    const tooBig = await getJson('/api/analysis/stream-health?windowHours=999');
+    assert.strictEqual(tooBig.status, 400);
+    assert.strictEqual(tooBig.body.field, 'windowHours');
+});
+
+test('authenticated stream-health returns per-stream health + roll-up', async () => {
+    authenticated = true;
+
+    // Seed the last 24h of complete rows for nl_ok so it is healthy right now.
+    // Done here (not in `before`) so the fixed-date summary/gaps assertions on
+    // nl_one are not affected by these now-relative rows.
+    const recordings = require('../services/recordings');
+    const pad = (n) => String(n).padStart(2, '0');
+    const localSlot = (d) => ({
+        date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+        hour: pad(d.getHours()),
+    });
+    const nowSeed = new Date();
+    for (let i = 1; i <= 24; i += 1) {
+        const slot = localSlot(new Date(nowSeed.getTime() - i * 3600 * 1000));
+        recordings.upsertRecording(db, {
+            stream_folder: 'nl_ok',
+            date: slot.date,
+            hour: slot.hour,
+            file_path: `/audio/nl_ok/nl_ok-${slot.date}-${slot.hour}.mp3`,
+            status: 'complete',
+            duration_seconds: 3600,
+            size_bytes: 1000,
+            segment_count: 1,
+        });
+    }
+
+    const res = await getJson('/api/analysis/stream-health');
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.window_hours, 24);
+    assert.ok(res.body.generated_slot && res.body.generated_slot.date);
+    assert.ok(Array.isArray(res.body.streams));
+    assert.strictEqual(res.body.streams.length, 2); // nl_one + nl_never
+
+    const valid = new Set(['ok', 'degraded', 'down', 'never']);
+    for (const s of res.body.streams) {
+        assert.deepStrictEqual(
+            Object.keys(s).sort(),
+            [
+                'consecutiveMissing',
+                'expectedInWindow',
+                'folder',
+                'lastSuccessfulSlot',
+                'name',
+                'presentInWindow',
+                'status',
+            ]
+        );
+        assert.ok(valid.has(s.status), `bad status ${s.status}`);
+    }
+
+    const byFolder = Object.fromEntries(
+        res.body.streams.map((s) => [s.folder, s])
+    );
+    assert.strictEqual(byFolder.nl_ok.status, 'ok');
+    assert.strictEqual(byFolder.nl_never.status, 'never');
+
+    // Counts roll up; unhealthy_count == down + degraded + never (non-ok).
+    assert.strictEqual(res.body.counts.total, 2);
+    assert.strictEqual(res.body.counts.ok, 1);
+    assert.strictEqual(res.body.counts.never, 1);
+    assert.strictEqual(res.body.unhealthy_count, 1);
 });

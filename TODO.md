@@ -1,8 +1,10 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (reconcile-job branch: FEAT-001 planner + FEAT-002 worker reconcile job landed —
-see item 18. ALL FIVE CHUNKS (A–E) + all big steps DONE, merged, and pushed to
+Last updated: 2026-10-23 (stream-health branch: item 21 admin "which streams are NOT working" health
+panel implemented on `.worktrees/stream-health` — read-only, derived from existing recordings rows,
+api 139 / frontend 23 tests green; in review. Earlier: reconcile-job branch: FEAT-001 planner +
+FEAT-002 worker reconcile job landed — see item 18. ALL FIVE CHUNKS (A–E) + all big steps DONE, merged, and pushed to
 origin/main == d16304a. Full roadmap complete; see HANDOVER.md for a fresh-start briefing.
 Dependabot + GitHub Actions are now enabled on the repo; its first run opened 10 PRs (#3–#12) —
 see item 19 below for which are green/safe vs. red. Item 20 (API docs) is DECIDED + IMPLEMENTED on
@@ -35,6 +37,31 @@ STATUS SUMMARY (what is DONE + on origin/main):
 ---
 
 ## Branches
+
+### `stream-health` — IN REVIEW (item 21: admin "which streams are NOT working" health panel; READ-ONLY, derived from existing recordings rows, NO schema change)
+Isolated git worktree at `.worktrees/stream-health` on branch `stream-health` (based on main == 6d865f1).
+Plan: `.agents/tasks/audiostreamlogger-stream-health-2026-10-23/plan.md`; verification evidence:
+`.agents/tasks/audiostreamlogger-stream-health-2026-10-23/verification.md`. Scope is `src/api/` +
+`src/frontend/` only — no recorder/worker/compose/nginx/schema edits, no new table, no writes.
+- **Pure helper** `src/api/services/stream-health.js`: `deriveStreamHealth({streams, rows, currentSlot,
+  windowHours})` classifies each stream `ok|degraded|down|never` over the last `windowHours` (default 24)
+  slots, returning `{folder, name, status, lastSuccessfulSlot, consecutiveMissing, expectedInWindow,
+  presentInWindow}`. PURE (injected `currentSlot`, no DB/fs/clock) so it is unit-tested without a DB;
+  the current in-progress hour is graced (never a failure). `summarizeHealth` rolls up the counts.
+- **Endpoint** `GET /api/analysis/stream-health?windowHours=N` (requireAuth) in `routes/analysis.js`:
+  reads the server clock once for the local `currentSlot`, fetches recent rows via the new cross-folder
+  `recordings.listRecentByDate(start, end)`, joins `listStreams()`, and returns
+  `{window_hours, generated_slot, unhealthy_count, counts, streams[]}`. `windowHours` validated to an
+  int in [1,168] (400 `{field:'windowHours'}`). Documented in `openapi/spec.js` (StreamHealthResponse).
+- **Frontend** `src/frontend/src/settings/StreamHealth.tsx` (rendered in SettingsPage between
+  WorkerStatus and RecordingsAnalysis): problem streams (down→degraded→never) listed first with their
+  symptom — status badge, consecutive-missing count, last successful hour (or "no recordings yet");
+  healthy streams summarised ("N streams OK"). Loading + ApiError states mirror WorkerStatus. Typed
+  client `getStreamHealth()` + interfaces added to `api.ts`.
+- **Tests:** api node:test 139 (new `stream-health.test.js` pure-helper cases: ok/down/degraded/never/
+  consecutive-missing/current-hour grace + `analysis-routes.test.js` route cases: 401, windowHours 400s,
+  authenticated shape with an ok + a never stream); frontend vitest 23 (new `StreamHealth.test.tsx`:
+  problem ordering + symptoms, all-ok summary, error alert).
 
 ### `testing-ci` — MERGED + PUSHED (CHUNK E: testing strategy + CI + dependency automation + architecture docs; tests/config/docs ONLY, NO runtime behavior change; fast-forward merged into main AND pushed to origin/main, main == testing-ci == bad6177)
 Isolated git worktree at `.worktrees/testing-ci` on branch `testing-ci`. Plan:

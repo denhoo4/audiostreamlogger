@@ -122,6 +122,49 @@ export interface AnalysisGaps {
 }
 
 /**
+ * One stream's health classification as returned inside
+ * GET /api/analysis/stream-health (requireAuth). `status` summarises recent
+ * recording coverage over the window: ok (every past slot complete), degraded
+ * (recording something but with gaps/partials), down (nothing good recently),
+ * never (no recordings ever). `lastSuccessfulSlot` is the most recent complete
+ * hour-slot or null; `consecutiveMissing` is the trailing run of failing past
+ * hours. See services/stream-health.js::deriveStreamHealth.
+ */
+export interface StreamHealthEntry {
+  folder: string;
+  name: string;
+  status: "ok" | "degraded" | "down" | "never";
+  lastSuccessfulSlot: { date: string; hour: string } | null;
+  consecutiveMissing: number;
+  expectedInWindow: number;
+  presentInWindow: number;
+}
+
+/** Roll-up counts across all streams in a stream-health response. */
+export interface StreamHealthCounts {
+  total: number;
+  unhealthy: number;
+  ok: number;
+  degraded: number;
+  down: number;
+  never: number;
+}
+
+/**
+ * Shape of GET /api/analysis/stream-health?windowHours=N (requireAuth):
+ * per-stream health derived from recent recordings coverage plus an overall
+ * unhealthy roll-up. `generated_slot` is the current local hour-slot the window
+ * ends at; `window_hours` is the window length (default 24).
+ */
+export interface StreamHealthResponse {
+  window_hours: number;
+  generated_slot: { date: string; hour: string };
+  unhealthy_count: number;
+  counts: StreamHealthCounts;
+  streams: StreamHealthEntry[];
+}
+
+/**
  * An api error carrying the backend's {error, field?} body so forms can show
  * the server-side validation message (400) or conflict message (409).
  */
@@ -640,4 +683,25 @@ export async function getAnalysisGaps(
     throw await toApiError(res);
   }
   return (await res.json()) as AnalysisGaps;
+}
+
+/**
+ * GET /api/analysis/stream-health?windowHours=N -> per-stream health
+ * (ok|degraded|down|never) over a recent window plus an overall unhealthy
+ * count. windowHours is optional (default 24, server-side range 1..168); throws
+ * ApiError on a 400 validation failure.
+ */
+export async function getStreamHealth(
+  windowHours?: number,
+): Promise<StreamHealthResponse> {
+  const query =
+    windowHours === undefined ? "" : `?windowHours=${windowHours}`;
+  const res = await fetch(
+    `${window.location.origin}/api/analysis/stream-health${query}`,
+    { credentials: "same-origin" },
+  );
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as StreamHealthResponse;
 }
