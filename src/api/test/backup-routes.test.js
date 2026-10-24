@@ -112,6 +112,8 @@ test('authenticated export returns streams + safe config only (no users/sessions
         name: 'Exported',
         folder: 'exported',
         url: 'https://example.com/exported',
+        codec: 'opus',
+        bitrate_kbps: 128,
     });
     appConfig.setConfig('app_title', 'My Logger');
     appConfig.setConfig('log_retention', '48');
@@ -131,11 +133,14 @@ test('authenticated export returns streams + safe config only (no users/sessions
     const backup = await res.json();
     assert.strictEqual(backup.version, 1);
     assert.strictEqual(backup.streams.length, 1);
-    // Stream carries only the four public fields.
+    // Stream carries the public fields incl. the per-stream quality fields.
     assert.deepStrictEqual(
         Object.keys(backup.streams[0]).sort(),
-        ['country', 'folder', 'name', 'url']
+        ['bit_depth', 'bitrate_kbps', 'codec', 'country', 'folder', 'name', 'url']
     );
+    assert.strictEqual(backup.streams[0].codec, 'opus');
+    assert.strictEqual(backup.streams[0].bitrate_kbps, 128);
+    assert.strictEqual(backup.streams[0].bit_depth, null);
     assert.strictEqual(backup.app_config.app_title, 'My Logger');
 
     // The whole serialized backup must contain no user/session material.
@@ -195,6 +200,66 @@ test('authenticated import upserts streams, applies safe config, reports counts'
     assert.strictEqual(streamsSvc.getStreamByFolder('existing').name, 'New');
     assert.strictEqual(appConfig.getConfig('app_title'), 'Imported Title');
     assert.strictEqual(appConfig.getConfig('favicon_path'), undefined);
+});
+
+test('import preserves per-stream quality and a pre-feature entry imports as mp3 default (AC-12)', async () => {
+    const res = await reqJson('POST', '/api/backup/import', {
+        version: 1,
+        streams: [
+            // explicit quality -> preserved
+            {
+                country: 'NL',
+                name: 'Flac Stream',
+                folder: 'flac_stream',
+                url: 'https://example.com/flac',
+                codec: 'flac',
+                bit_depth: 24,
+            },
+            // pre-feature entry (no quality fields) -> mp3 default
+            {
+                country: 'BE',
+                name: 'Legacy Stream',
+                folder: 'legacy_stream',
+                url: 'https://example.com/legacy',
+            },
+        ],
+    });
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.imported, 2);
+
+    const flac = streamsSvc.getStreamByFolder('flac_stream');
+    assert.strictEqual(flac.codec, 'flac');
+    assert.strictEqual(flac.bit_depth, 24);
+    assert.strictEqual(flac.bitrate_kbps, null);
+
+    const legacy = streamsSvc.getStreamByFolder('legacy_stream');
+    assert.strictEqual(legacy.codec, 'mp3');
+    assert.strictEqual(legacy.bitrate_kbps, 160);
+    assert.strictEqual(legacy.bit_depth, null);
+});
+
+test('import skips-and-reports an invalid quality combo (flac+bitrate)', async () => {
+    const res = await reqJson('POST', '/api/backup/import', {
+        version: 1,
+        streams: [
+            {
+                country: 'NL',
+                name: 'Bad Quality',
+                folder: 'bad_quality',
+                url: 'https://example.com/bad',
+                codec: 'flac',
+                bit_depth: 16,
+                bitrate_kbps: 128,
+            },
+        ],
+    });
+
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.imported, 0);
+    assert.strictEqual(res.body.skipped.length, 1);
+    assert.strictEqual(res.body.skipped[0].folder, 'bad_quality');
+    assert.strictEqual(streamsSvc.getStreamByFolder('bad_quality'), undefined);
 });
 
 test('import of a malformed body (bad version) returns 400', async () => {

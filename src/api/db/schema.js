@@ -132,9 +132,47 @@ function migrateStreamsSortOrder(db) {
     db.exec('UPDATE streams SET sort_order = id WHERE sort_order IS NULL');
 }
 
+/**
+ * Guarded in-place migration for the additive per-stream recording-quality
+ * columns `codec`, `bitrate_kbps`, `bit_depth` (design §3). Mirrors the
+ * `migrateStreamsSortOrder` precedent: read `PRAGMA table_info(streams)` and add
+ * each column only when absent, so applySchema stays idempotent and an existing
+ * app.db migrates in place with zero row loss.
+ *
+ * `codec` is added as `TEXT NOT NULL DEFAULT 'mp3'` — a constant default
+ * `ALTER TABLE ADD COLUMN` allows, backfilling every existing row to the
+ * behaviour-preserving mp3 encoding. `bitrate_kbps` is a plain nullable column
+ * backfilled to 160 (the current fixed bitrate) INSIDE its own guard;
+ * `bit_depth` stays NULL (not applicable to the mp3 default). Each `if` is
+ * independently guarded so a half-applied migration self-heals on the next
+ * boot. It does NOT alter/drop an existing column and does NOT touch PRAGMA
+ * journal_mode. The authoritative value-domain rules live in
+ * lib/validate-stream.js (no DB CHECK — design §3/§7), same division as
+ * `streams.country`.
+ */
+function migrateStreamsQuality(db) {
+    const cols = db.prepare('PRAGMA table_info(streams)').all();
+    const has = (name) => cols.some((c) => c.name === name);
+    if (!has('codec')) {
+        db.exec(
+            "ALTER TABLE streams ADD COLUMN codec TEXT NOT NULL DEFAULT 'mp3'"
+        );
+    }
+    if (!has('bitrate_kbps')) {
+        db.exec('ALTER TABLE streams ADD COLUMN bitrate_kbps INTEGER');
+        db.exec(
+            'UPDATE streams SET bitrate_kbps = 160 WHERE bitrate_kbps IS NULL'
+        );
+    }
+    if (!has('bit_depth')) {
+        db.exec('ALTER TABLE streams ADD COLUMN bit_depth INTEGER');
+    }
+}
+
 function applySchema(db) {
     db.exec(STREAMS_TABLE);
     migrateStreamsSortOrder(db);
+    migrateStreamsQuality(db);
     db.exec(USERS_TABLE);
     db.exec(JOBS_TABLE);
     db.exec(JOBS_STATUS_CREATED_INDEX);
@@ -146,4 +184,8 @@ function applySchema(db) {
     db.exec(RECORDINGS_DATE_INDEX);
 }
 
-module.exports = { applySchema, migrateStreamsSortOrder };
+module.exports = {
+    applySchema,
+    migrateStreamsSortOrder,
+    migrateStreamsQuality,
+};

@@ -134,3 +134,61 @@ test('reorderStreams throws ReorderMismatchError on a duplicate id', () => {
         streams.ReorderMismatchError
     );
 });
+
+// --- per-stream recording quality (FEAT-001) ------------------------------
+
+test('createStream fills the mp3 default when quality fields are omitted (AC-12)', () => {
+    const row = makeStream('default');
+    assert.strictEqual(row.codec, 'mp3');
+    assert.strictEqual(row.bitrate_kbps, 160);
+    assert.strictEqual(row.bit_depth, null);
+});
+
+test('createStream persists an explicit lossy quality combo', () => {
+    const row = streams.createStream({
+        country: 'NL',
+        name: 'Opus',
+        folder: 'opus_one',
+        url: 'https://example.com/opus',
+        codec: 'opus',
+        bitrate_kbps: 128,
+        bit_depth: null,
+    });
+    assert.strictEqual(row.codec, 'opus');
+    assert.strictEqual(row.bitrate_kbps, 128);
+    assert.strictEqual(row.bit_depth, null);
+});
+
+test('createStream persists an explicit lossless quality combo', () => {
+    const row = streams.createStream({
+        country: 'NL',
+        name: 'Flac',
+        folder: 'flac_one',
+        url: 'https://example.com/flac',
+        codec: 'flac',
+        bitrate_kbps: null,
+        bit_depth: 24,
+    });
+    assert.strictEqual(row.codec, 'flac');
+    assert.strictEqual(row.bitrate_kbps, null);
+    assert.strictEqual(row.bit_depth, 24);
+});
+
+test('updateStream persists a changed quality combo and reads it back', () => {
+    const created = makeStream('upd');
+    const updated = streams.updateStream(created.id, {
+        country: 'NL',
+        name: 'Updated',
+        folder: 'stream_upd',
+        url: 'https://example.com/upd',
+        codec: 'flac',
+        bit_depth: 16,
+    });
+    assert.strictEqual(updated.codec, 'flac');
+    assert.strictEqual(updated.bit_depth, 16);
+    assert.strictEqual(updated.bitrate_kbps, null);
+
+    const readBack = streams.getStream(created.id);
+    assert.strictEqual(readBack.codec, 'flac');
+    assert.strictEqual(readBack.bit_depth, 16);
+});

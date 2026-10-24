@@ -22,7 +22,12 @@ const SAFE_CONFIG_KEYS = [
 
 const BACKUP_VERSION = 1;
 
-/** The four public stream fields, in a stable order, for a backup entry. */
+/**
+ * The public stream fields, in a stable order, for a backup entry. Includes the
+ * per-stream recording-quality fields (codec/bitrate_kbps/bit_depth) so a
+ * backup preserves them; a pre-feature backup without these imports as the mp3
+ * default via the service's quality normalisation (design §5.11b).
+ */
 function pickStreamFields(stream) {
     const s = stream || {};
     return {
@@ -30,6 +35,9 @@ function pickStreamFields(stream) {
         name: s.name,
         folder: s.folder,
         url: s.url,
+        codec: s.codec,
+        bitrate_kbps: s.bitrate_kbps,
+        bit_depth: s.bit_depth,
     };
 }
 

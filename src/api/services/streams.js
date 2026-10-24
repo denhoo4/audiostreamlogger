@@ -21,11 +21,37 @@ class ReorderMismatchError extends Error {
     }
 }
 
+// Behaviour-preserving mp3 default applied when a write omits the quality
+// fields entirely (legacy client, pre-feature backup import) — design §7.
+const DEFAULT_QUALITY = { codec: 'mp3', bitrate_kbps: 160, bit_depth: null };
+
+/**
+ * Resolve the three quality fields for a write. When ALL are undefined the mp3
+ * default is applied so a field-less write persists a valid, behaviour-
+ * preserving row (AC-12). When any field is supplied the caller's values are
+ * used verbatim (the api validator has already proven the combination valid);
+ * a null is persisted as NULL.
+ */
+function resolveQuality({ codec, bitrate_kbps, bit_depth }) {
+    if (
+        codec === undefined &&
+        bitrate_kbps === undefined &&
+        bit_depth === undefined
+    ) {
+        return { ...DEFAULT_QUALITY };
+    }
+    return {
+        codec,
+        bitrate_kbps: bitrate_kbps === undefined ? null : bitrate_kbps,
+        bit_depth: bit_depth === undefined ? null : bit_depth,
+    };
+}
+
 /** List all streams with id + timestamps (admin view), ordered by sort_order. */
 function listStreams() {
     return db
         .prepare(
-            'SELECT id, country, name, folder, url, sort_order, created_at, updated_at FROM streams ORDER BY sort_order IS NULL, sort_order, id'
+            'SELECT id, country, name, folder, url, codec, bitrate_kbps, bit_depth, sort_order, created_at, updated_at FROM streams ORDER BY sort_order IS NULL, sort_order, id'
         )
         .all();
 }
@@ -34,7 +60,7 @@ function listStreams() {
 function getStream(id) {
     return db
         .prepare(
-            'SELECT id, country, name, folder, url, sort_order, created_at, updated_at FROM streams WHERE id = ?'
+            'SELECT id, country, name, folder, url, codec, bitrate_kbps, bit_depth, sort_order, created_at, updated_at FROM streams WHERE id = ?'
         )
         .get(id);
 }
@@ -43,16 +69,17 @@ function getStream(id) {
 function getStreamByFolder(folder) {
     return db
         .prepare(
-            'SELECT id, country, name, folder, url, sort_order, created_at, updated_at FROM streams WHERE folder = ?'
+            'SELECT id, country, name, folder, url, codec, bitrate_kbps, bit_depth, sort_order, created_at, updated_at FROM streams WHERE folder = ?'
         )
         .get(folder);
 }
 
 /**
  * Insert a new stream. Pre-checks for a duplicate folder and throws
- * DuplicateFolderError if one exists. Returns the created row.
+ * DuplicateFolderError if one exists. Returns the created row. Quality fields
+ * default to the behaviour-preserving mp3 encoding when omitted (design §7).
  */
-function createStream({ country, name, folder, url }) {
+function createStream({ country, name, folder, url, codec, bitrate_kbps, bit_depth }) {
     const clash = db
         .prepare('SELECT id FROM streams WHERE folder = ?')
         .get(folder);
@@ -60,21 +87,32 @@ function createStream({ country, name, folder, url }) {
         throw new DuplicateFolderError();
     }
 
+    const quality = resolveQuality({ codec, bitrate_kbps, bit_depth });
+
     const result = db
         .prepare(
-            `INSERT INTO streams (country, name, folder, url, sort_order)
-             VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM streams))`
+            `INSERT INTO streams (country, name, folder, url, codec, bitrate_kbps, bit_depth, sort_order)
+             VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM streams))`
         )
-        .run(country, name, folder, url);
+        .run(
+            country,
+            name,
+            folder,
+            url,
+            quality.codec,
+            quality.bitrate_kbps,
+            quality.bit_depth
+        );
     return getStream(Number(result.lastInsertRowid));
 }
 
 /**
  * Update an existing stream and bump updated_at. Returns the updated row, or
  * null if no row with that id exists. Throws DuplicateFolderError if the new
- * folder collides with a different row.
+ * folder collides with a different row. Quality fields default to the mp3
+ * encoding when omitted (design §7).
  */
-function updateStream(id, { country, name, folder, url }) {
+function updateStream(id, { country, name, folder, url, codec, bitrate_kbps, bit_depth }) {
     const existing = getStream(id);
     if (!existing) {
         return null;
@@ -87,9 +125,20 @@ function updateStream(id, { country, name, folder, url }) {
         throw new DuplicateFolderError();
     }
 
+    const quality = resolveQuality({ codec, bitrate_kbps, bit_depth });
+
     db.prepare(
-        "UPDATE streams SET country = ?, name = ?, folder = ?, url = ?, updated_at = datetime('now') WHERE id = ?"
-    ).run(country, name, folder, url, id);
+        "UPDATE streams SET country = ?, name = ?, folder = ?, url = ?, codec = ?, bitrate_kbps = ?, bit_depth = ?, updated_at = datetime('now') WHERE id = ?"
+    ).run(
+        country,
+        name,
+        folder,
+        url,
+        quality.codec,
+        quality.bitrate_kbps,
+        quality.bit_depth,
+        id
+    );
     return getStream(id);
 }
 

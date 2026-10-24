@@ -68,6 +68,76 @@ function validateCountry(country) {
     return null;
 }
 
+// Per-stream recording-quality allowlist (design §4/§7). codec is compared
+// case-sensitively against this lowercase allowlist (reject 'MP3'), mirroring
+// the strict folder/country posture. Lossy codecs take a bitrate from a fixed
+// set and forbid bit_depth; the lossless codec takes a bit_depth from {16,24}
+// and forbids a bitrate. This is the authoritative value-domain gate — the DB
+// keeps only the NOT NULL DEFAULT 'mp3' shape backstop (no CHECK), and the
+// recorder clamps defensively.
+const CODECS = {
+    mp3: { kind: 'lossy', bitrates: [96, 128, 160, 192, 256, 320] },
+    opus: { kind: 'lossy', bitrates: [64, 96, 128, 160, 192] },
+    flac: { kind: 'lossless', bitDepths: [16, 24] },
+};
+
+function isPresent(value) {
+    return value !== undefined && value !== null;
+}
+
+/**
+ * Validate the per-stream quality fields (codec / bitrate_kbps / bit_depth).
+ * Returns the first {field, error} found, or null when the combination is
+ * valid. When all three fields are absent the combination is valid: the service
+ * layer fills the behaviour-preserving mp3 default (design §7).
+ */
+function validateQuality(stream) {
+    const { codec, bitrate_kbps, bit_depth } = stream;
+
+    // All-absent is valid — the service normalises to the mp3 default.
+    if (!isPresent(codec) && !isPresent(bitrate_kbps) && !isPresent(bit_depth)) {
+        return null;
+    }
+
+    if (typeof codec !== 'string' || !Object.prototype.hasOwnProperty.call(CODECS, codec)) {
+        return { field: 'codec', error: 'invalid codec' };
+    }
+    const spec = CODECS[codec];
+
+    if (spec.kind === 'lossy') {
+        if (
+            typeof bitrate_kbps !== 'number' ||
+            !Number.isInteger(bitrate_kbps) ||
+            !spec.bitrates.includes(bitrate_kbps)
+        ) {
+            return { field: 'bitrate_kbps', error: 'invalid bitrate' };
+        }
+        if (isPresent(bit_depth)) {
+            return {
+                field: 'bit_depth',
+                error: 'bit_depth not allowed for a lossy codec',
+            };
+        }
+        return null;
+    }
+
+    // lossless (flac)
+    if (
+        typeof bit_depth !== 'number' ||
+        !Number.isInteger(bit_depth) ||
+        !spec.bitDepths.includes(bit_depth)
+    ) {
+        return { field: 'bit_depth', error: 'invalid bit_depth' };
+    }
+    if (isPresent(bitrate_kbps)) {
+        return {
+            field: 'bitrate_kbps',
+            error: 'bitrate not allowed for a lossless codec',
+        };
+    }
+    return null;
+}
+
 /**
  * Validate a full stream payload. Returns the first {field, error} found, or
  * null when every field is valid.
@@ -79,6 +149,7 @@ function validateStream(stream) {
         validateName(s.name) ||
         validateFolder(s.folder) ||
         validateUrl(s.url) ||
+        validateQuality(s) ||
         null
     );
 }
@@ -89,5 +160,7 @@ module.exports = {
     validateName,
     validateUrl,
     validateCountry,
+    validateQuality,
+    CODECS,
     VALID_COUNTRY_CODES,
 };

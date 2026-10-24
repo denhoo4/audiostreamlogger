@@ -1,7 +1,13 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (item 17 DONE + MERGED to main: stream-ordering — manual stream ordering +
+Last updated: 2026-10-23 (item 22 IN PROGRESS on branch `stream-quality`: per-stream recording
+quality — FEAT-001 api backend landed (additive `codec`/`bitrate_kbps`/`bit_depth` columns +
+idempotent in-place migration, authoritative server-side quality validation, service persistence
+with the behaviour-preserving mp3@160 default, the three write call-sites forwarding the fields, a
+`codec` field on the public `/settings` projection, backup round-trip, and the OpenAPI update);
+api node:test 177 → 204 green in node:26-bookworm; committed locally, NOT pushed; recorder/worker/
+frontend FEATs still pending. Earlier: item 17 DONE + MERGED to main: stream-ordering — manual stream ordering +
 default stream + country-grouped admin view. FEAT-001 backend (additive `streams.sort_order` column +
 idempotent in-place migration, sort_order-ordered reads, `PUT /api/streams/reorder`,
 `default_stream_folder` app_config key with public read + `PUT /api/app-config/default-stream` setter)
@@ -61,6 +67,30 @@ STATUS SUMMARY (what is DONE + on origin/main):
 ---
 
 ## Branches
+
+### `stream-quality` — IN PROGRESS (item 22: per-stream codec/bitrate/bit-depth; ADDITIVE schema change; FEAT-001 api backend DONE, recorder/worker/frontend FEATs pending)
+Isolated git worktree at `.worktrees/stream-quality` on branch `stream-quality`. Task artifacts under
+`.agents/tasks/stream-quality-2026-10-23/` (context.json + design.md + features/FEAT-001..N.json).
+Resolved codec allowlist: `mp3` / `opus` / `flac` (aac excluded — the worker image's audiowaveform
+1.10.2 cannot read the AAC/M4A container; a documented follow-up). Schema change is ADDITIVE ONLY and
+`journal_mode` stays DELETE.
+- **FEAT-001 — api backend (DONE, committed).** `db/schema.js` adds a guarded idempotent
+  `migrateStreamsQuality(db)` (called after `migrateStreamsSortOrder`) that ADDs
+  `codec TEXT NOT NULL DEFAULT 'mp3'`, `bitrate_kbps INTEGER` (backfilled to 160 inside its own
+  guard) and `bit_depth INTEGER` (NULL) — each ALTER independently guarded, no CHECK, journal_mode
+  untouched. `lib/validate-stream.js` gains the authoritative `validateQuality`/`CODECS` gate
+  (lossy mp3[96..320]/opus[64..192] require an in-set bitrate + forbid bit_depth; lossless flac
+  requires bit_depth∈{16,24} + forbids bitrate; codec compared case-sensitively; all-absent → valid
+  so the service fills the mp3 default). `services/streams.js` persists the three columns on
+  create/update (mp3 default when all omitted) and returns them from every SELECT projection. The
+  three write call-sites forward the fields (`routes/api.js` POST/PUT `/streams`, `routes/backup.js`
+  import). Public `GET /api/settings` now projects `codec` (player derives the extension). Backup
+  round-trip: `lib/backup.js` `pickStreamFields` carries codec/bitrate_kbps/bit_depth; a pre-feature
+  backup imports as the mp3 default. OpenAPI `spec.js`: StreamInput/Stream + SettingsEntry +
+  selection-export `ext` documented. api node:test 177 → 204 (new `streams-quality-schema.test.js` +
+  extended validate-stream/streams-service/streams-routes/settings-routes/backup/backup-routes suites),
+  verified green in node:26-bookworm. Recorder/worker/frontend de-`.mp3`-ification + admin-form
+  controls are later FEATs on this branch.
 
 ### `stream-ordering` — MERGED + PUSHED (item 17: manual stream ordering + default stream + country-grouped admin view; ADDITIVE schema change; fast-forward merged into main AND pushed to origin/main)
 Isolated git worktree at `.worktrees/stream-ordering` on branch `stream-ordering`. Task artifacts
@@ -1071,13 +1101,17 @@ health state).
 The user wants to set the audio CODEC, BITRATE, and BIT DEPTH per stream, used by the recorder when
 capturing that stream. Today the recorder records with fixed ffmpeg settings; these become
 per-stream, admin-editable fields.
-- [ ] Data model: add per-stream recording-quality columns to the `streams` table (+ migration) —
-      e.g. `codec` (mp3/aac/opus/flac/pcm...), `bitrate` (kbps, for lossy codecs), `bit_depth`
-      (16/24, for PCM/lossless). Decide sensible defaults that match the current fixed behavior so
-      existing streams keep recording identically after the migration.
-- [ ] Validation: codec from an allowlist; bitrate/bit-depth constrained to values valid for the
-      chosen codec (bitrate is meaningless for lossless; bit depth is meaningless for lossy) — the
-      admin form should only offer the combinations that make sense per codec.
+- [x] Data model: add per-stream recording-quality columns to the `streams` table (+ migration) —
+      DONE on branch `stream-quality` (FEAT-001): additive `codec TEXT NOT NULL DEFAULT 'mp3'`,
+      `bitrate_kbps INTEGER` (backfilled to 160), `bit_depth INTEGER` (NULL) via a guarded
+      `migrateStreamsQuality(db)` mirroring the `sort_order` precedent. Defaults reproduce today's
+      fixed mp3@160/44100 behaviour exactly. Allowlist resolved to `mp3`/`opus`/`flac` (aac dropped —
+      audiowaveform can't read the m4a container; see design §4).
+- [x] Validation: codec from an allowlist; bitrate/bit-depth constrained to values valid for the
+      chosen codec — DONE on branch `stream-quality` (FEAT-001): authoritative server-side
+      `validateQuality` in `lib/validate-stream.js` (lossy mp3/opus require an in-set bitrate +
+      forbid bit_depth; lossless flac requires bit_depth in {16,24} + forbids bitrate; case-sensitive
+      codec). The admin-form combination-gating is the later frontend FEAT.
 - [ ] Recorder: map the per-stream fields to the ffmpeg args (currently execFileSync array args),
       and reflect the codec in the OUTPUT FILE EXTENSION/container (today everything is `.mp3`; a
       flac/opus/aac stream needs the right extension + the peak-file + browse/player paths updated

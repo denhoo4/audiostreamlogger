@@ -38,12 +38,15 @@ const {
 // settings.json.streams array (no id/timestamps).
 router.get('/settings', (req, res) => {
     try {
-        const streams = listStreams().map(({ country, name, folder, url }) => ({
-            country,
-            name,
-            folder,
-            url,
-        }));
+        const streams = listStreams().map(
+            ({ country, name, folder, url, codec }) => ({
+                country,
+                name,
+                folder,
+                url,
+                codec,
+            })
+        );
         res.json(streams);
     } catch (err) {
         console.error('Error reading streams:', err);
@@ -170,6 +173,9 @@ router.post('/streams', requireAuth, (req, res) => {
             name: body.name,
             folder: body.folder,
             url: body.url,
+            codec: body.codec,
+            bitrate_kbps: body.bitrate_kbps,
+            bit_depth: body.bit_depth,
         });
         return res.status(201).json(created);
     } catch (err) {
@@ -258,6 +264,9 @@ router.put('/streams/:id', requireAuth, (req, res) => {
             name: body.name,
             folder: body.folder,
             url: body.url,
+            codec: body.codec,
+            bitrate_kbps: body.bitrate_kbps,
+            bit_depth: body.bit_depth,
         });
         if (!updated) {
             return res.status(404).json({ error: 'stream not found' });

@@ -99,12 +99,16 @@ test('GET /api/settings is public and returns only {country,name,folder,url}', a
     for (const s of res.body) {
         assert.deepStrictEqual(
             Object.keys(s).sort(),
-            ['country', 'folder', 'name', 'url']
+            ['codec', 'country', 'folder', 'name', 'url']
         );
+        // The player derives the file extension from codec (codec === ext).
+        assert.strictEqual(s.codec, 'mp3');
         // No admin-only fields leak to the public projection.
         assert.ok(!('id' in s));
         assert.ok(!('created_at' in s));
         assert.ok(!('updated_at' in s));
+        assert.ok(!('bitrate_kbps' in s));
+        assert.ok(!('bit_depth' in s));
     }
 });
 

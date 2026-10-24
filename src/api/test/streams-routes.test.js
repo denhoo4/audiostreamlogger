@@ -167,6 +167,78 @@ test('PUT an unknown id returns 404', async () => {
     assert.strictEqual(res.status, 404);
 });
 
+// --- per-stream recording quality (FEAT-001) ------------------------------
+
+test('create with no quality fields persists the mp3 default (AC-12)', async () => {
+    const res = await reqJson('POST', '/api/streams', GOOD);
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.codec, 'mp3');
+    assert.strictEqual(res.body.bitrate_kbps, 160);
+    assert.strictEqual(res.body.bit_depth, null);
+});
+
+test('create persists an explicit valid quality combo', async () => {
+    const res = await reqJson('POST', '/api/streams', {
+        ...GOOD,
+        codec: 'opus',
+        bitrate_kbps: 128,
+    });
+    assert.strictEqual(res.status, 201);
+    assert.strictEqual(res.body.codec, 'opus');
+    assert.strictEqual(res.body.bitrate_kbps, 128);
+    assert.strictEqual(res.body.bit_depth, null);
+});
+
+test('create rejects an unknown codec with 400 {field:codec} (AC-5)', async () => {
+    const res = await reqJson('POST', '/api/streams', { ...GOOD, codec: 'xyz' });
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.body.field, 'codec');
+});
+
+test('create rejects flac+bitrate and mp3+bit_depth with 400 (AC-6)', async () => {
+    const flac = await reqJson('POST', '/api/streams', {
+        ...GOOD,
+        codec: 'flac',
+        bit_depth: 16,
+        bitrate_kbps: 128,
+    });
+    assert.strictEqual(flac.status, 400);
+    assert.strictEqual(flac.body.field, 'bitrate_kbps');
+
+    const mp3 = await reqJson('POST', '/api/streams', {
+        ...GOOD,
+        folder: 'other_folder',
+        codec: 'mp3',
+        bitrate_kbps: 160,
+        bit_depth: 24,
+    });
+    assert.strictEqual(mp3.status, 400);
+    assert.strictEqual(mp3.body.field, 'bit_depth');
+});
+
+test('create rejects an out-of-set bitrate with 400 {field:bitrate_kbps} (AC-7)', async () => {
+    const res = await reqJson('POST', '/api/streams', {
+        ...GOOD,
+        codec: 'mp3',
+        bitrate_kbps: 999,
+    });
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(res.body.field, 'bitrate_kbps');
+});
+
+test('PUT updates the quality combo and the row reflects it', async () => {
+    const created = (await reqJson('POST', '/api/streams', GOOD)).body;
+    const res = await reqJson('PUT', `/api/streams/${created.id}`, {
+        ...GOOD,
+        codec: 'flac',
+        bit_depth: 24,
+    });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.codec, 'flac');
+    assert.strictEqual(res.body.bit_depth, 24);
+    assert.strictEqual(res.body.bitrate_kbps, null);
+});
+
 test('DELETE removes a stream; deleting an unknown id returns 404', async () => {
     const created = (await reqJson('POST', '/api/streams', GOOD)).body;
     const del = await reqJson('DELETE', `/api/streams/${created.id}`);

@@ -116,6 +116,9 @@ router.post('/import', requireAuth, express.json({ limit: '5mb' }), (req, res) =
             name: stream.name,
             folder: stream.folder,
             url: stream.url,
+            codec: stream.codec,
+            bitrate_kbps: stream.bitrate_kbps,
+            bit_depth: stream.bit_depth,
         };
 
         try {

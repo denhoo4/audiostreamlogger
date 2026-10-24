@@ -24,7 +24,18 @@ const GOOD_STREAM = {
 
 test('buildBackup shapes version, exported_at, streams and filtered config', () => {
     const backup = buildBackup({
-        streams: [{ ...GOOD_STREAM, id: 7, created_at: 'x', updated_at: 'y' }],
+        streams: [
+            {
+                ...GOOD_STREAM,
+                codec: 'opus',
+                bitrate_kbps: 128,
+                bit_depth: null,
+                id: 7,
+                sort_order: 1,
+                created_at: 'x',
+                updated_at: 'y',
+            },
+        ],
         config: {
             app_title: 'My Logger',
             log_retention: '2',
@@ -36,8 +47,10 @@ test('buildBackup shapes version, exported_at, streams and filtered config', () 
 
     assert.strictEqual(backup.version, BACKUP_VERSION);
     assert.strictEqual(backup.exported_at, '2026-10-23T00:00:00.000Z');
-    // Only the four public stream fields, dropping id/timestamps.
-    assert.deepStrictEqual(backup.streams, [GOOD_STREAM]);
+    // Public stream fields incl. quality, dropping id/sort_order/timestamps.
+    assert.deepStrictEqual(backup.streams, [
+        { ...GOOD_STREAM, codec: 'opus', bitrate_kbps: 128, bit_depth: null },
+    ]);
     // Safe keys kept; favicon_path + unknown secret dropped.
     assert.deepStrictEqual(backup.app_config, {
         app_title: 'My Logger',
@@ -257,4 +270,54 @@ test('import upserts by folder: creates new, updates existing, applies safe conf
     assert.ok(config_skipped.some((c) => c.key === 'log_retention'));
     assert.strictEqual(appConfig.getConfig('app_title'), 'Imported Title');
     assert.strictEqual(appConfig.getConfig('favicon_path'), undefined);
+});
+
+test('a pre-feature backup (no quality fields) validates and imports as the mp3 default (AC-12)', () => {
+    const backup = {
+        version: 1,
+        streams: [
+            {
+                country: 'NL',
+                name: 'Legacy',
+                folder: 'legacy_quality',
+                url: 'https://legacy.example.com',
+            },
+        ],
+    };
+
+    const { ok, streams } = validateBackup(backup);
+    assert.strictEqual(ok, true);
+    // No quality fields present -> validator treats the combo as valid.
+    assert.strictEqual(streams[0].valid, true);
+
+    streamsSvc.createStream(streams[0].stream);
+
+    const row = streamsSvc.getStreamByFolder('legacy_quality');
+    assert.strictEqual(row.codec, 'mp3');
+    assert.strictEqual(row.bitrate_kbps, 160);
+    assert.strictEqual(row.bit_depth, null);
+});
+
+test('a backup round-trips explicit per-stream quality through build + validate', () => {
+    streamsSvc.createStream({
+        country: 'NL',
+        name: 'Flac RT',
+        folder: 'flac_rt',
+        url: 'https://flac.example.com',
+        codec: 'flac',
+        bit_depth: 24,
+    });
+
+    const built = buildBackup({
+        streams: [streamsSvc.getStreamByFolder('flac_rt')],
+        config: {},
+        exported_at: '2026-10-23T00:00:00.000Z',
+    });
+    assert.strictEqual(built.streams[0].codec, 'flac');
+    assert.strictEqual(built.streams[0].bit_depth, 24);
+    assert.strictEqual(built.streams[0].bitrate_kbps, null);
+
+    const { ok, streams } = validateBackup(built);
+    assert.strictEqual(ok, true);
+    assert.strictEqual(streams[0].valid, true);
 });

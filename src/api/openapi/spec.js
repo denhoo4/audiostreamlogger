@@ -46,6 +46,38 @@ const StreamInput = z
         name: z.string().openapi({ example: 'Test Stream' }),
         folder: z.string().openapi({ example: 'test_stream' }),
         url: z.string().url().openapi({ example: 'https://example.com/stream' }),
+        codec: z
+            .enum(['mp3', 'opus', 'flac'])
+            .optional()
+            .openapi({
+                example: 'mp3',
+                description:
+                    'Recording codec. Defaults to mp3 when omitted. Lossy ' +
+                    'codecs (mp3/opus) take bitrate_kbps; the lossless codec ' +
+                    '(flac) takes bit_depth.',
+            }),
+        bitrate_kbps: z
+            .number()
+            .int()
+            .nullable()
+            .optional()
+            .openapi({
+                example: 160,
+                description:
+                    'Target bitrate (kbps) for a lossy codec; null/omitted ' +
+                    'for flac. Must be from the codec bitrate set.',
+            }),
+        bit_depth: z
+            .number()
+            .int()
+            .nullable()
+            .optional()
+            .openapi({
+                example: 16,
+                description:
+                    'PCM sample bit depth (16 or 24) for flac; null/omitted ' +
+                    'for lossy codecs.',
+            }),
     })
     .openapi('StreamInput');
 
@@ -77,6 +109,12 @@ const SettingsEntry = z
         name: z.string(),
         folder: z.string(),
         url: z.string(),
+        codec: z.enum(['mp3', 'opus', 'flac']).openapi({
+            example: 'mp3',
+            description:
+                'Recording codec; the player derives the file extension from ' +
+                'it (codec === extension for mp3/opus/flac).',
+        }),
     })
     .openapi('SettingsEntry');
 
@@ -839,7 +877,13 @@ function buildOpenApiDocument() {
         method: 'post',
         path: '/util/selection-export',
         tags: ['util'],
-        summary: 'Export a trimmed MP3 slice of a recording (public)',
+        summary: 'Export a trimmed slice of a recording (public)',
+        description:
+            'Re-encodes a trimmed clip of a recording in the source ' +
+            "container. The optional `ext` selects the codec/container " +
+            '(mp3/opus/flac); it defaults to mp3 for backward-compatible ' +
+            'callers. The response container follows `ext` (mp3→audio/mpeg, ' +
+            'opus→audio/ogg, flac→audio/flac).',
         request: {
             body: {
                 content: json(
@@ -851,13 +895,22 @@ function buildOpenApiDocument() {
                         hour: z.string(),
                         startTime: z.union([z.string(), z.number()]),
                         endTime: z.union([z.string(), z.number()]),
+                        ext: z
+                            .enum(['mp3', 'opus', 'flac'])
+                            .optional()
+                            .openapi({
+                                example: 'mp3',
+                                description:
+                                    'Source/output container; defaults to mp3.',
+                            }),
                     })
                 ),
             },
         },
         responses: {
             200: {
-                description: 'MP3 file stream',
+                description:
+                    'Exported audio file stream (mp3/opus/flac per ext)',
                 content: {
                     'audio/mpeg': {
                         schema: { type: 'string', format: 'binary' },
