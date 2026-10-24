@@ -1,13 +1,20 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (item 24 live-hour-refresh FEAT-001 DONE + committed locally on branch
-`live-hour-refresh`, NOT pushed: a new worker handler `src/worker/handlers/currenthourpeaks.js` driven
-by an independent `setInterval(CURRENT_HOUR_PEAK_MS)` (default 30s) in `worker.js`, decoupled from the
-job busy lock, that full-rebuilds + overwrites only the PRIMARY current-hour peak `<base>.json` per
-stream (per-stream codec ext; `.partN` out of scope); the existing peakfilegenerator current-hour SKIP
-stays. worker node:test 56 → 63 green in node:26-bookworm + `docker build -f Dockerfile.worker`
-succeeds. FEAT-002 frontend live-poll + cache-busting still pending. Earlier this day: item 23
+Last updated: 2026-10-23 (item 24 live-hour-refresh FEAT-001 + FEAT-002 DONE + committed locally on
+branch `live-hour-refresh`, NOT pushed; cross-FEAT integration verification PASSED. Backend: a new
+worker handler `src/worker/handlers/currenthourpeaks.js` driven by an independent
+`setInterval(CURRENT_HOUR_PEAK_MS)` (default 30s) in `worker.js`, decoupled from the job busy lock,
+that full-rebuilds + overwrites only the PRIMARY current-hour peak `<base>.json` per stream (per-stream
+codec ext; `.partN` out of scope); the existing peakfilegenerator current-hour SKIP stays. Frontend:
+`currentAmsterdamSlot`/`isLiveHour` (TZ-safe `Intl`) in `api.ts` + an optional `cacheBust` query param
+on `audioUrl`/`audioJsonUrl`; `App.tsx` detects the live hour and polls a cache-busted reload every 30s
+(matching the worker cadence) plus an always-present 'Ververs' button, preserving the graceful
+`ws.load(mediaUrl)` fallback for a missing/partial peak. `nginx.conf` untouched. Cross-FEAT seam
+verified: the worker's `SELECT folder, codec FROM streams` matches the api-owned `codec` column
+(`TEXT NOT NULL DEFAULT 'mp3'`) and the json path shape the frontend consumes. ALL suites green in
+node:26-bookworm: worker 63 node:test, api 223 node:test (no regression), frontend 55 vitest +
+`tsc -b && vite build`, and `docker build -f Dockerfile.worker` succeeds. Earlier this day: item 23
 storage-estimate DONE + MERGED to main AND pushed to origin/main:
 requireAuth `GET /api/analysis/storage-estimate` + a StorageEstimate admin panel projecting
 steady-state disk use from measured/estimated per-stream bytes/hour × the retention window, plus
@@ -112,10 +119,10 @@ STATUS SUMMARY (what is DONE + on origin/main):
 
 ## Branches
 
-### `live-hour-refresh` — IN PROGRESS (item 24: live auto-refresh of the currently-recording hour; FEAT-001 worker current-hour peak regen DONE + committed locally, NOT pushed; FEAT-002 frontend still pending)
+### `live-hour-refresh` — IN PROGRESS (item 24: live auto-refresh of the currently-recording hour; FEAT-001 worker current-hour peak regen + FEAT-002 frontend live-poll DONE + committed locally, NOT pushed; cross-FEAT integration verification PASSED; awaiting semantic review + merge)
 Isolated git worktree at `.worktrees/live-hour-refresh` on branch `live-hour-refresh`. Task artifacts
-under `.agents/tasks/` (context.json + features/FEAT-001..N.json). Scope so far is `src/worker/` only —
-no SQLite schema change, no `journal_mode` change.
+under `.agents/tasks/` (context.json + features/FEAT-001..N.json). Scope is `src/worker/` +
+`src/frontend/` only — no SQLite schema change, no `journal_mode` change, `nginx.conf` untouched.
 - **FEAT-001 — worker-side current-hour peak regen (DONE, committed locally).** New handler
   `src/worker/handlers/currenthourpeaks.js` exporting
   `regenerateCurrentHourPeaks(db, { now = new Date(), run = defaultRun } = {})`. For each
@@ -139,9 +146,38 @@ no SQLite schema change, no `journal_mode` change.
   ext, ignore a `.partN`-only folder, catch+count an injected-run throw while other folders still
   process, stamp from the injected `now`, and null-codec → mp3 default) all green; `docker build -f
   Dockerfile.worker` succeeds.
-- **FEAT-002 — frontend live-poll + cache-busting (PENDING).** Detect the selected hour IS the current
-  Amsterdam hour, periodically reload the source + refreshed peak `.json`, add a manual refresh button,
-  and cache-bust the live `/audio` URLs client-side. Consumes the json FEAT-001 regenerates.
+- **FEAT-002 — frontend live-poll + cache-busting (DONE, committed locally).** `src/frontend/src/api.ts`
+  gains a pure `currentAmsterdamSlot(now = new Date())` returning zero-padded `{year,month,day,hour}`
+  via `Intl.DateTimeFormat('en-GB', timeZone 'Europe/Amsterdam', hourCycle 'h23')` + `formatToParts`
+  (DST-safe, browser-TZ-independent, `'24'→'00'` midnight normalization mirroring
+  `src/api/lib/amsterdam-slot.js`), a pure `isLiveHour(slot, loaded)` doing an exact four-field equality,
+  and a trailing optional `cacheBust?: number` on `audioUrl(...)`/`audioJsonUrl(...)` that appends
+  `?t=<n>` ONLY when provided (omitting it yields byte-identical URLs, so existing callers/tests are
+  unaffected). `src/frontend/src/App.tsx` records the loaded `{folder,year,month,day,hour}` after a
+  successful load, extracts the load body into a reusable `reload(sel, cacheBust?)` that rebuilds the
+  media + peaks URLs and preserves the existing peaks-fetch-then-`ws.load` flow WITH the
+  `catch → ws.load(mediaUrl)` graceful fallback + download-anchor update; a `useEffect` starts
+  `setInterval(LIVE_POLL_MS=30000)` ONLY while `isLiveHour(currentAmsterdamSlot(), loaded)` is true
+  (re-checked each tick; self-clears on selection change / past hour / slot roll-over / unmount; nothing
+  polls before a load). An always-present 'Ververs' `<button>` (disabled until something is loaded) next
+  to 'Inladen!' triggers an immediate cache-busted `reload(Date.now())`. `nginx.conf` UNTOUCHED
+  (cache-busting is purely the client-side `?t=` param). Verified in node:26-bookworm: frontend vitest
+  45 → 55 (new `src/frontend/src/live-hour.test.ts`: slot zero-pad/CEST/CET/midnight, `isLiveHour`
+  exact-match ±each field, `?t=` iff `cacheBust`; + 4 `App.test.tsx` live-refresh cases: live hour
+  re-loads cache-busted after 30s via `vi.useFakeTimers()`+`setSystemTime`, 'Ververs' immediate reload,
+  past hour schedules NO reload, failed peaks fetch still `ws.load(mediaUrl)`) all green, and
+  `tsc -b && vite build` exit 0.
+- **Cross-FEAT integration (iteration 1) — PASSED, no fixes needed.** Verified the seam between the
+  worker regen (FEAT-001) and the frontend live-poll (FEAT-002): the worker's
+  `SELECT folder, codec FROM streams` matches the api-owned `codec` column
+  (`ALTER TABLE streams ADD COLUMN codec TEXT NOT NULL DEFAULT 'mp3'`), so the regen never throws at
+  runtime and emits the correct per-codec extension; both sides agree on the
+  `AUDIO_DIR/<folder>/<folder>-<stamp>.json` path shape and the `.<codec>` audio extension; both poll at
+  30s so a live refresh picks up freshly regenerated peaks, and a briefly absent/partial json falls back
+  to `ws.load(mediaUrl)` without error. All suites re-run green in node:26-bookworm: worker 63 node:test,
+  api 223 node:test (baseline, no regression), frontend 55 vitest + `tsc -b && vite build` exit 0, and
+  `docker build -f Dockerfile.worker` succeeds. Constraints honored: `:9703` never bound, repo-root
+  `./audio` + `./data` never touched, no schema/`journal_mode` change.
 
 ### `stream-quality` — MERGED (item 22: per-stream codec/bitrate/bit-depth; ADDITIVE schema change; FEAT-001 api backend + FEAT-002 recorder/worker/api de-.mp3 + FEAT-003 frontend DONE; cross-FEAT integration PASSED (opus sample-rate fix), semantic review APPROVED, fast-forward merged into main)
 Isolated git worktree at `.worktrees/stream-quality` on branch `stream-quality`. Task artifacts under
@@ -1355,15 +1391,27 @@ CHOSEN APPROACH (brainstormed with user, 2026-10-23): periodic refresh, NOT incr
       rebuilds + OVERWRITES only the PRIMARY `<folder>-<stamp>.<ext>` current-hour peak `<base>.json`
       per stream (ext = per-stream codec, FEAT-002); `.partN` segments are out of scope (primary only).
       The existing peakfilegenerator current-hour SKIP stays. Decided cadence constant:
-      `CURRENT_HOUR_PEAK_MS`. Still needed for item 24: FEAT-002 frontend live-poll + cache-busting.
-- [ ] Frontend: detect that the selected hour IS the current hour and poll/reload the source
+      `CURRENT_HOUR_PEAK_MS`.
+- [x] Frontend: detect that the selected hour IS the current hour and poll/reload the source
       periodically (reload the mp3 — it has grown — and the refreshed peak `.json`), plus a manual
-      "refresh" button as a fallback. Only poll for the live hour; past hours are static.
-- [ ] Edge cases to handle: the peak `.json` may not exist yet for the current hour (show the mp3 /
+      "refresh" button as a fallback. Only poll for the live hour; past hours are static. DONE on
+      `live-hour-refresh` (FEAT-002): `api.ts` `currentAmsterdamSlot()` + `isLiveHour()` (TZ-safe
+      `Intl`, mirrors `src/api/lib/amsterdam-slot.js`); `App.tsx` records the loaded slot and runs a
+      `setInterval(LIVE_POLL_MS=30000)` cache-busted reload ONLY while the loaded hour === the current
+      Amsterdam slot (re-checked each tick; self-clears on selection change / past hour / roll-over /
+      unmount; never polls before a load); an always-present 'Ververs' button triggers an immediate
+      reload.
+- [x] Edge cases to handle: the peak `.json` may not exist yet for the current hour (show the mp3 /
       a partial or empty waveform gracefully, don't error); a mid-hour recorder restart writes
       `.partN` SEGMENTS (recorder-resilience), so "the current hour" can be multiple files — decide
       whether live refresh follows the primary file only or stitches segments; ensure cache headers
-      (api/nginx) don't serve a stale mp3/`.json` for the live hour.
+      (api/nginx) don't serve a stale mp3/`.json` for the live hour. DONE: the existing
+      peaks-fetch-then-`ws.load` flow keeps its `catch → ws.load(mediaUrl)` fallback, so an
+      absent/partial current-hour json shows audio/partial waveform rather than an error. DECIDED:
+      live refresh follows the PRIMARY file only (`.partN` stitching is a documented out-of-scope
+      follow-up, matching FEAT-001's backend scope). Staleness is solved CLIENT-SIDE via a
+      `?t=<Date.now()>` cache-bust on the live `/audio` mp3 + json URLs — `nginx.conf` is left
+      UNTOUCHED (no server cache-header change needed).
 Order: mostly frontend + a small backend peak-refresh; reads the same recording-state as items 8/18/21.
 Touches recorder-or-worker + api/nginx (cache headers) + frontend. Needs a build-time decision on the
 regen cadence and the `.partN` segment handling. No new dependency (reuse audiowaveform via periodic
