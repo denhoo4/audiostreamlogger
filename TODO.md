@@ -1,11 +1,15 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (item 22 IN PROGRESS on branch `stream-quality`: per-stream recording
+Last updated: 2026-10-23 (item 22 DONE + MERGED to main: per-stream recording
 quality — FEAT-001 api backend + FEAT-002 recorder/worker/api de-`.mp3`-ification + FEAT-003 frontend
 (player per-codec extension + admin codec/bitrate/bit-depth controls) all landed; cross-FEAT
-integration verification PASSED (one fix: opus pinned to 48000 Hz — libopus rejects 44100) and review
-is next. FEAT-001:
+integration verification PASSED (one fix: opus pinned to 48000 Hz — libopus rejects 44100), semantic
+review APPROVED (gate `.agents/tasks/stream-quality-2026-10-23/review.json` verdict=APPROVED, no
+findings), fast checks re-run green in node:26-bookworm (api 211 / frontend 41 / worker 56 /
+recorder 54, frontend build exit 0) and the branch fast-forward merged into `main`. New test
+baselines: api 211 (was 177), frontend 41 (was 37), worker 56, recorder 54. Recording files are now
+named `<folder>-<stamp>.<ext>` (mp3/opus/flac) — no longer always `.mp3`. FEAT-001:
 additive `codec`/`bitrate_kbps`/`bit_depth` columns + idempotent in-place migration, authoritative
 server-side quality validation, service persistence with the behaviour-preserving mp3@160 default,
 the three write call-sites forwarding the fields, a `codec` field on the public `/settings`
@@ -85,10 +89,20 @@ STATUS SUMMARY (what is DONE + on origin/main):
 
 ## Branches
 
-### `stream-quality` — IN PROGRESS (item 22: per-stream codec/bitrate/bit-depth; ADDITIVE schema change; FEAT-001 api backend + FEAT-002 recorder/worker/api de-.mp3 + FEAT-003 frontend DONE; cross-FEAT integration PASSED (opus sample-rate fix), review next)
+### `stream-quality` — MERGED (item 22: per-stream codec/bitrate/bit-depth; ADDITIVE schema change; FEAT-001 api backend + FEAT-002 recorder/worker/api de-.mp3 + FEAT-003 frontend DONE; cross-FEAT integration PASSED (opus sample-rate fix), semantic review APPROVED, fast-forward merged into main)
 Isolated git worktree at `.worktrees/stream-quality` on branch `stream-quality`. Task artifacts under
 `.agents/tasks/stream-quality-2026-10-23/` (context.json + design.md + features/FEAT-001..N.json +
 verification.md).
+
+**MERGE (2026-10-23).** Semantic review APPROVED — gate
+`.agents/tasks/stream-quality-2026-10-23/review.json` `verdict=APPROVED`, zero findings. The fast
+checks were re-run green in node:26-bookworm one last time before merging: api 211 node:test,
+frontend `npm ci && npm run build` exit 0 + 41 vitest, worker 56 + recorder 54 node:test. `main` was
+still at `origin/main` (36c0bd7) with `stream-quality` four commits ahead on that exact tip, so no
+rebase was needed; this living-doc update was committed on the branch, then `main` was
+fast-forwarded to `stream-quality` (a clean fast-forward — no force-push). New test baselines to
+carry forward: api 211, frontend 41, worker 56, recorder 54. Recording files are now
+`<folder>-<stamp>.<ext>` (mp3/opus/flac), no longer always `.mp3`.
 
 **Cross-FEAT integration (2026-10-23) — PASSED with one fix.** All four suites green in
 node:26-bookworm (api 211, frontend 41, worker 56, recorder 54); all four images `docker compose
