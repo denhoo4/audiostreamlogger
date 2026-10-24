@@ -1,7 +1,9 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23. Items 25 DELETE + 26 RENAME stream-folder lifecycle CODED + VERIFIED green on
+Last updated: 2026-10-23. Item 27 admin /settings tabs (frontend-only reorganization into 4 tabs:
+Streams, Recordings & health, Jobs, System) CODED + VERIFIED green on branch `admin-tabs` —
+see the Branches section. Items 25 DELETE + 26 RENAME stream-folder lifecycle CODED + VERIFIED green on
 branch `stream-folder-lifecycle2`, in review — see the Branches section. Earlier context: item 24 live-hour-refresh DONE + MERGED to main (fast-forward, main ==
 live-hour-refresh == 39b701f), NOT pushed to origin — left merged locally. Backend: a new worker
 handler `src/worker/handlers/currenthourpeaks.js` driven by an independent
@@ -120,6 +122,28 @@ STATUS SUMMARY (what is DONE + on origin/main):
 ---
 
 ## Branches
+
+### `admin-tabs` — CODED + VERIFIED (item 27: organize the admin /settings screen into tabs; FRONTEND-ONLY, pure reorganization, NO behavior/API/schema/backend change, NO new dependency)
+Isolated git worktree at `.worktrees/admin-tabs` on branch `admin-tabs`. Scope is
+`src/frontend/src/settings/` ONLY. Verification evidence:
+`.agents/tasks/admin-tabs-verification.md`.
+- **Option B layout (4 tabs).** The authenticated `/settings` view now groups the EXISTING panels
+  under four tabs; no panel added/removed and no panel's behavior, props, or data fetching changed:
+  **Streams** (`StreamTable`), **Recordings & health** (`RecordingsAnalysis`, `StreamHealth`,
+  `StorageEstimate`), **Jobs** (`SchedulerConfig`, `JobViewer`, `WorkerStatus`), **System**
+  (`BrandingSettings`, `BackupSettings`, `ChangePasswordForm`).
+- Simple local state in `SettingsPage.tsx` (`useState<TabId>('streams')`) conditionally renders each
+  tab's panels. NO router, NO new dependency. The auth gate is untouched — logged out still shows only
+  the login form; the tab bar renders only after authentication.
+- Accessible button-based tablist: `role="tablist"` wrapper, each tab a `<button role="tab">` with
+  `aria-selected`/`aria-controls`, each panel container `role="tabpanel"` with matching
+  `id`/`aria-labelledby`. Minimal styling only (plain button row, active tab bolded) — full UI styling
+  is DEFERRED per the user.
+- Only the active tab's panels mount, so a panel that fetches on mount fetches when its tab opens and
+  `JobViewer`'s EventSource opens/closes with the Jobs tab via its existing unmount cleanup; no panel
+  needs to stay mounted to hold a live connection.
+- Verified green in node:26-bookworm (host has no node): frontend 61 → 64 vitest (+3 tab tests in
+  `SettingsPage.test.tsx`; no existing test needed changing) + clean `tsc -b && vite build`.
 
 ### `stream-folder-lifecycle2` — IN REVIEW (items 25 DELETE + 26 RENAME stream folder; API-DIRECT HYBRID, NO schema change, NO new jobs.type, NO worker change)
 Isolated git worktree at `.worktrees/stream-folder-lifecycle2` on branch `stream-folder-lifecycle2`.

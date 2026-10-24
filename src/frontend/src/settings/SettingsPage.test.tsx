@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -132,5 +133,90 @@ describe("SettingsPage auth gate", () => {
         screen.queryByRole("button", { name: "Sign in" }),
       ).not.toBeInTheDocument();
     });
+  });
+
+  it("does not render the tab bar while anonymous", async () => {
+    stubFetch({ authenticated: false });
+    render(<SettingsPage />);
+
+    expect(
+      await screen.findByRole("button", { name: "Sign in" }),
+    ).toBeInTheDocument();
+    // No tablist / tabs are shown before authentication.
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab")).not.toBeInTheDocument();
+  });
+
+  it("renders the four tabs with Streams active by default", async () => {
+    stubFetch({ authenticated: true, username: "admin" });
+    render(<SettingsPage />);
+
+    await screen.findByText("Signed in as admin");
+
+    expect(screen.getByRole("tablist")).toBeInTheDocument();
+    for (const label of ["Streams", "Recordings & health", "Jobs", "System"]) {
+      expect(screen.getByRole("tab", { name: label })).toBeInTheDocument();
+    }
+    // Streams is selected and its panel (StreamTable <h2>Streams</h2>) is shown.
+    expect(screen.getByRole("tab", { name: "Streams" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(
+      screen.getByRole("heading", { name: "Streams" }),
+    ).toBeInTheDocument();
+    // A panel from another tab is not mounted yet.
+    expect(
+      screen.queryByRole("heading", { name: "Stream health" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("switches tabs: clicking a tab shows its panels and hides the others", async () => {
+    stubFetch({ authenticated: true, username: "admin" });
+    render(<SettingsPage />);
+
+    await screen.findByText("Signed in as admin");
+
+    // Open Recordings & health -> its panels appear, the Streams panel hides.
+    fireEvent.click(screen.getByRole("tab", { name: "Recordings & health" }));
+    expect(
+      await screen.findByRole("heading", { name: "Recordings analysis" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Stream health" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Storage estimate" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Streams" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "Recordings & health" }),
+    ).toHaveAttribute("aria-selected", "true");
+
+    // Open Jobs -> job panels appear, recordings panels hide.
+    fireEvent.click(screen.getByRole("tab", { name: "Jobs" }));
+    expect(
+      await screen.findByRole("heading", { name: "Scheduled jobs" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Worker status" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Recordings analysis" }),
+    ).not.toBeInTheDocument();
+
+    // Open System -> system panels appear.
+    fireEvent.click(screen.getByRole("tab", { name: "System" }));
+    expect(
+      await screen.findByRole("heading", { name: "Branding" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Change password" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Scheduled jobs" }),
+    ).not.toBeInTheDocument();
   });
 });
