@@ -3,8 +3,20 @@ import { displayNameForFolder, existingHoursFor } from "./player-hours";
 import type { Settings2, Stream } from "./api";
 
 const STREAMS: Stream[] = [
-  { country: "NL", name: "Glow FM", folder: "glowfm", url: "http://x/1" },
-  { country: "NL", name: "Sublime", folder: "sublime", url: "http://x/2" },
+  {
+    country: "NL",
+    name: "Glow FM",
+    folder: "glowfm",
+    url: "http://x/1",
+    codec: "mp3",
+  },
+  {
+    country: "NL",
+    name: "Sublime",
+    folder: "sublime",
+    url: "http://x/2",
+    codec: "mp3",
+  },
 ];
 
 // Tree keyed by the stored station name verbatim (station -> year -> month ->

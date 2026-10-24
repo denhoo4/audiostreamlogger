@@ -9,11 +9,47 @@ import {
   setDefaultStream,
   testStreamUrl,
   updateStream,
+  type Codec,
   type StreamInput,
   type StreamRecord,
   type StreamTestResult,
 } from "../api";
 import { COUNTRIES_BY_NAME, countryName } from "./countries";
+
+/**
+ * Valid recording-quality combinations per codec, mirroring the api allowlist
+ * (src/api/lib/validate-stream.js CODECS). A lossy codec carries a bitrate from
+ * its set and no bit-depth; a lossless codec carries a bit-depth and no
+ * bitrate. The form only ever offers combos from this table, so it can never
+ * submit a combination the backend would reject (AC-10).
+ */
+const CODEC_OPTIONS: {
+  codec: Codec;
+  kind: "lossy" | "lossless";
+  bitrates: number[];
+  bitDepths: number[];
+}[] = [
+  {
+    codec: "mp3",
+    kind: "lossy",
+    bitrates: [96, 128, 160, 192, 256, 320],
+    bitDepths: [],
+  },
+  {
+    codec: "opus",
+    kind: "lossy",
+    bitrates: [64, 96, 128, 160, 192],
+    bitDepths: [],
+  },
+  { codec: "flac", kind: "lossless", bitrates: [], bitDepths: [16, 24] },
+];
+
+/** Look up a codec's option descriptor (defaults to mp3 for an unknown codec). */
+function codecOption(codec: Codec) {
+  return (
+    CODEC_OPTIONS.find((c) => c.codec === codec) ?? CODEC_OPTIONS[0]
+  );
+}
 
 /**
  * Bucket the (already sort_order-ordered) rows by country, preserving each
@@ -38,12 +74,15 @@ function groupByCountry(
   return groups;
 }
 
-/** Empty add/edit form state. */
+/** Empty add/edit form state (behaviour-preserving mp3@160 quality default). */
 const EMPTY_FORM: StreamInput = {
   country: "",
   name: "",
   folder: "",
   url: "",
+  codec: "mp3",
+  bitrate_kbps: 160,
+  bit_depth: null,
 };
 
 /**
@@ -150,9 +189,29 @@ export default function StreamTable() {
       name: stream.name,
       folder: stream.folder,
       url: stream.url,
+      codec: stream.codec,
+      bitrate_kbps: stream.bitrate_kbps,
+      bit_depth: stream.bit_depth,
     });
     setFormError(null);
     clearTest();
+  }
+
+  /**
+   * Switch the form's codec and reset the dependent quality fields to a valid
+   * combo for the new codec: a lossy codec gets its first bitrate and a null
+   * bit-depth; a lossless codec gets its first bit-depth and a null bitrate.
+   * This keeps the form from ever holding (and submitting) an invalid
+   * codec/bitrate/bit-depth combination (AC-10).
+   */
+  function handleCodecChange(codec: Codec) {
+    const opt = codecOption(codec);
+    setForm({
+      ...form,
+      codec,
+      bitrate_kbps: opt.kind === "lossy" ? opt.bitrates[0] : null,
+      bit_depth: opt.kind === "lossless" ? opt.bitDepths[0] : null,
+    });
   }
 
   /**
@@ -341,6 +400,52 @@ export default function StreamTable() {
             }}
           />
         </label>
+        <label>
+          Codec
+          <select
+            value={form.codec}
+            onChange={(e) => handleCodecChange(e.target.value as Codec)}
+          >
+            {CODEC_OPTIONS.map((c) => (
+              <option key={c.codec} value={c.codec}>
+                {c.codec}
+              </option>
+            ))}
+          </select>
+        </label>
+        {codecOption(form.codec).kind === "lossy" ? (
+          <label>
+            Bitrate (kbps)
+            <select
+              value={form.bitrate_kbps ?? ""}
+              onChange={(e) =>
+                setForm({ ...form, bitrate_kbps: Number(e.target.value) })
+              }
+            >
+              {codecOption(form.codec).bitrates.map((b) => (
+                <option key={b} value={b}>
+                  {b}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <label>
+            Bit depth
+            <select
+              value={form.bit_depth ?? ""}
+              onChange={(e) =>
+                setForm({ ...form, bit_depth: Number(e.target.value) })
+              }
+            >
+              {codecOption(form.codec).bitDepths.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <div className="settings-form-actions">
           <button
             type="button"

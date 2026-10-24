@@ -136,11 +136,13 @@ moved into the database and are managed from the admin screen.
 Everything that used to live in `settings.json` is now edited in the login-gated `/settings` screen
 and stored in the database:
 
-- **Streams** — each stream has a `country`, `name`, `folder`, `url`, and a `sort_order` that drives
-  the display order (set from the admin reorder controls); `folder` is the subdirectory under
-  `audio/` where that station's recordings go, and recording files are named
-  `<folder>/<folder>-YYYY-MM-DD-HH.mp3`. A `default_stream_folder` app-config key records which stream
-  the player preselects (empty falls back to the first stream).
+- **Streams** — each stream has a `country`, `name`, `folder`, `url`, a `sort_order` that drives
+  the display order (set from the admin reorder controls), and a recording quality (`codec` ∈
+  `mp3`/`opus`/`flac`, with a `bitrate_kbps` for the lossy codecs or a `bit_depth` of 16/24 for flac;
+  defaults to mp3@160); `folder` is the subdirectory under `audio/` where that station's recordings
+  go, and recording files are named `<folder>/<folder>-YYYY-MM-DD-HH.<ext>` where `<ext>` equals the
+  stream's codec. A `default_stream_folder` app-config key records which stream the player preselects
+  (empty falls back to the first stream).
 - **Schedules** — per job type (`cleaner`, `peakfilegenerator`, `reconcile`) an enable toggle and an
   hourly/daily/weekly schedule with the matching anchor (minute; hour+minute; day-of-week+hour+minute).
   A "Run now" button enqueues a one-off manual job.
@@ -154,9 +156,9 @@ updates in real time over Server-Sent Events.
 
 ## Recording layout
 
-Recordings are stored under `audio/<folder>/` named `<folder>-YYYY-MM-DD-HH.mp3` (local time,
-timezone `Europe/Amsterdam`). A `.json` peak file is generated per mp3 for the waveform display in
-the frontend.
+Recordings are stored under `audio/<folder>/` named `<folder>-YYYY-MM-DD-HH.<ext>` (local time,
+timezone `Europe/Amsterdam`), where `<ext>` is the stream's codec (`mp3`/`opus`/`flac`). A `.json`
+peak file is generated per recording for the waveform display in the frontend.
 
 ## Development
 

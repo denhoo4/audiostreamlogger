@@ -49,7 +49,7 @@ export interface UseWavesurfer {
   duration: number;
   isPlaying: boolean;
   hasRegion: boolean;
-  load: (mp3Url: string, peaks?: number[][]) => void;
+  load: (audioUrl: string, peaks?: number[][]) => void;
   playPause: () => void;
   skip: (seconds: number) => void;
   seekTo: (progress: number) => void;
@@ -180,13 +180,13 @@ export function useWavesurfer(): UseWavesurfer {
     };
   }, []);
 
-  const load = useCallback((mp3Url: string, peaks?: number[][]) => {
+  const load = useCallback((audioUrl: string, peaks?: number[][]) => {
     const ws = wsRef.current;
     if (!ws) return;
     if (peaks) {
-      ws.load(mp3Url, peaks);
+      ws.load(audioUrl, peaks);
     } else {
-      ws.load(mp3Url);
+      ws.load(audioUrl);
     }
   }, []);
 

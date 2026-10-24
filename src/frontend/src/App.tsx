@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   audioJsonUrl,
-  audioMp3Url,
+  audioUrl,
   exportSelection,
   getPublicConfig,
   getSettings,
   getSettings2,
+  type Codec,
   type Settings2,
   type Stream,
 } from "./api";
@@ -84,6 +85,12 @@ export default function App() {
   );
 
   const selectionEnabled = ws.hasRegion;
+
+  // File extension for the selected stream's recordings == its codec
+  // (mp3/opus/flac). Falls back to mp3 when no stream is selected or the codec
+  // is somehow absent, matching the recorder's defensive default.
+  const selectedCodec: Codec =
+    streams.find((s) => s.folder === selectedFolder)?.codec ?? "mp3";
 
   // Hours that actually have a recording for the selected stream + date, derived
   // from the public /api/settings2 tree. Empty until a valid stream + date are
@@ -178,11 +185,12 @@ export default function App() {
       return;
     }
     const { year, month, day, hour: h } = parts;
-    const mp3Url = audioMp3Url(selectedFolder, year, month, day, h);
+    const ext = selectedCodec;
+    const mediaUrl = audioUrl(selectedFolder, year, month, day, h, ext);
     const jsonUrl = audioJsonUrl(selectedFolder, year, month, day, h);
 
-    setDownloadHref(mp3Url);
-    setDownloadName(`${selectedFolder}-${year}-${month}-${day}-${h}.mp3`);
+    setDownloadHref(mediaUrl);
+    setDownloadName(`${selectedFolder}-${year}-${month}-${day}-${h}.${ext}`);
 
     ws.reset();
 
@@ -190,11 +198,11 @@ export default function App() {
       const res = await fetch(jsonUrl);
       if (!res.ok) throw new Error(`peaks ${res.status}`);
       const json = (await res.json()) as { data: number[][] };
-      ws.load(mp3Url, json.data);
+      ws.load(mediaUrl, json.data);
     } catch {
-      ws.load(mp3Url);
+      ws.load(mediaUrl);
     }
-  }, [date, hour, selectedFolder, ws]);
+  }, [date, hour, selectedFolder, selectedCodec, ws]);
 
   // Download Selection (#downloadRegionButton): show wait message, POST the
   // selection, trigger a browser download of the returned mp3, hide the message.
@@ -214,11 +222,12 @@ export default function App() {
         hour: parts.hour,
         startTime: round1(region.start),
         endTime: round1(region.end),
+        ext: selectedCodec,
       });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "Leuk fragmentje.mp3";
+      a.download = `Leuk fragmentje.${selectedCodec}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -228,7 +237,7 @@ export default function App() {
     } finally {
       setDownloadWaiting(false);
     }
-  }, [selectedFolder, ws]);
+  }, [selectedFolder, selectedCodec, ws]);
 
   return (
     <>

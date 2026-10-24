@@ -2,12 +2,16 @@
 // All requests target the same origin: no base URL, no extra CORS assumptions
 // beyond what the backend already sets. The backend is NOT modified by this app.
 
+/** Audio codec of a stream's recordings; the on-disk file extension equals the codec. */
+export type Codec = "mp3" | "opus" | "flac";
+
 /** A single stream as returned by GET /api/settings (public player selector). */
 export interface Stream {
   country: string;
   name: string;
   folder: string;
   url: string;
+  codec: Codec;
 }
 
 /**
@@ -22,6 +26,9 @@ export interface StreamRecord {
   name: string;
   folder: string;
   url: string;
+  codec: Codec;
+  bitrate_kbps: number | null;
+  bit_depth: number | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -30,7 +37,7 @@ export interface StreamRecord {
 /** Writable stream fields for create/update (no id/timestamps). */
 export type StreamInput = Pick<
   StreamRecord,
-  "country" | "name" | "folder" | "url"
+  "country" | "name" | "folder" | "url" | "codec" | "bitrate_kbps" | "bit_depth"
 >;
 
 /** Shape of GET /auth/me. */
@@ -226,6 +233,8 @@ export interface SelectionExportBody {
   hour: string;
   startTime: number;
   endTime: number;
+  /** Source/output extension (== the stream's codec); defaults to 'mp3' server-side. */
+  ext?: Codec;
 }
 
 /** GET /api/settings -> raw streams array (drives the stream selector). */
@@ -249,15 +258,20 @@ export async function getSettings2(): Promise<Settings2> {
   return (await res.json()) as Settings2;
 }
 
-/** URL of the recorded mp3 for a given folder + date/hour. */
-export function audioMp3Url(
+/**
+ * URL of the recorded audio for a given folder + date/hour. The file extension
+ * equals the stream's codec (mp3/opus/flac); opus files use an Ogg container
+ * but keep the .opus on-disk extension.
+ */
+export function audioUrl(
   folder: string,
   year: string,
   month: string,
   day: string,
   hour: string,
+  ext: string,
 ): string {
-  return `${window.location.origin}/audio/${folder}/${folder}-${year}-${month}-${day}-${hour}.mp3`;
+  return `${window.location.origin}/audio/${folder}/${folder}-${year}-${month}-${day}-${hour}.${ext}`;
 }
 
 /** URL of the precomputed peaks JSON for a given folder + date/hour. */

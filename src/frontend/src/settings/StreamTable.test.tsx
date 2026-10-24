@@ -44,6 +44,9 @@ const ROWS: StreamRecord[] = [
     name: "Radio One",
     folder: "radio_one",
     url: "https://example.com/one",
+    codec: "mp3",
+    bitrate_kbps: 160,
+    bit_depth: null,
     sort_order: 0,
     created_at: "2026-10-23 10:00:00",
     updated_at: "2026-10-23 10:00:00",
@@ -54,6 +57,9 @@ const ROWS: StreamRecord[] = [
     name: "Radio Two",
     folder: "radio_two",
     url: "https://example.com/two",
+    codec: "mp3",
+    bitrate_kbps: 160,
+    bit_depth: null,
     sort_order: 1,
     created_at: "2026-10-23 10:00:00",
     updated_at: "2026-10-23 10:00:00",
@@ -166,8 +172,8 @@ describe("StreamTable", () => {
     // Empty list placeholder confirms the initial load resolved.
     await screen.findByText("No streams yet.");
 
-    // Fill the add form.
-    fireEvent.change(screen.getByRole("combobox"), {
+    // Fill the add form. The country <select> is the combobox labelled Country.
+    fireEvent.change(screen.getByRole("combobox", { name: "Country" }), {
       target: { value: "NL" },
     });
     const textboxes = screen.getAllByRole("textbox");
@@ -183,11 +189,92 @@ describe("StreamTable", () => {
     await waitFor(() => {
       expect(createStream).toHaveBeenCalledTimes(1);
     });
+    // Quality defaults to the behaviour-preserving mp3@160 combo.
     expect(createStream).toHaveBeenCalledWith({
       country: "NL",
       name: "Radio One",
       folder: "radio_one",
       url: "https://example.com/one",
+      codec: "mp3",
+      bitrate_kbps: 160,
+      bit_depth: null,
+    });
+  });
+
+  it("selecting flac shows a bit-depth control and hides bitrate; mp3/opus show bitrate", async () => {
+    getStreams.mockResolvedValue([]);
+    render(<StreamTable />);
+    await screen.findByText("No streams yet.");
+
+    // Default codec is mp3: a Bitrate control is shown, no Bit depth control.
+    expect(
+      screen.getByRole("combobox", { name: "Bitrate (kbps)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "Bit depth" }),
+    ).not.toBeInTheDocument();
+
+    // Switch to flac: Bit depth appears, Bitrate disappears.
+    fireEvent.change(screen.getByRole("combobox", { name: "Codec" }), {
+      target: { value: "flac" },
+    });
+    expect(
+      screen.getByRole("combobox", { name: "Bit depth" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "Bitrate (kbps)" }),
+    ).not.toBeInTheDocument();
+
+    // Switch to opus (lossy): Bitrate is back, Bit depth hidden again.
+    fireEvent.change(screen.getByRole("combobox", { name: "Codec" }), {
+      target: { value: "opus" },
+    });
+    expect(
+      screen.getByRole("combobox", { name: "Bitrate (kbps)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "Bit depth" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("submitting flac sends a valid lossless combo (bit_depth set, bitrate null)", async () => {
+    getStreams.mockResolvedValue([]);
+    createStream.mockResolvedValue(ROWS[0]);
+    render(<StreamTable />);
+    await screen.findByText("No streams yet.");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Country" }), {
+      target: { value: "NL" },
+    });
+    const textboxes = screen.getAllByRole("textbox");
+    fireEvent.change(textboxes[0], { target: { value: "Radio Flac" } });
+    fireEvent.change(textboxes[1], { target: { value: "radio_flac" } });
+    fireEvent.change(textboxes[2], {
+      target: { value: "https://example.com/flac" },
+    });
+
+    // Switching to flac resets to a valid lossless combo (bit_depth=16).
+    fireEvent.change(screen.getByRole("combobox", { name: "Codec" }), {
+      target: { value: "flac" },
+    });
+    // Pick the 24-bit option to confirm the control drives bit_depth.
+    fireEvent.change(screen.getByRole("combobox", { name: "Bit depth" }), {
+      target: { value: "24" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Add stream" }));
+
+    await waitFor(() => {
+      expect(createStream).toHaveBeenCalledTimes(1);
+    });
+    expect(createStream).toHaveBeenCalledWith({
+      country: "NL",
+      name: "Radio Flac",
+      folder: "radio_flac",
+      url: "https://example.com/flac",
+      codec: "flac",
+      bitrate_kbps: null,
+      bit_depth: 24,
     });
   });
 

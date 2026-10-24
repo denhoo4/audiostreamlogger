@@ -2,7 +2,9 @@
 
 Living document tracking the modernization/cleanup of the project.
 Last updated: 2026-10-23 (item 22 IN PROGRESS on branch `stream-quality`: per-stream recording
-quality — FEAT-001 api backend + FEAT-002 recorder/worker/api de-`.mp3`-ification landed. FEAT-001:
+quality — FEAT-001 api backend + FEAT-002 recorder/worker/api de-`.mp3`-ification + FEAT-003 frontend
+(player per-codec extension + admin codec/bitrate/bit-depth controls) all landed; the branch's coding
+is complete (integration/review still to run). FEAT-001:
 additive `codec`/`bitrate_kbps`/`bit_depth` columns + idempotent in-place migration, authoritative
 server-side quality validation, service persistence with the behaviour-preserving mp3@160 default,
 the three write call-sites forwarding the fields, a `codec` field on the public `/settings`
@@ -14,8 +16,14 @@ de-`.mp3`-ification across recorder/worker/api (filename parsers return the ext;
 peakgen/reconcile scan `.mp3/.opus/.flac` and `upsertRecordingMeta` builds the real-ext file_path;
 cleaner row-match via the widened parser; api browse lists opus/flac hours + selection-export gained
 an `ext` field). recorder node:test 53 / worker 56 / api 211 green in node:26-bookworm, and
-`docker build -f Dockerfile.recorder` succeeds with the new module; committed locally, NOT pushed;
-frontend FEAT (player ext + admin-form controls) still pending. Earlier: item 17 DONE + MERGED to main: stream-ordering — manual stream ordering +
+`docker build -f Dockerfile.recorder` succeeds with the new module. FEAT-003: `api.ts` gains a `Codec`
+type + codec/bitrate_kbps/bit_depth on Stream/StreamRecord/StreamInput, `audioMp3Url` renamed to
+`audioUrl(...,ext)`, and an optional `ext` on the selection-export body; `App.tsx` derives the player
+URL / WaveSurfer load / download name / selection-export ext from the selected stream's codec;
+`StreamTable.tsx` adds codec/bitrate/bit-depth controls that only offer valid per-codec combos (lossy
+→ bitrate, lossless → bit-depth) so an invalid combo can never be submitted. frontend build +
+vitest 37 → 41 green in node:26-bookworm (new App non-mp3 opus/flac load tests + StreamTable
+codec-control tests); committed locally, NOT pushed. Earlier: item 17 DONE + MERGED to main: stream-ordering — manual stream ordering +
 default stream + country-grouped admin view. FEAT-001 backend (additive `streams.sort_order` column +
 idempotent in-place migration, sort_order-ordered reads, `PUT /api/streams/reorder`,
 `default_stream_folder` app_config key with public read + `PUT /api/app-config/default-stream` setter)
@@ -76,7 +84,7 @@ STATUS SUMMARY (what is DONE + on origin/main):
 
 ## Branches
 
-### `stream-quality` — IN PROGRESS (item 22: per-stream codec/bitrate/bit-depth; ADDITIVE schema change; FEAT-001 api backend + FEAT-002 recorder/worker/api de-.mp3 DONE, frontend FEAT pending)
+### `stream-quality` — IN PROGRESS (item 22: per-stream codec/bitrate/bit-depth; ADDITIVE schema change; FEAT-001 api backend + FEAT-002 recorder/worker/api de-.mp3 + FEAT-003 frontend DONE; integration/review still to run)
 Isolated git worktree at `.worktrees/stream-quality` on branch `stream-quality`. Task artifacts under
 `.agents/tasks/stream-quality-2026-10-23/` (context.json + design.md + features/FEAT-001..N.json).
 Resolved codec allowlist: `mp3` / `opus` / `flac` (aac excluded — the worker image's audiowaveform
@@ -126,8 +134,21 @@ Resolved codec allowlist: `mp3` / `opus` / `flac` (aac excluded — the worker i
   POST /util/selection-export` gained an optional `ext` validated `^(mp3|opus|flac)$` (default 'mp3',
   bad ext → 400) used for the source path + temp output, keeping the existing re-encode trim.
   recorder node:test 53 / worker node:test 56 / api node:test 211 green in node:26-bookworm;
-  `docker build -f Dockerfile.recorder` succeeds. The frontend player extension + admin-form
-  codec/bitrate/bit-depth controls are the remaining FEAT on this branch.
+  `docker build -f Dockerfile.recorder` succeeds.
+- **FEAT-003 — frontend player extension + admin codec/bitrate/bit-depth controls (DONE, committed).**
+  `src/frontend/src/api.ts`: new `Codec` union (`mp3|opus|flac`); `codec` on the public `Stream`,
+  `codec`/`bitrate_kbps`/`bit_depth` on `StreamRecord` + `StreamInput`; `audioMp3Url(...)` renamed to
+  `audioUrl(folder,y,m,d,h,ext)` (single caller, no alias); optional `ext` on `SelectionExportBody`.
+  `src/frontend/src/App.tsx` derives `selectedCodec` from the selected stream and uses it for the
+  player URL (`audioUrl`), the WaveSurfer load, the `Download uur` filename, the selection-export
+  `ext`, and the `Leuk fragmentje.<ext>` fragment download — the peaks `<base>.json` URL is
+  unchanged. `src/frontend/src/useWavesurfer.ts` renames the `mp3Url` param to `audioUrl` (cosmetic).
+  `src/frontend/src/settings/StreamTable.tsx` adds a `CODEC_OPTIONS` table mirroring the api
+  allowlist, a codec `<select>`, and conditional Bitrate (lossy mp3/opus) / Bit-depth (lossless flac)
+  `<select>`s; switching codec resets the dependent field to the codec's first valid value and clears
+  the irrelevant one, so the form can never submit an invalid combo (AC-10); `EMPTY_FORM` defaults to
+  the behaviour-preserving mp3@160. frontend vitest 37 → 41 (new App non-mp3 opus/flac player-load
+  tests + StreamTable codec-control tests) and `tsc -b && vite build` green in node:26-bookworm.
 
 ### `stream-ordering` — MERGED + PUSHED (item 17: manual stream ordering + default stream + country-grouped admin view; ADDITIVE schema change; fast-forward merged into main AND pushed to origin/main)
 Isolated git worktree at `.worktrees/stream-ordering` on branch `stream-ordering`. Task artifacts
