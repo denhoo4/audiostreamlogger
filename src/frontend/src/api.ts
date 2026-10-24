@@ -41,7 +41,7 @@ export interface AuthState {
 /** A job row as returned by GET /api/jobs and the SSE stream (requireAuth). */
 export interface JobRecord {
   id: number;
-  type: "cleaner" | "peakfilegenerator";
+  type: "cleaner" | "peakfilegenerator" | "reconcile";
   trigger_source: "manual" | "schedule";
   status: "pending" | "running" | "done" | "failed" | "skipped";
   output: string;
@@ -52,7 +52,7 @@ export interface JobRecord {
 
 /** A schedule row as returned by GET /api/schedules (requireAuth). */
 export interface ScheduleRecord {
-  type: "cleaner" | "peakfilegenerator";
+  type: "cleaner" | "peakfilegenerator" | "reconcile";
   enabled: 0 | 1;
   frequency: "hourly" | "daily" | "weekly";
   minute: number;

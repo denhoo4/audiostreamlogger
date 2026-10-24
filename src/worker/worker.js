@@ -19,6 +19,7 @@ const { openDb, withBusyRetry, sleepSync } = require('./db');
 const { planTick, applyPlan } = require('./claim');
 const { runCleaner } = require('./handlers/cleaner');
 const { runPeakfileGenerator } = require('./handlers/peakfilegenerator');
+const { runReconcile } = require('./handlers/reconcile');
 
 const HEARTBEAT = '/tmp/heartbeat';
 const HEARTBEAT_MS = 5000;
@@ -30,6 +31,7 @@ const TERMINAL_SLEEP_MS = 200;
 const HANDLERS = {
     cleaner: runCleaner,
     peakfilegenerator: runPeakfileGenerator,
+    reconcile: runReconcile,
 };
 
 function writeHeartbeat() {

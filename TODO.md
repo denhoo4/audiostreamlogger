@@ -1,7 +1,7 @@
 # audiostreamlogger — TODO & status
 
 Living document tracking the modernization/cleanup of the project.
-Last updated: 2026-10-23 (reconcile-job branch: FEAT-001 shared two-way reconcile planner landed —
+Last updated: 2026-10-23 (reconcile-job branch: FEAT-001 planner + FEAT-002 worker reconcile job landed —
 see item 18. ALL FIVE CHUNKS (A–E) + all big steps DONE, merged, and pushed to
 origin/main == d16304a. Full roadmap complete; see HANDOVER.md for a fresh-start briefing.
 Dependabot + GitHub Actions are now enabled on the repo; its first run opened 10 PRs (#3–#12) —
@@ -884,14 +884,14 @@ land before the later full frontend overhaul; the richer UI pieces pair with it)
 The recordings table (Chunk C) is populated incrementally by the recorder/worker/cleaner, plus a
 one-time startup backfill. But disk and DB can drift over time (a crash mid-write, a file removed
 out-of-band, a missed event). Add a periodic FULL SYNC that reconciles both directions:
-- [ ] New worker JOB TYPE "reconcile" (alongside cleaner + peakfilegenerator) — fits the existing
+- [x] New worker JOB TYPE "reconcile" (alongside cleaner + peakfilegenerator) — fits the existing
       job-queue/worker + scheduler model, so it can be scheduled (e.g. daily) and run manually too.
-- [ ] Two-way reconcile: files on disk with no DB row -> insert; DB rows whose file no longer
+- [x] Two-way reconcile: files on disk with no DB row -> insert; DB rows whose file no longer
       exists -> remove/mark missing; fix mismatched size/duration/status. Reuse the startup-backfill
       logic (generalize it into the shared reconcile so there's one implementation).
-- [ ] Respect the global single-job lock (busy=skip) like the other jobs; log a summary
+- [x] Respect the global single-job lock (busy=skip) like the other jobs; log a summary
       (added/removed/fixed counts) visible in the SSE job viewer.
-- [ ] Expose it in the admin scheduler UI as a schedulable type with a "Run now" button.
+- [x] Expose it in the admin scheduler UI as a schedulable type with a "Run now" button.
 Order: AFTER Chunk C lands (needs the recordings table + job model). Natural follow-on; could fold
 into Chunk C follow-ups or be its own small workflow.
 IN PROGRESS on branch `reconcile-job` (worktree `.worktrees/reconcile-job`), decomposed into
@@ -908,8 +908,15 @@ FEAT-001 (shared planner) + FEAT-002 (worker job type + UI + seed):
       guard + idempotency) plus the updated `recordings-backfill.test.js`; api suite green (127
       tests) in node:26-bookworm. FEAT-002 ports this planner byte-for-byte into
       `src/worker/reconcile-planner.js`.
-- [ ] FEAT-002: worker "reconcile" job type (ports the planner, applies all three directions under
-      the busy-skip lock), seed the schedule, admin scheduler UI + Run-now.
+- [x] FEAT-002 DONE (not yet merged): worker "reconcile" job type — ported the planner byte-for-byte
+      into `src/worker/reconcile-planner.js`, added `src/worker/handlers/reconcile.js` (two-level
+      AUDIO_DIR walk, applies inserts/updates/removes over the worker RW handle in withBusyRetry,
+      summary line with added/removed/fixed counts), registered `reconcile` in the worker HANDLERS
+      map (no second lock — the existing busy-skip poll lock governs it), added row-write helpers in
+      `src/worker/recordings-db.js`, enumerated `reconcile` across api schema/routes/openapi + the
+      frontend typed client, and seeded a daily/03:30/enabled reconcile schedule. New worker planner
+      + handler tests, `jobs-schema.test.js` now asserts 3 seeded schedules. The scheduler UI + job
+      viewer are data-driven, so the card + Run-now surface automatically.
 
 ### 19. Triage the first Dependabot PRs (opened 2026-10-23; user wants these picked up)
 Dependabot's first run opened 10 PRs. `gh` is installed and authenticated as `denhoo4`. CI

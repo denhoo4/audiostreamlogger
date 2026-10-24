@@ -158,7 +158,7 @@ test('GET /api/jobs/schedules lists schedule rows', async () => {
     const res = await reqJson('GET', '/api/jobs/schedules');
     assert.strictEqual(res.status, 200);
     const types = res.body.map((s) => s.type).sort();
-    assert.deepStrictEqual(types, ['cleaner', 'peakfilegenerator']);
+    assert.deepStrictEqual(types, ['cleaner', 'peakfilegenerator', 'reconcile']);
 });
 
 test('PUT /api/jobs/schedules/:type updates a known schedule', async () => {

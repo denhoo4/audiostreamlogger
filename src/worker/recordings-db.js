@@ -107,4 +107,72 @@ function deleteRecordingByFile(db, { folder, stamp }) {
     return result.changes;
 }
 
-module.exports = { upsertRecordingMeta, deleteRecordingByFile, splitStamp };
+/**
+ * INSERT-or-UPDATE a reconcile slot keyed on (stream_folder, date, hour) — the
+ * worker-side mirror of src/api/services/recordings.js::upsertRecording, used by
+ * the reconcile job (FEAT-002) to apply plan.inserts. The slot already carries
+ * the derived file_path/status/segment_count from the planner, so this writes
+ * them verbatim; duration_seconds/size_bytes are left for the peakfilegenerator
+ * to fill. Wrapped in withBusyRetry. Returns the run result (`changes`).
+ */
+function upsertRecordingRow(db, { stream_folder, date, hour, file_path, status, segment_count }) {
+    return withBusyRetry(() =>
+        db
+            .prepare(
+                `INSERT INTO recordings
+                   (stream_folder, date, hour, file_path, status, segment_count)
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (stream_folder, date, hour) DO UPDATE SET
+                   file_path     = excluded.file_path,
+                   status        = excluded.status,
+                   segment_count = excluded.segment_count,
+                   updated_at    = datetime('now')`
+            )
+            .run(stream_folder, date, hour, file_path, status, segment_count ?? 1)
+    );
+}
+
+/**
+ * UPDATE the status/segment_count/file_path of an existing (stream_folder,date,
+ * hour) row to the planner's derived values (reconcile plan.updates). Leaves
+ * duration_seconds/size_bytes untouched. Wrapped in withBusyRetry. Returns the
+ * number of rows changed (0 when the row no longer exists).
+ */
+function updateRecordingRow(db, { stream_folder, date, hour, status, segment_count, file_path }) {
+    const result = withBusyRetry(() =>
+        db
+            .prepare(
+                `UPDATE recordings
+                   SET status = ?, segment_count = ?, file_path = ?,
+                       updated_at = datetime('now')
+                 WHERE stream_folder = ? AND date = ? AND hour = ?`
+            )
+            .run(status, segment_count ?? 1, file_path, stream_folder, date, hour)
+    );
+    return result.changes;
+}
+
+/**
+ * DELETE the row for a (stream_folder,date,hour) slot (reconcile plan.removes,
+ * the full-sync removal of a DB row whose file is gone from disk). Wrapped in
+ * withBusyRetry. Returns the number of rows removed (0 or 1).
+ */
+function deleteRecordingBySlot(db, { stream_folder, date, hour }) {
+    const result = withBusyRetry(() =>
+        db
+            .prepare(
+                'DELETE FROM recordings WHERE stream_folder = ? AND date = ? AND hour = ?'
+            )
+            .run(stream_folder, date, hour)
+    );
+    return result.changes;
+}
+
+module.exports = {
+    upsertRecordingMeta,
+    deleteRecordingByFile,
+    splitStamp,
+    upsertRecordingRow,
+    updateRecordingRow,
+    deleteRecordingBySlot,
+};

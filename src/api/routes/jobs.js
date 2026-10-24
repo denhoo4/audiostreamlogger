@@ -32,7 +32,7 @@ const {
 } = require('../services/app-config');
 const { validateRetentionHours } = require('../lib/config-validate');
 
-const JOB_TYPES = ['cleaner', 'peakfilegenerator'];
+const JOB_TYPES = ['cleaner', 'peakfilegenerator', 'reconcile'];
 
 /**
  * Prune job output using the configured retention count, read defensively

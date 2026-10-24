@@ -451,7 +451,7 @@ function buildOpenApiDocument() {
             body: {
                 content: json(
                     z.object({
-                        type: z.enum(['cleaner', 'peakfilegenerator']),
+                        type: z.enum(['cleaner', 'peakfilegenerator', 'reconcile']),
                     })
                 ),
             },
@@ -483,7 +483,7 @@ function buildOpenApiDocument() {
         security: authed,
         request: {
             params: z.object({
-                type: z.enum(['cleaner', 'peakfilegenerator']),
+                type: z.enum(['cleaner', 'peakfilegenerator', 'reconcile']),
             }),
             body: { content: json(ScheduleUpdate) },
         },

@@ -17,7 +17,7 @@ The application consists of four services (source under `src/`):
 | Service | Directory | Role |
 | --- | --- | --- |
 | `recorder` | `src/recorder/` | Records each stream every hour (ffmpeg), supervising each stream's ffmpeg process independently: if one stream drops mid-hour it is restarted on its own with capped backoff (a restart writes a `.partN.mp3` segment) without disturbing the others. On startup, and on a periodic poll, it catches up the remaining part of the current hour for any stream with no recording yet — so a newly-added stream starts recording right away. Shuts down cleanly on SIGTERM/SIGINT (finalizes each mp3). Reads its run minute from the database and writes a `recordings` row per captured hour-slot (status `recording`→`complete`/`partial` + size). |
-| `worker` | `src/worker/` | Generic job runner. Polls the `jobs` table and executes one job at a time (cleaner = delete recordings past the retention window; peakfilegenerator = generate `audiowaveform` peak files). Replaces the old `cleaner` + `peakfilegenerator` containers. Also fills each `recordings` row's duration/size (ffprobe) after processing a file and removes the row when the cleaner unlinks its mp3. |
+| `worker` | `src/worker/` | Generic job runner. Polls the `jobs` table and executes one job at a time (cleaner = delete recordings past the retention window; peakfilegenerator = generate `audiowaveform` peak files; reconcile = full two-way sync of the `recordings` table against the on-disk audio tree, inserting missing rows, removing orphans and fixing drifted status/segment counts). Replaces the old `cleaner` + `peakfilegenerator` containers. Also fills each `recordings` row's duration/size (ffprobe) after processing a file and removes the row when the cleaner unlinks its mp3. |
 | `api` | `src/api/` | Express API: serves the stream list and the recordings browse tree, handles cutting/downloading fragments, powers the login-gated admin screen (authentication, stream CRUD, job scheduling + Run-now + a live job feed + a recordings-analysis view), hosts the DB-driven scheduler that enqueues jobs, exposes the requireAuth `GET /api/analysis/summary` + `/api/analysis/gaps` endpoints, serves interactive OpenAPI 3 docs (Swagger UI at `GET /api/docs`, raw spec at `GET /api/docs.json`) generated from `zod` schemas — both behind requireAuth, since the API is admin-only — and runs a one-time startup backfill that reconciles existing audio files into `recordings` rows. Runs internally on port 3000, not public. |
 | `frontend` | `src/frontend/` | React + Vite single-page app, served by nginx. nginx also serves the audio and reverse-proxies `/api`, `/util`, and `/auth` to the `api` service (same-origin, so no CORS needed). |
 
@@ -133,7 +133,7 @@ and stored in the database:
 - **Streams** — each stream has a `country`, `name`, `folder`, and `url`; `folder` is the
   subdirectory under `audio/` where that station's recordings go, and recording files are named
   `<folder>/<folder>-YYYY-MM-DD-HH.mp3`.
-- **Schedules** — per job type (`cleaner`, `peakfilegenerator`) an enable toggle and an
+- **Schedules** — per job type (`cleaner`, `peakfilegenerator`, `reconcile`) an enable toggle and an
   hourly/daily/weekly schedule with the matching anchor (minute; hour+minute; day-of-week+hour+minute).
   A "Run now" button enqueues a one-off manual job.
 - **Log retention** — the retention window for recordings, in **hours** (e.g. `168` for seven days),

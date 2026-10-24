@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS users (
 const JOBS_TABLE = `
 CREATE TABLE IF NOT EXISTS jobs (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  type           TEXT    NOT NULL CHECK (type IN ('cleaner','peakfilegenerator')),
+  type           TEXT    NOT NULL CHECK (type IN ('cleaner','peakfilegenerator','reconcile')),
   trigger_source TEXT    NOT NULL CHECK (trigger_source IN ('manual','schedule')),
   status         TEXT    NOT NULL DEFAULT 'pending'
                    CHECK (status IN ('pending','running','done','failed','skipped')),
@@ -58,7 +58,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs (created_at, id);
 
 const SCHEDULES_TABLE = `
 CREATE TABLE IF NOT EXISTS schedules (
-  type        TEXT    PRIMARY KEY CHECK (type IN ('cleaner','peakfilegenerator')),
+  type        TEXT    PRIMARY KEY CHECK (type IN ('cleaner','peakfilegenerator','reconcile')),
   enabled     INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0,1)),
   frequency   TEXT    NOT NULL DEFAULT 'hourly'
                 CHECK (frequency IN ('hourly','daily','weekly')),

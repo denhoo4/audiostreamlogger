@@ -93,8 +93,13 @@ test('applySchema is idempotent (a second call does not throw or wipe data)', ()
     db.exec('DELETE FROM jobs');
 });
 
-test('seedJobConfig seeds the two schedules and three config scalars', () => {
+test('seedJobConfig seeds the three schedules and three config scalars', () => {
     seedJobConfig(db);
+
+    const scheduleCount = db
+        .prepare('SELECT COUNT(*) AS n FROM schedules')
+        .get().n;
+    assert.strictEqual(scheduleCount, 3, 'three seeded schedules');
 
     const cleaner = db
         .prepare('SELECT * FROM schedules WHERE type = ?')
@@ -109,6 +114,14 @@ test('seedJobConfig seeds the two schedules and three config scalars', () => {
     assert.strictEqual(peak.frequency, 'hourly');
     assert.strictEqual(peak.minute, 5);
     assert.strictEqual(peak.enabled, 1);
+
+    const reconcile = db
+        .prepare('SELECT * FROM schedules WHERE type = ?')
+        .get('reconcile');
+    assert.strictEqual(reconcile.frequency, 'daily');
+    assert.strictEqual(reconcile.hour, 3);
+    assert.strictEqual(reconcile.minute, 30);
+    assert.strictEqual(reconcile.enabled, 1);
 
     const cfg = (key) =>
         db.prepare('SELECT value FROM app_config WHERE key = ?').get(key).value;
@@ -133,7 +146,7 @@ test('seedJobConfig is idempotent: a second seed never duplicates or overwrites 
     const scheduleCount = db
         .prepare('SELECT COUNT(*) AS n FROM schedules')
         .get().n;
-    assert.strictEqual(scheduleCount, 2, 'no duplicate schedule rows');
+    assert.strictEqual(scheduleCount, 3, 'no duplicate schedule rows');
 
     const cleaner = db
         .prepare('SELECT minute FROM schedules WHERE type = ?')
