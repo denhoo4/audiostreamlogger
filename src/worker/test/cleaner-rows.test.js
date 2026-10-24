@@ -112,6 +112,33 @@ test('a .partN file maps to and removes the same hour row', () => {
     assert.strictEqual(rowExists('00'), false, 'partN unlink removed the hour row');
 });
 
+test('cleaner removes the row for an expired .opus recording', () => {
+    const p = writeOldFile(`radio1-${OLD_STAMP}.opus`);
+    db.prepare(
+        `INSERT INTO recordings (stream_folder, date, hour, file_path, status)
+         VALUES ('radio1', '2020-01-01', '00', 'radio1/radio1-2020-01-01-00.opus', 'complete')`
+    ).run();
+
+    const summary = cleaner.runCleaner(db);
+
+    assert.strictEqual(fs.existsSync(p), false, 'opus file unlinked');
+    assert.strictEqual(rowExists('00'), false, 'opus recordings row removed');
+    assert.match(summary, /1 recordings row\(s\) removed/);
+});
+
+test('cleaner removes the row for an expired .flac recording', () => {
+    const p = writeOldFile(`radio1-${OLD_STAMP}.flac`);
+    db.prepare(
+        `INSERT INTO recordings (stream_folder, date, hour, file_path, status)
+         VALUES ('radio1', '2020-01-01', '00', 'radio1/radio1-2020-01-01-00.flac', 'complete')`
+    ).run();
+
+    cleaner.runCleaner(db);
+
+    assert.strictEqual(fs.existsSync(p), false, 'flac file unlinked');
+    assert.strictEqual(rowExists('00'), false, 'flac recordings row removed');
+});
+
 test('a non-recording filename is unlinked without touching recordings', () => {
     const p = writeOldFile('notes.txt');
 

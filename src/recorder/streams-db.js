@@ -10,7 +10,7 @@ function readStreams() {
     try {
       db.exec('PRAGMA busy_timeout = 5000');
       const rows = db.prepare(
-        'SELECT country, name, folder, url FROM streams'
+        'SELECT country, name, folder, url, codec, bitrate_kbps, bit_depth FROM streams'
       ).all();
       return rows;
     } finally {

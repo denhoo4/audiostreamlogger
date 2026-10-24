@@ -161,3 +161,29 @@ test('reconcile inserts disk-only, removes orphan, fixes drift, guards the curre
     assert.match(summary, /1 fixed/);
     assert.match(summary, /0 per-slot error\(s\)/);
 });
+
+test('reconcile scans and inserts disk-only opus/flac recordings', () => {
+    // Disk-only OLD opus + flac files -> expect INSERTs with their real paths.
+    writeFile('radio1-2019-05-05-05.opus');
+    writeFile('radio1-2019-06-06-06.flac');
+
+    const summary = reconcile.runReconcile(db);
+
+    const opusRow = db
+        .prepare(
+            "SELECT status, file_path FROM recordings WHERE stream_folder='radio1' AND date='2019-05-05' AND hour='05'"
+        )
+        .get();
+    assert.ok(opusRow, 'opus slot inserted');
+    assert.match(opusRow.file_path, /radio1-2019-05-05-05\.opus$/);
+
+    const flacRow = db
+        .prepare(
+            "SELECT status, file_path FROM recordings WHERE stream_folder='radio1' AND date='2019-06-06' AND hour='06'"
+        )
+        .get();
+    assert.ok(flacRow, 'flac slot inserted');
+    assert.match(flacRow.file_path, /radio1-2019-06-06-06\.flac$/);
+
+    assert.match(summary, /2 added/);
+});

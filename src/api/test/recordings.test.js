@@ -180,27 +180,48 @@ test('aggregateByStream folds rows per stream incl. a partial row', () => {
     assert.strictEqual(r2.earliest, '2026-10-22-23');
 });
 
-test('parseRecordingFilename handles primary, .partN, and non-matches', () => {
+test('parseRecordingFilename handles primary, .partN, and non-matches and returns ext', () => {
     assert.deepStrictEqual(parseRecordingFilename('radio1-2026-10-23-09.mp3'), {
         folder: 'radio1',
         date: '2026-10-23',
         hour: '09',
         part: 1,
+        ext: 'mp3',
     });
 
     assert.deepStrictEqual(
         parseRecordingFilename('radio1-2026-10-23-09.part2.mp3'),
-        { folder: 'radio1', date: '2026-10-23', hour: '09', part: 2 }
+        { folder: 'radio1', date: '2026-10-23', hour: '09', part: 2, ext: 'mp3' }
     );
 
     // Folder names may contain hyphens — the trailing date still anchors.
     assert.deepStrictEqual(
         parseRecordingFilename('bbc-radio-4-2026-01-01-00.part3.mp3'),
-        { folder: 'bbc-radio-4', date: '2026-01-01', hour: '00', part: 3 }
+        { folder: 'bbc-radio-4', date: '2026-01-01', hour: '00', part: 3, ext: 'mp3' }
     );
 
     assert.strictEqual(parseRecordingFilename('no-date-here.mp3'), null);
     assert.strictEqual(parseRecordingFilename('radio1-2026-10-23-09.json'), null);
     assert.strictEqual(parseRecordingFilename(''), null);
     assert.strictEqual(parseRecordingFilename(null), null);
+});
+
+test('parseRecordingFilename handles opus/flac extensions (FEAT-002)', () => {
+    assert.deepStrictEqual(parseRecordingFilename('radio1-2026-10-23-09.opus'), {
+        folder: 'radio1',
+        date: '2026-10-23',
+        hour: '09',
+        part: 1,
+        ext: 'opus',
+    });
+    assert.deepStrictEqual(parseRecordingFilename('radio1-2026-10-23-09.part2.flac'), {
+        folder: 'radio1',
+        date: '2026-10-23',
+        hour: '09',
+        part: 2,
+        ext: 'flac',
+    });
+    // An unknown/unsupported extension is not a recording we manage.
+    assert.strictEqual(parseRecordingFilename('radio1-2026-10-23-09.aac'), null);
+    assert.strictEqual(parseRecordingFilename('radio1-2026-10-23-09.wav'), null);
 });

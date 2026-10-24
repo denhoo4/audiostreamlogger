@@ -4,7 +4,8 @@
  * Full two-way sync of the `recordings` table against the on-disk audio tree.
  * It scans AUDIO_DIR with the same faithful two-level directory walk the cleaner
  * and peakfilegenerator use (readdirSync(AUDIO_DIR) -> directories ->
- * readdirSync(subdir) -> .mp3), parses each filename with parseRecordingParts,
+ * readdirSync(subdir) -> allowlisted audio ext), parses each filename with
+ * parseRecordingParts,
  * and splits its 'YYYY-MM-DD-HH' stamp into date/hour (splitStamp) to build the
  * planner's scannedFiles { folder, date, hour, part, file_path }. The existing
  * rows come from a SELECT over the worker RW handle; currentStamp is the local
@@ -27,6 +28,11 @@ const { splitStamp, upsertRecordingRow, updateRecordingRow, deleteRecordingBySlo
     require('../recordings-db');
 const { reconcilePlan } = require('../reconcile-planner');
 const { AUDIO_DIR } = require('./paths');
+
+// Allowlisted recording extensions the scan picks up (FEAT-002). Same set as
+// the peakfilegenerator; the scanned entry's file_path carries the true name so
+// parseRecordingParts returns its ext and the planner is extension-agnostic.
+const AUDIO_EXTS = new Set(['.mp3', '.opus', '.flac']);
 
 /**
  * Current date-time in local 'YYYY-MM-DD-HH' format, matching the recorder's
@@ -65,7 +71,7 @@ function scanAudioTree(log) {
             }
 
             files
-                .filter((file) => path.extname(file) === '.mp3')
+                .filter((file) => AUDIO_EXTS.has(path.extname(file)))
                 .forEach((file) => {
                     const parts = parseRecordingParts(file);
                     if (parts === null) {

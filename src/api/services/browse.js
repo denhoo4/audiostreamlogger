@@ -36,7 +36,7 @@ async function folderContent(folderPath) {
         const dateMap = new Map();
 
         files.forEach((file) => {
-            const match = file.match(/(\d{4})-(\d{2})-(\d{2})-(\d{2})\.mp3$/);
+            const match = file.match(/(\d{4})-(\d{2})-(\d{2})-(\d{2})\.(?:mp3|opus|flac)$/);
             if (match) {
                 const [year, month, day, hour] = match.slice(1);
 

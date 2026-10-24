@@ -52,3 +52,18 @@ test('segmentOutputName: attempt >= 1 uses .partN suffixes (N = attempt + 1)', (
 test('segmentOutputName: negative/invalid attempt falls back to the plain name', () => {
     assert.strictEqual(segmentOutputName('radio1', '2026-10-23-14', -1), 'radio1-2026-10-23-14.mp3');
 });
+
+test('segmentOutputName: default ext is mp3 when omitted (behaviour-preserving)', () => {
+    assert.strictEqual(segmentOutputName('radio1', '2026-10-23-14', 0), 'radio1-2026-10-23-14.mp3');
+    assert.strictEqual(segmentOutputName('radio1', '2026-10-23-14', 1), 'radio1-2026-10-23-14.part2.mp3');
+});
+
+test('segmentOutputName: honours an explicit opus/flac extension on attempt 0', () => {
+    assert.strictEqual(segmentOutputName('radio1', '2026-10-23-14', 0, 'opus'), 'radio1-2026-10-23-14.opus');
+    assert.strictEqual(segmentOutputName('radio1', '2026-10-23-14', 0, 'flac'), 'radio1-2026-10-23-14.flac');
+});
+
+test('segmentOutputName: .partN segments carry the per-stream extension', () => {
+    assert.strictEqual(segmentOutputName('radio1', '2026-10-23-14', 1, 'opus'), 'radio1-2026-10-23-14.part2.opus');
+    assert.strictEqual(segmentOutputName('radio1', '2026-10-23-14', 2, 'flac'), 'radio1-2026-10-23-14.part3.flac');
+});

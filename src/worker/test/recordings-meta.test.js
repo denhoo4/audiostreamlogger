@@ -123,6 +123,50 @@ test('upsertRecordingMeta inserts a row when none exists yet', () => {
     assert.strictEqual(row.file_path, 'radio1/radio1-2026-10-23-15.mp3');
 });
 
+test('upsertRecordingMeta INSERT builds a non-mp3 file_path from the ext param', () => {
+    const wroteOpus = upsertRecordingMeta(db, {
+        folder: 'opusfm',
+        stamp: '2026-10-23-20',
+        durationSeconds: 3600,
+        sizeBytes: 1000,
+        part: 1,
+        ext: 'opus',
+    });
+    assert.strictEqual(wroteOpus, true);
+    assert.strictEqual(
+        getRow('opusfm', '2026-10-23', '20').file_path,
+        'opusfm/opusfm-2026-10-23-20.opus'
+    );
+
+    const wroteFlac = upsertRecordingMeta(db, {
+        folder: 'flacfm',
+        stamp: '2026-10-23-21',
+        durationSeconds: 3600,
+        sizeBytes: 2000,
+        part: 2,
+        ext: 'flac',
+    });
+    assert.strictEqual(wroteFlac, true);
+    const flacRow = getRow('flacfm', '2026-10-23', '21');
+    assert.strictEqual(flacRow.file_path, 'flacfm/flacfm-2026-10-23-21.flac');
+    assert.strictEqual(flacRow.status, 'partial');
+    assert.strictEqual(flacRow.segment_count, 2);
+});
+
+test('upsertRecordingMeta INSERT defaults the file_path ext to mp3 when omitted', () => {
+    upsertRecordingMeta(db, {
+        folder: 'radio1',
+        stamp: '2026-10-23-22',
+        durationSeconds: 3600,
+        sizeBytes: 1,
+        part: 1,
+    });
+    assert.strictEqual(
+        getRow('radio1', '2026-10-23', '22').file_path,
+        'radio1/radio1-2026-10-23-22.mp3'
+    );
+});
+
 test('upsertRecordingMeta marks a .partN segment partial on insert', () => {
     const wrote = upsertRecordingMeta(db, {
         folder: 'radio1',

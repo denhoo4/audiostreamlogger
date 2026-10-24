@@ -12,7 +12,35 @@ const TMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'recorder-db-'));
 const TMP_DB = path.join(TMP_DIR, 'app.db');
 process.env.DB_PATH = TMP_DB;
 
-const { readRecorderMinute } = require('./streams-db');
+const { readStreams, readRecorderMinute } = require('./streams-db');
+
+// Build a temp DB with a minimal `streams` table carrying the FEAT-001 quality
+// columns and seed the given rows. Used by the readStreams() coverage below.
+function buildStreamsDb(streamRows) {
+    try {
+        fs.rmSync(TMP_DB, { force: true });
+    } catch { /* ignore */ }
+    const db = new DatabaseSync(TMP_DB);
+    try {
+        db.exec(`
+            CREATE TABLE streams (
+              id INTEGER PRIMARY KEY,
+              country TEXT, name TEXT, folder TEXT, url TEXT,
+              codec TEXT NOT NULL DEFAULT 'mp3',
+              bitrate_kbps INTEGER,
+              bit_depth INTEGER
+            )
+        `);
+        const stmt = db.prepare(
+            'INSERT INTO streams (country, name, folder, url, codec, bitrate_kbps, bit_depth) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        );
+        for (const r of streamRows) {
+            stmt.run(r.country, r.name, r.folder, r.url, r.codec, r.bitrate_kbps ?? null, r.bit_depth ?? null);
+        }
+    } finally {
+        db.close();
+    }
+}
 
 // Build a temp DB with the minimal app_config shape and an optional seeded
 // recorder_minute value. Pass `undefined` to leave the row absent.
@@ -36,6 +64,34 @@ test.after(() => {
     try {
         fs.rmSync(TMP_DIR, { recursive: true, force: true });
     } catch { /* ignore */ }
+});
+
+test('readStreams: returns the per-stream codec/bitrate_kbps/bit_depth columns', () => {
+    buildStreamsDb([
+        { country: 'nl', name: 'Radio 1', folder: 'radio1', url: 'http://a', codec: 'mp3', bitrate_kbps: 160, bit_depth: null },
+        { country: 'nl', name: 'Opus FM', folder: 'opusfm', url: 'http://b', codec: 'opus', bitrate_kbps: 128, bit_depth: null },
+        { country: 'nl', name: 'Flac FM', folder: 'flacfm', url: 'http://c', codec: 'flac', bitrate_kbps: null, bit_depth: 24 },
+    ]);
+    const streams = readStreams();
+    assert.strictEqual(streams.length, 3);
+    assert.strictEqual(streams[0].country, 'nl');
+    assert.strictEqual(streams[0].name, 'Radio 1');
+    assert.strictEqual(streams[0].folder, 'radio1');
+    assert.strictEqual(streams[0].url, 'http://a');
+    assert.strictEqual(streams[0].codec, 'mp3');
+    assert.strictEqual(streams[0].bitrate_kbps, 160);
+    assert.strictEqual(streams[0].bit_depth, null);
+    assert.strictEqual(streams[1].codec, 'opus');
+    assert.strictEqual(streams[1].bitrate_kbps, 128);
+    assert.strictEqual(streams[2].codec, 'flac');
+    assert.strictEqual(streams[2].bit_depth, 24);
+});
+
+test('readStreams: returns [] when the DB is not ready (no file/table)', () => {
+    try {
+        fs.rmSync(TMP_DB, { force: true });
+    } catch { /* ignore */ }
+    assert.deepStrictEqual(readStreams(), []);
 });
 
 test('readRecorderMinute: returns the stored minute as a number', () => {

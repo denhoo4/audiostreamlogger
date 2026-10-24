@@ -34,12 +34,14 @@ function splitStamp(stamp) {
  *   `part` > 1 (a mid-hour `.partN` segment) also mark status 'partial' and
  *   bump segment_count so the hour reflects the restart.
  * - If no row exists yet (the recorder has not written one, or backfill has not
- *   run): INSERT one with status 'partial' for a `.partN` else 'complete', and
- *   segment_count = part.
+ *   run): INSERT one with status 'partial' for a `.partN` else 'complete',
+ *   segment_count = part, and file_path `${folder}/${folder}-${stamp}.${ext}`
+ *   (ext is the real codec extension, default 'mp3'). `ext` is consulted ONLY on
+ *   the INSERT branch; the UPDATE branches key on (folder,date,hour) only.
  *
  * Returns true when a row was written. Throws only on a non-busy DB error.
  */
-function upsertRecordingMeta(db, { folder, stamp, durationSeconds, sizeBytes, part }) {
+function upsertRecordingMeta(db, { folder, stamp, durationSeconds, sizeBytes, part, ext = 'mp3' }) {
     const split = splitStamp(stamp);
     if (split === null) {
         return false;
@@ -58,8 +60,9 @@ function upsertRecordingMeta(db, { folder, stamp, durationSeconds, sizeBytes, pa
 
         if (existing === undefined) {
             const status = segment > 1 ? 'partial' : 'complete';
-            // file_path is required NOT NULL; reconstruct the on-disk basename.
-            const filePath = `${folder}/${folder}-${stamp}.mp3`;
+            // file_path is required NOT NULL; reconstruct the on-disk basename
+            // with the real codec extension (defaults to mp3 — FEAT-002 §5.5).
+            const filePath = `${folder}/${folder}-${stamp}.${ext}`;
             db.prepare(
                 `INSERT INTO recordings
                    (stream_folder, date, hour, file_path, status, duration_seconds, size_bytes, segment_count)

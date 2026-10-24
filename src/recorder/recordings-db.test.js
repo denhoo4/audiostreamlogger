@@ -97,6 +97,32 @@ test('upsertRecordingStart: inserts a recording row with the primary file_path',
     assert.strictEqual(all[0].size_bytes, null);
 });
 
+test('upsertRecordingStart: builds the primary file_path with a per-stream extension', () => {
+    buildDb();
+    const db = openDb();
+    try {
+        upsertRecordingStart(db, { folder: 'radio1', stamp: '2026-10-23-14', ext: 'opus' });
+        upsertRecordingStart(db, { folder: 'radio2', stamp: '2026-10-23-14', ext: 'flac' });
+    } finally {
+        db.close();
+    }
+    const all = rows();
+    assert.strictEqual(all.length, 2);
+    assert.strictEqual(all[0].file_path, 'radio1-2026-10-23-14.opus');
+    assert.strictEqual(all[1].file_path, 'radio2-2026-10-23-14.flac');
+});
+
+test('upsertRecordingStart: defaults ext to mp3 when omitted (behaviour-preserving)', () => {
+    buildDb();
+    const db = openDb();
+    try {
+        upsertRecordingStart(db, { folder: 'radio1', stamp: '2026-10-23-14' });
+    } finally {
+        db.close();
+    }
+    assert.strictEqual(rows()[0].file_path, 'radio1-2026-10-23-14.mp3');
+});
+
 test('upsertRecordingStart: a second start for the same hour does not duplicate or clobber', () => {
     buildDb();
     const db = openDb();

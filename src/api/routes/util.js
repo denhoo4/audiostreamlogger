@@ -37,6 +37,16 @@ router.post('/selection-export', (req, res) => {
         return res.status(400).send('Invalid parameters');
     }
 
+    // Optional per-stream codec extension (FEAT-002). Defaults to 'mp3' so a
+    // pre-feature caller that omits it keeps today's behaviour; a supplied value
+    // must be in the allowlist (its own strict regex, separate from the
+    // path-traversal allowlist above). fluent-ffmpeg infers the output muxer
+    // from this extension (.opus->ogg/libopus, .flac->flac).
+    const ext = data.ext === undefined ? 'mp3' : data.ext;
+    if (typeof ext !== 'string' || !/^(mp3|opus|flac)$/.test(ext)) {
+        return res.status(400).send('Invalid extension');
+    }
+
     // Validate startTime/endTime are finite, non-negative numbers with endTime > startTime.
     const start = Number(startTime);
     const end = Number(endTime);
@@ -47,7 +57,7 @@ router.post('/selection-export', (req, res) => {
         return res.status(400).send('Invalid time range');
     }
 
-    const file = `${station_id}/${station_id}-${year}-${month}-${day}-${hour}.mp3`;
+    const file = `${station_id}/${station_id}-${year}-${month}-${day}-${hour}.${ext}`;
 
     // Resolve the requested file and confirm it stays within the audio base dir.
     const audioBaseDir = path.resolve(__dirname, '../audio');
@@ -62,7 +72,7 @@ router.post('/selection-export', (req, res) => {
     }
 
     // Write the ffmpeg output to a unique temp file outside the public audio dir.
-    const pathToOutput = path.join(os.tmpdir(), `export-${Date.now()}-${process.pid}.mp3`);
+    const pathToOutput = path.join(os.tmpdir(), `export-${Date.now()}-${process.pid}.${ext}`);
 
     // Use FFmpeg to extract the part of the MP3
     ffmpeg(pathToFile)

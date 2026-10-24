@@ -25,6 +25,11 @@ const { extractFileDateTime, parseRecordingParts } = require('../filename-utils'
 const { upsertRecordingMeta } = require('../recordings-db');
 const { AUDIO_DIR } = require('./paths');
 
+// Allowlisted recording extensions the two-level walk picks up (FEAT-002).
+// audiowaveform/ffprobe infer the format from the extension and the §4 probe
+// confirmed each is both encodable and peak-readable.
+const AUDIO_EXTS = new Set(['.mp3', '.opus', '.flac']);
+
 /**
  * Current date-time in "YYYY-MM-DD-HH" local format, matching the audio filename
  * stamp, so files still being recorded this hour are skipped.
@@ -82,9 +87,12 @@ function runPeakfileGenerator(db) {
             const outputFolder = path.join(AUDIO_DIR, folder);
 
             fs.readdirSync(outputFolder)
-                .filter((file) => path.extname(file) === '.mp3')
+                .filter((file) => AUDIO_EXTS.has(path.extname(file)))
                 .forEach((file) => {
-                    const filename = path.basename(file, '.mp3');
+                    // Derive the peak base from the REAL extension so <base>.json
+                    // is correct for any codec (.mp3/.opus/.flac).
+                    const fileExt = path.extname(file);
+                    const filename = path.basename(file, fileExt);
                     const jsonFilePath = path.join(outputFolder, `${filename}.json`);
 
                     const fileDateTime = extractFileDateTime(filename);
@@ -129,6 +137,9 @@ function runPeakfileGenerator(db) {
                             durationSeconds,
                             sizeBytes,
                             part: parts.part,
+                            // The true on-disk extension so an INSERT builds the
+                            // real-ext file_path (not a hard-coded .mp3).
+                            ext: fileExt.slice(1),
                         });
                         counters.metaFilled += 1;
                     } catch (error) {

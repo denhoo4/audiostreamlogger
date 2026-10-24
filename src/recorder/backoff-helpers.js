@@ -27,16 +27,20 @@ function shouldRestartWithinHour(remainingSeconds, floorSeconds) {
 }
 
 // Output filename for a given restart attempt (D2 in the plan). Attempt 0 keeps
-// the EXACT current name `<folder>-<stamp>.mp3` so the normal/catch-up path and
+// the EXACT current name `<folder>-<stamp>.<ext>` so the normal/catch-up path and
 // all downstream consumers are unchanged. A mid-hour restart (attempt >= 1)
-// writes a distinct same-hour segment `<folder>-<stamp>.part<attempt+1>.mp3`
+// writes a distinct same-hour segment `<folder>-<stamp>.part<attempt+1>.<ext>`
 // (.part2, .part3, ...) so it never overwrites audio already captured.
-function segmentOutputName(folder, stamp, attempt) {
+//
+// `ext` is the per-stream codec extension (mp3/opus/flac resolved via
+// encoding.js); it defaults to 'mp3' so existing call sites and tests that omit
+// it stay on today's behaviour (FEAT-002, design §5.1).
+function segmentOutputName(folder, stamp, attempt, ext = 'mp3') {
     const n = Number.isFinite(attempt) && attempt > 0 ? Math.floor(attempt) : 0;
     if (n === 0) {
-        return `${folder}-${stamp}.mp3`;
+        return `${folder}-${stamp}.${ext}`;
     }
-    return `${folder}-${stamp}.part${n + 1}.mp3`;
+    return `${folder}-${stamp}.part${n + 1}.${ext}`;
 }
 
 module.exports = { backoffDelayMs, shouldRestartWithinHour, segmentOutputName };

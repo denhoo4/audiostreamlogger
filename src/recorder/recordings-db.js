@@ -80,15 +80,17 @@ function parseStamp(stamp) {
 }
 
 // INSERT the hour row on record start with status 'recording' and segment_count
-// 1. file_path is the primary mp3 name `<folder>-<stamp>.mp3` (segmentOutputName
-// attempt 0). ON CONFLICT(stream_folder,date,hour) DO NOTHING so a retry/catch-up
-// start for an hour already tracked never clobbers a 'partial'/'complete' row.
-function upsertRecordingStart(db, { folder, stamp }) {
+// 1. file_path is the primary name `<folder>-<stamp>.<ext>` (segmentOutputName
+// attempt 0 with the stream's resolved codec extension — FEAT-002). ext defaults
+// to 'mp3' so existing callers/tests stay on today's behaviour. ON
+// CONFLICT(stream_folder,date,hour) DO NOTHING so a retry/catch-up start for an
+// hour already tracked never clobbers a 'partial'/'complete' row.
+function upsertRecordingStart(db, { folder, stamp, ext = 'mp3' }) {
     const parts = parseStamp(stamp);
     if (!parts) {
         throw new Error(`recorder: cannot parse hour stamp ${JSON.stringify(stamp)}`);
     }
-    const filePath = `${folder}-${stamp}.mp3`;
+    const filePath = `${folder}-${stamp}.${ext}`;
     return withBusyRetry(() => {
         db.prepare(
             `INSERT INTO recordings (stream_folder, date, hour, file_path, status, segment_count)

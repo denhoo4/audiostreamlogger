@@ -70,12 +70,17 @@ beforeEach(() => {
 });
 
 function writeMp3(name) {
-    const mp3 = path.join(audioDir, 'radio1', name);
-    fs.writeFileSync(mp3, 'fake-mp3-bytes');
-    // Pre-create the .json so audiowaveform (execSync) is never invoked.
-    const base = path.basename(name, '.mp3');
+    return writeAudio(name);
+}
+
+// Write a fake audio file (any allowlisted ext) and pre-create its <base>.json
+// so audiowaveform (execSync) is never invoked during the test.
+function writeAudio(name) {
+    const file = path.join(audioDir, 'radio1', name);
+    fs.writeFileSync(file, 'fake-audio-bytes');
+    const base = path.basename(name, path.extname(name));
     fs.writeFileSync(path.join(audioDir, 'radio1', `${base}.json`), '{}');
-    return mp3;
+    return file;
 }
 
 function getRow(hour) {
@@ -98,6 +103,36 @@ test('peakfilegenerator fills duration + size on the recordings row', () => {
     assert.strictEqual(row.size_bytes, fs.statSync(mp3).size);
     assert.strictEqual(row.status, 'complete');
     assert.match(summary, /1 recording row\(s\) metadata-filled/);
+});
+
+test('peakfilegenerator picks up opus/flac files and builds the real-ext file_path', () => {
+    const opus = writeAudio(`radio1-${PAST_STAMP}.opus`);
+    peak.probeDurationSeconds = () => 3600;
+
+    const summary = peak.runPeakfileGenerator(db);
+
+    const row = getRow('00');
+    assert.ok(row, 'an opus recording row was created');
+    assert.strictEqual(row.file_path, 'radio1/radio1-2020-01-01-00.opus');
+    assert.strictEqual(row.size_bytes, fs.statSync(opus).size);
+    assert.match(summary, /1 recording row\(s\) metadata-filled/);
+});
+
+test('peakfilegenerator generates the <base>.json for a flac file (no .flac in the name)', () => {
+    // No pre-created .json here, so the handler would try audiowaveform; stub
+    // execFileSync by pre-creating the json AFTER asserting the base name.
+    const flac = path.join(audioDir, 'radio1', `radio1-${PAST_STAMP}.flac`);
+    fs.writeFileSync(flac, 'fake-flac-bytes');
+    // Pre-create the json the handler derives from the real extension.
+    fs.writeFileSync(path.join(audioDir, 'radio1', `radio1-${PAST_STAMP}.json`), '{}');
+    peak.probeDurationSeconds = () => 1800;
+
+    peak.runPeakfileGenerator(db);
+
+    const row = getRow('00');
+    assert.ok(row);
+    assert.strictEqual(row.file_path, 'radio1/radio1-2020-01-01-00.flac');
+    assert.strictEqual(row.duration_seconds, 1800);
 });
 
 test('peakfilegenerator folds a .partN segment into a partial row', () => {

@@ -2,12 +2,20 @@
 
 Living document tracking the modernization/cleanup of the project.
 Last updated: 2026-10-23 (item 22 IN PROGRESS on branch `stream-quality`: per-stream recording
-quality — FEAT-001 api backend landed (additive `codec`/`bitrate_kbps`/`bit_depth` columns +
-idempotent in-place migration, authoritative server-side quality validation, service persistence
-with the behaviour-preserving mp3@160 default, the three write call-sites forwarding the fields, a
-`codec` field on the public `/settings` projection, backup round-trip, and the OpenAPI update);
-api node:test 177 → 204 green in node:26-bookworm; committed locally, NOT pushed; recorder/worker/
-frontend FEATs still pending. Earlier: item 17 DONE + MERGED to main: stream-ordering — manual stream ordering +
+quality — FEAT-001 api backend + FEAT-002 recorder/worker/api de-`.mp3`-ification landed. FEAT-001:
+additive `codec`/`bitrate_kbps`/`bit_depth` columns + idempotent in-place migration, authoritative
+server-side quality validation, service persistence with the behaviour-preserving mp3@160 default,
+the three write call-sites forwarding the fields, a `codec` field on the public `/settings`
+projection, backup round-trip, and the OpenAPI update. FEAT-002: pure `src/recorder/encoding.js`
+per-codec ffmpeg ARRAY-arg resolver (mp3/opus/flac, defensive clamp to mp3@160) + the mandatory
+`Dockerfile.recorder` COPY, extension-parameterised `segmentOutputName`, recorder wired to the
+per-stream codec (output name + ffmpeg output-option array + recordings-row file_path), and the full
+de-`.mp3`-ification across recorder/worker/api (filename parsers return the ext; worker
+peakgen/reconcile scan `.mp3/.opus/.flac` and `upsertRecordingMeta` builds the real-ext file_path;
+cleaner row-match via the widened parser; api browse lists opus/flac hours + selection-export gained
+an `ext` field). recorder node:test 53 / worker 56 / api 211 green in node:26-bookworm, and
+`docker build -f Dockerfile.recorder` succeeds with the new module; committed locally, NOT pushed;
+frontend FEAT (player ext + admin-form controls) still pending. Earlier: item 17 DONE + MERGED to main: stream-ordering — manual stream ordering +
 default stream + country-grouped admin view. FEAT-001 backend (additive `streams.sort_order` column +
 idempotent in-place migration, sort_order-ordered reads, `PUT /api/streams/reorder`,
 `default_stream_folder` app_config key with public read + `PUT /api/app-config/default-stream` setter)
@@ -68,7 +76,7 @@ STATUS SUMMARY (what is DONE + on origin/main):
 
 ## Branches
 
-### `stream-quality` — IN PROGRESS (item 22: per-stream codec/bitrate/bit-depth; ADDITIVE schema change; FEAT-001 api backend DONE, recorder/worker/frontend FEATs pending)
+### `stream-quality` — IN PROGRESS (item 22: per-stream codec/bitrate/bit-depth; ADDITIVE schema change; FEAT-001 api backend + FEAT-002 recorder/worker/api de-.mp3 DONE, frontend FEAT pending)
 Isolated git worktree at `.worktrees/stream-quality` on branch `stream-quality`. Task artifacts under
 `.agents/tasks/stream-quality-2026-10-23/` (context.json + design.md + features/FEAT-001..N.json).
 Resolved codec allowlist: `mp3` / `opus` / `flac` (aac excluded — the worker image's audiowaveform
@@ -89,8 +97,37 @@ Resolved codec allowlist: `mp3` / `opus` / `flac` (aac excluded — the worker i
   backup imports as the mp3 default. OpenAPI `spec.js`: StreamInput/Stream + SettingsEntry +
   selection-export `ext` documented. api node:test 177 → 204 (new `streams-quality-schema.test.js` +
   extended validate-stream/streams-service/streams-routes/settings-routes/backup/backup-routes suites),
-  verified green in node:26-bookworm. Recorder/worker/frontend de-`.mp3`-ification + admin-form
-  controls are later FEATs on this branch.
+  verified green in node:26-bookworm.
+- **FEAT-002 — recorder/worker/api de-`.mp3`-ification (DONE, committed).** New pure
+  `src/recorder/encoding.js`: `resolveEncoding(row)` clamps an unrecognised/NULL codec to the
+  behaviour-preserving mp3@160 default (and reports `clamped`) and returns `{codec,ext,bitrate_kbps,
+  bit_depth}`; `outputOptionsFor(enc)` returns the ffmpeg OUTPUT option **ARRAY** (never a shell
+  string — NFR-3): mp3 `-c:a libmp3lame -b:a <n>k -ar 44100`, opus `-c:a libopus -b:a <n>k -ar 44100`,
+  flac `-c:a flac -ar 44100` + `-sample_fmt s16` (16-bit) / `-sample_fmt s32 -bits_per_raw_sample 24`
+  (24-bit). `ext === codec`. `Dockerfile.recorder` gains the MANDATORY `COPY src/recorder/encoding.js
+  ./` (the recorder image copies by name; built + boot-required-module confirmed). `backoff-helpers.js`
+  `segmentOutputName(folder,stamp,attempt,ext='mp3')` builds `.<ext>` / `.partN.<ext>`. `recorder.js`
+  `recordStream(item,…)`/`superviseStream` resolve the per-stream encoding, build the output name with
+  the resolved ext, apply the output-option array (replacing the fixed `.audioBitrate('160k')`, keeping
+  `.audioFrequency(44100)`), probe `hasCurrentHourRecording(folder,stamp,ext)` with the resolved ext,
+  and log a greppable `recorder: unknown codec <x> for <folder>, falling back to mp3` on a clamp;
+  hourly cron + startup catch-up + 30s new-stream poll + per-stream supervision/backoff + `.partN` +
+  graceful shutdown all preserved. `streams-db.js readStreams()` selects codec/bitrate_kbps/bit_depth;
+  `recordings-db.js upsertRecordingStart({folder,stamp,ext='mp3'})` builds the real-ext file_path.
+  Worker + api parsers widened to `(mp3|opus|flac)` and return `ext` (`worker/filename-utils.js`
+  `parseRecordingParts` requires a real ext for the three production callers, keeps a bare-key
+  `allowMissingExt` affordance returning `ext:null`; `api/lib/recording-name.js parseRecordingFilename`
+  returns `{folder,date,hour,part,ext}`). Worker `AUDIO_EXTS={.mp3,.opus,.flac}` in peakfilegenerator
+  (peak `<base>.json` derived from the real ext; passes `ext` into `upsertRecordingMeta`) and reconcile
+  `scanAudioTree`; cleaner needs no delete-walk change (the widened parser handles row-match).
+  `worker/recordings-db.js upsertRecordingMeta` (Site A, peakgen INSERT) gained an `ext` param
+  (default 'mp3'); `upsertRecordingRow`/`updateRecordingRow` (Site B, reconcile) UNCHANGED. api
+  `services/browse.js folderContent` lists `.mp3/.opus/.flac` hours; `routes/util.js
+  POST /util/selection-export` gained an optional `ext` validated `^(mp3|opus|flac)$` (default 'mp3',
+  bad ext → 400) used for the source path + temp output, keeping the existing re-encode trim.
+  recorder node:test 53 / worker node:test 56 / api node:test 211 green in node:26-bookworm;
+  `docker build -f Dockerfile.recorder` succeeds. The frontend player extension + admin-form
+  codec/bitrate/bit-depth controls are the remaining FEAT on this branch.
 
 ### `stream-ordering` — MERGED + PUSHED (item 17: manual stream ordering + default stream + country-grouped admin view; ADDITIVE schema change; fast-forward merged into main AND pushed to origin/main)
 Isolated git worktree at `.worktrees/stream-ordering` on branch `stream-ordering`. Task artifacts

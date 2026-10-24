@@ -8,6 +8,7 @@ const { readStreams, readRecorderMinute } = require('./streams-db');
 const { backoffDelayMs, shouldRestartWithinHour, segmentOutputName } = require('./backoff-helpers');
 const { streamsNeedingCatchup } = require('./catchup-helpers');
 const recordingsDb = require('./recordings-db');
+const { resolveEncoding, outputOptionsFor } = require('./encoding');
 
 // The recorder's OWN scoped read-write DB handle (FEAT-002), opened once at
 // module load like streams-db is used per-read. recordings writes go through it
@@ -24,12 +25,12 @@ try {
 
 // Best-effort recordings writers: each swallows a null handle and any error with
 // a greppable log line so a DB hiccup never throws into the ffmpeg callbacks.
-function recordStartRow(folder, stamp) {
+function recordStartRow(folder, stamp, ext = 'mp3') {
     if (!recordingsHandle) {
         return;
     }
     try {
-        recordingsDb.upsertRecordingStart(recordingsHandle, { folder, stamp });
+        recordingsDb.upsertRecordingStart(recordingsHandle, { folder, stamp, ext });
     } catch (err) {
         log.error(`recorder: recordings start-row write failed for ${folder} ${stamp}:`, err.message);
     }
@@ -100,23 +101,33 @@ let currentMinute = readRecorderMinute();
 
 // Build and start an ffmpeg recording command for one stream and RETURN the
 // command object so the supervisor can observe its error/end events and kill it
-// on shutdown. The ffmpeg flags, the output-path formula and the existing log
-// lines are preserved exactly; `attempt` only changes the output filename for a
-// mid-hour restart (attempt 0 keeps `<folder>-<stamp>.mp3`, attempt >= 1 writes
-// a distinct `<folder>-<stamp>.partN.mp3` segment — see segmentOutputName/D2).
-function recordStream(name, folder, url, durationSeconds = 3600, attempt = 0) {
+// on shutdown. The per-stream codec/bitrate/bit_depth (on the full `item` row)
+// is resolved via encoding.js into the ffmpeg OUTPUT option ARRAY (never a shell
+// string — NFR-3) and the output-file extension; for the behaviour-preserving
+// default row (mp3@160) this is exactly today's `-c:a libmp3lame -b:a 160k
+// -ar 44100`. `attempt` only changes the output filename for a mid-hour restart
+// (attempt 0 keeps `<folder>-<stamp>.<ext>`, attempt >= 1 writes a distinct
+// `<folder>-<stamp>.partN.<ext>` segment — see segmentOutputName/D2). An
+// unrecognised/NULL codec clamps to mp3 defensively and logs a greppable warn.
+function recordStream(item, durationSeconds = 3600, attempt = 0) {
+    const { name, folder, url } = item;
+    const enc = resolveEncoding(item);
+    if (enc.clamped && typeof item.codec !== 'undefined' && item.codec !== null) {
+        log.error(`recorder: unknown codec ${item.codec} for ${folder}, falling back to mp3`);
+    }
+
     const audioFolderPath = path.join(__dirname, `./audio/${folder}`);
     fs.mkdirSync(audioFolderPath, { recursive: true });
 
     const formattedDate = currentHourStamp();
-    const outputPath = `${audioFolderPath}/${segmentOutputName(folder, formattedDate, attempt)}`;
+    const outputPath = `${audioFolderPath}/${segmentOutputName(folder, formattedDate, attempt, enc.ext)}`;
 
     const command = ffmpeg()
         .input(url)
         .inputOptions('-user_agent', `'${name} Logger'`)
         .duration(durationSeconds)
         .audioFrequency(44100)
-        .audioBitrate('160k')
+        .outputOptions(outputOptionsFor(enc))
         .output(outputPath)
         .on('start', (commandLine) => {
             log.info(`Started recording for ${name} in folder ${folder}.`);
@@ -156,19 +167,21 @@ function superviseStream(item, attempt) {
     // so the recordings-row writes (FEAT-002) key on the same hour and the
     // finalize stats the file ffmpeg is actually writing.
     const stamp = currentHourStamp();
-    const outputName = segmentOutputName(item.folder, stamp, attempt);
+    const enc = resolveEncoding(item);
+    const outputName = segmentOutputName(item.folder, stamp, attempt, enc.ext);
     const outputPath = path.join(__dirname, `./audio/${item.folder}/${outputName}`);
 
-    // Track the hour row: attempt 0 inserts a 'recording' row on start; a
+    // Track the hour row: attempt 0 inserts a 'recording' row on start (with the
+    // resolved codec extension so file_path matches what ffmpeg writes); a
     // mid-hour restart (attempt >= 1) flips it to 'partial' with the new
     // segment count. Best-effort — never throws into the supervisor.
     if (attempt === 0) {
-        recordStartRow(item.folder, stamp);
+        recordStartRow(item.folder, stamp, enc.ext);
     } else {
         recordSegmentRow(item.folder, stamp, attempt);
     }
 
-    const command = recordStream(item.name, item.folder, item.url, remaining, attempt);
+    const command = recordStream(item, remaining, attempt);
     entry.command = command;
     active.set(id, entry);
 
@@ -418,9 +431,11 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // True when a recording file for the current hour already exists for `folder`
 // (the "exists = skip" rule). Shared by the startup catch-up and the periodic
-// poll so both honor the same primary-filename convention `<folder>-<stamp>.mp3`.
-function hasCurrentHourRecording(folder, stamp) {
-    const outputPath = path.join(__dirname, `./audio/${folder}/${folder}-${stamp}.mp3`);
+// poll so both honor the same primary-filename convention
+// `<folder>-<stamp>.<ext>` where ext is the stream's resolved codec extension
+// (defaults to 'mp3' for a field-less/legacy row).
+function hasCurrentHourRecording(folder, stamp, ext = 'mp3') {
+    const outputPath = path.join(__dirname, `./audio/${folder}/${folder}-${stamp}.${ext}`);
     return fs.existsSync(outputPath);
 }
 
@@ -435,7 +450,14 @@ function hasCurrentHourRecording(folder, stamp) {
 function runCatchup(streams, reason) {
     const stamp = currentHourStamp();
     const remaining = secondsUntilNextHour();
-    const needing = streamsNeedingCatchup(streams, (folder) => hasCurrentHourRecording(folder, stamp));
+    // Resolve each stream's codec extension once so the "exists = skip" probe
+    // looks for the primary file with the right extension (opus/flac streams
+    // never re-trigger a catch-up because a .mp3 was missing).
+    const extByFolder = new Map(
+        (Array.isArray(streams) ? streams : []).map((item) => [item.folder, resolveEncoding(item).ext])
+    );
+    const needing = streamsNeedingCatchup(streams, (folder) =>
+        hasCurrentHourRecording(folder, stamp, extByFolder.get(folder) || 'mp3'));
     needing.forEach((item) => {
         try {
             log.info(`recorder: ${reason} starting for ${item.folder}: no recording for hour ${stamp} yet (${remaining}s remaining).`);
