@@ -520,11 +520,14 @@ export default function App() {
           ))}
         </Group>
 
-        {/* Selection zone: stream + calendar + hour + load/refresh. */}
+        {/* Selection zone: stream + calendar + hour + load/refresh. On narrow
+            widths the three selectors grow to full width and stack (wrap);
+            on wider screens they sit side-by-side at their natural width. */}
         <Group align="flex-end" gap="sm" wrap="wrap" justify="center">
           <NativeSelect
             id="stringSelector"
             label="Stream"
+            w={{ base: "100%", xs: "auto" }}
             value={selectedFolder}
             onChange={(e) => setSelectedFolder(e.currentTarget.value)}
             data={orderedStreams.map((s) => ({
@@ -536,6 +539,7 @@ export default function App() {
             id="dateSelector"
             label="Date"
             placeholder="Pick a day"
+            w={{ base: "100%", xs: "auto" }}
             firstDayOfWeek={1}
             value={date === "" ? null : date}
             onChange={(value) => setDate(value ?? "")}
@@ -547,6 +551,7 @@ export default function App() {
           <NativeSelect
             id="hourSelector"
             label="Hour"
+            w={{ base: "100%", xs: "auto" }}
             value={hour}
             onChange={(e) => setHour(e.currentTarget.value)}
             data={[

@@ -702,6 +702,40 @@ describe("StreamTable", () => {
     expect(deleteStream).not.toHaveBeenCalled();
   });
 
+  // --- A11y: icon-only controls expose aria-labels; errors use role=alert ---
+
+  it("exposes accessible names on the representative icon-only row controls", async () => {
+    getStreams.mockResolvedValue(ROWS);
+    renderWithMantine(<StreamTable />);
+    await screen.findByText("Radio One");
+
+    // Each icon-only ActionIcon is reachable purely by its accessible name.
+    expect(
+      screen.getByRole("button", { name: "Edit Radio One" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Delete Radio One" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Move Radio One up" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Move Radio Two down" }),
+    ).toBeInTheDocument();
+    // The set-default star is icon-only too and carries its state name.
+    expect(
+      screen.getAllByRole("button", { name: "Set as default" }).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("surfaces a list-load failure through an element with role='alert'", async () => {
+    getStreams.mockRejectedValue(new MockApiError("boom", 500));
+    renderWithMantine(<StreamTable />);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("boom");
+  });
+
   it("surfaces a 409 'recording right now' when the delete is refused", async () => {
     getStreams.mockResolvedValue(ROWS);
     getDeletionImpact.mockResolvedValue({

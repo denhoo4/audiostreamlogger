@@ -42,7 +42,12 @@ export default function AppLayout({
         backgroundColor: "var(--mantine-color-body)",
       }}
     >
-      <Box component="header" px="lg" py="md" className={classes.header}>
+      <Box
+        component="header"
+        px={{ base: "md", sm: "lg" }}
+        py="md"
+        className={classes.header}
+      >
         <Title order={1} size="h4">
           {title}
         </Title>

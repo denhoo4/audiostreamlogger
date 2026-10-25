@@ -271,7 +271,7 @@ export default function SchedulerConfig() {
                 )}
                 {rowStatus[s.type] && <Text>{rowStatus[s.type]}</Text>}
 
-                <Group gap="sm">
+                <Group gap="sm" wrap="wrap">
                   <Button type="button" onClick={() => handleSave(s)}>
                     Save
                   </Button>

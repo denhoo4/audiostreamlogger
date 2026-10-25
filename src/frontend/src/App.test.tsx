@@ -1049,6 +1049,71 @@ describe("App play-selection stops at region end", () => {
   });
 });
 
+// --- Play/pause control is keyboard-reachable by its accessible name -------
+
+describe("App play/pause control accessible name", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/api/app-config/public")) {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({ title: "", default_stream_folder: "" }),
+              { status: 200, headers: { "Content-Type": "application/json" } },
+            ),
+          );
+        }
+        if (url.includes("/api/settings2")) {
+          return Promise.resolve(
+            new Response(JSON.stringify({}), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        }
+        if (url.includes("/api/settings")) {
+          return Promise.resolve(
+            new Response(JSON.stringify([]), {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            }),
+          );
+        }
+        return Promise.resolve(new Response("", { status: 404 }));
+      }),
+    );
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    resetFakeWs();
+  });
+
+  it("exposes the icon-only transport control as 'Play', flipping to 'Pause' once playing", async () => {
+    renderWithMantine(<App />);
+
+    // The icon-only ActionIcon is reachable purely by its accessible name
+    // (aria-label) — 'Play' while paused.
+    const control = screen.getByRole("button", { name: "Play" });
+    expect(control).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+
+    // The WaveSurfer 'play' event drives isPlaying, flipping the aria-label to
+    // 'Pause' so the same control keeps a correct accessible name.
+    await act(async () => {
+      fakeWs?.emit("play");
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Pause" })).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "Play" })).toBeNull();
+  });
+});
+
 // --- Header no longer renders a color-scheme toggle ------------------------
 
 describe("App header has no color-scheme toggle", () => {

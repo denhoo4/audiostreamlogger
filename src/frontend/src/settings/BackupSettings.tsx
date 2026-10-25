@@ -122,7 +122,7 @@ export default function BackupSettings() {
       <Panel mt="md">
         <Stack gap="sm">
           <Title order={3}>Export</Title>
-          <Group>
+          <Group wrap="wrap">
             <Button type="button" onClick={handleExportJson}>
               Download backup (JSON)
             </Button>
