@@ -24,6 +24,9 @@ Last updated: 2026-10-23.
 > Branch `ui-polish` (not yet merged): Phase-6 polish — structural color-scheme
 > follow fix + consistent loading/empty/error states + reduced-motion-aware motion +
 > responsive/accessibility pass. Approved, ready for review. See the Phase-6 entry.
+> Branch `peakfile-revert` (IN PROGRESS, not yet merged): reverts the live current-hour
+> peak regeneration (worker) + client-decodes the current hour in the player + removes
+> the redundant player Refresh button. Covers the two peak/Refresh open items below.
 
 ## Current state
 
