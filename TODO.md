@@ -51,8 +51,9 @@ share the styling layer, NOT parallel):
       no panel/player-control restyle, no new dependency. Added a `window.matchMedia`
       stub to the vitest setup and moved `SettingsPage.test.tsx` onto
       `renderWithMantine`. Build + 64 tests green in `node:26-bookworm`.
-- [x] Phase 3 — shared base components + Streams-tab proof: DONE on branch
-      `ui-components-streams` (not yet merged). Added a thin shared `src/ui/` layer —
+- [x] Phase 3 — shared base components + Streams-tab proof: DONE and merged to
+      `origin/main` (branch `ui-components-streams`). Added a thin shared `src/ui/`
+      layer —
       `StatusBadge` (the single stream-health/recording state→colour map) and `Panel`
       (the AI-Studio dark `Card` surface) — plus a `ui/README.md` documenting the
       house conventions for using Mantine `Button`/`TextInput`/`NativeSelect`/`Table`/
