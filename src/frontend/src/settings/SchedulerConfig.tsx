@@ -1,5 +1,16 @@
 import { useEffect, useState } from "react";
 import {
+  Alert,
+  Button,
+  Group,
+  NativeSelect,
+  NumberInput,
+  Stack,
+  Switch,
+  Text,
+  Title,
+} from "@mantine/core";
+import {
   ApiError,
   getLogRetention,
   listSchedules,
@@ -8,6 +19,7 @@ import {
   updateSchedule,
   type ScheduleRecord,
 } from "../api";
+import { Panel } from "../ui";
 
 /** Weekday labels for the day-of-week select (0=Sunday..6=Saturday). */
 const WEEKDAYS = [
@@ -33,6 +45,11 @@ const FREQUENCIES: ScheduleRecord["frequency"][] = [
  * hour+minute for weekly), a Save button (PUT /api/jobs/schedules/:type) and a
  * Run now button (POST /api/jobs {type}). A log_retention (hours) input with its
  * own Save (PUT /api/jobs/config/log_retention) sits below the schedule cards.
+ *
+ * Restyled to the Mantine AI-Studio house style (Panel + Mantine
+ * Switch/NativeSelect/NumberInput/Button); every api.ts call, the enabled 0|1
+ * mapping, the conditional anchor fields, the inline status/error strings and
+ * the <h2> heading are preserved verbatim — only presentation changed.
  */
 export default function SchedulerConfig() {
   const [schedules, setSchedules] = useState<ScheduleRecord[]>([]);
@@ -143,139 +160,137 @@ export default function SchedulerConfig() {
 
   return (
     <section className="settings-section">
-      <h2>Scheduled jobs</h2>
+      <Title order={2}>Scheduled jobs</Title>
 
       {listError && (
-        <p className="settings-error" role="alert">
+        <Alert color="red" role="alert" mt="md">
           {listError}
-        </p>
+        </Alert>
       )}
 
       {loading ? (
-        <p>Loading…</p>
+        <Text c="dimmed" mt="md">
+          Loading…
+        </Text>
       ) : schedules.length === 0 ? (
-        <p>No scheduled jobs.</p>
+        <Text c="dimmed" mt="md">
+          No scheduled jobs.
+        </Text>
       ) : (
-        schedules.map((s) => (
-          <div key={s.type} className="settings-form">
-            <h3>{s.type}</h3>
-            <label>
-              <input
-                type="checkbox"
-                checked={s.enabled === 1}
-                onChange={(e) =>
-                  patch(s.type, { enabled: e.target.checked ? 1 : 0 })
-                }
-              />
-              Enabled
-            </label>
-            <label>
-              Frequency
-              <select
-                value={s.frequency}
-                onChange={(e) =>
-                  patch(s.type, {
-                    frequency: e.target.value as ScheduleRecord["frequency"],
-                  })
-                }
-              >
-                {FREQUENCIES.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
-                ))}
-              </select>
-            </label>
+        <Stack gap="md" mt="md">
+          {schedules.map((s) => (
+            <Panel key={s.type}>
+              <Stack gap="sm">
+                <Title order={3}>{s.type}</Title>
 
-            {s.frequency === "weekly" && (
-              <label>
-                Day of week
-                <select
-                  value={s.day_of_week}
+                <Switch
+                  label="Enabled"
+                  checked={s.enabled === 1}
                   onChange={(e) =>
-                    patch(s.type, { day_of_week: Number(e.target.value) })
-                  }
-                >
-                  {WEEKDAYS.map((label, idx) => (
-                    <option key={label} value={idx}>
-                      {label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-
-            {(s.frequency === "daily" || s.frequency === "weekly") && (
-              <label>
-                Hour
-                <input
-                  type="number"
-                  min={0}
-                  max={23}
-                  value={s.hour}
-                  onChange={(e) =>
-                    patch(s.type, { hour: Number(e.target.value) })
+                    patch(s.type, {
+                      enabled: e.currentTarget.checked ? 1 : 0,
+                    })
                   }
                 />
-              </label>
-            )}
 
-            <label>
-              Minute
-              <input
-                type="number"
-                min={0}
-                max={59}
-                value={s.minute}
-                onChange={(e) =>
-                  patch(s.type, { minute: Number(e.target.value) })
-                }
-              />
-            </label>
+                <NativeSelect
+                  label="Frequency"
+                  value={s.frequency}
+                  onChange={(e) =>
+                    patch(s.type, {
+                      frequency: e.currentTarget
+                        .value as ScheduleRecord["frequency"],
+                    })
+                  }
+                  data={FREQUENCIES.map((f) => ({ value: f, label: f }))}
+                />
 
-            {rowError[s.type] && (
-              <p className="settings-error" role="alert">
-                {rowError[s.type]}
-              </p>
-            )}
-            {rowStatus[s.type] && <p>{rowStatus[s.type]}</p>}
+                {s.frequency === "weekly" && (
+                  <NativeSelect
+                    label="Day of week"
+                    value={s.day_of_week}
+                    onChange={(e) =>
+                      patch(s.type, {
+                        day_of_week: Number(e.currentTarget.value),
+                      })
+                    }
+                    data={WEEKDAYS.map((label, idx) => ({
+                      value: String(idx),
+                      label,
+                    }))}
+                  />
+                )}
 
-            <div className="settings-form-actions">
-              <button type="button" onClick={() => handleSave(s)}>
-                Save
-              </button>
-              <button type="button" onClick={() => handleRunNow(s.type)}>
-                Run now
-              </button>
-            </div>
-          </div>
-        ))
+                {(s.frequency === "daily" || s.frequency === "weekly") && (
+                  <NumberInput
+                    label="Hour"
+                    min={0}
+                    max={23}
+                    value={s.hour}
+                    onChange={(value) =>
+                      patch(s.type, { hour: Number(value) })
+                    }
+                  />
+                )}
+
+                <NumberInput
+                  label="Minute"
+                  min={0}
+                  max={59}
+                  value={s.minute}
+                  onChange={(value) =>
+                    patch(s.type, { minute: Number(value) })
+                  }
+                />
+
+                {rowError[s.type] && (
+                  <Alert color="red" role="alert">
+                    {rowError[s.type]}
+                  </Alert>
+                )}
+                {rowStatus[s.type] && <Text>{rowStatus[s.type]}</Text>}
+
+                <Group gap="sm">
+                  <Button type="button" onClick={() => handleSave(s)}>
+                    Save
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="default"
+                    onClick={() => handleRunNow(s.type)}
+                  >
+                    Run now
+                  </Button>
+                </Group>
+              </Stack>
+            </Panel>
+          ))}
+        </Stack>
       )}
 
-      <div className="settings-form">
-        <h3>Log retention</h3>
-        <label>
-          Hours
-          <input
-            type="number"
+      <Panel mt="md">
+        <Stack gap="sm">
+          <Title order={3}>Log retention</Title>
+          <NumberInput
+            label="Hours"
             min={1}
             max={8760}
-            value={retentionHours}
-            onChange={(e) => setRetentionHours(e.target.value)}
+            value={retentionHours === "" ? "" : Number(retentionHours)}
+            onChange={(value) => setRetentionHours(value === "" ? "" : String(value))}
           />
-        </label>
-        {retentionError && (
-          <p className="settings-error" role="alert">
-            {retentionError}
-          </p>
-        )}
-        {retentionStatus && <p>{retentionStatus}</p>}
-        <div className="settings-form-actions">
-          <button type="button" onClick={handleSaveRetention}>
-            Save
-          </button>
-        </div>
-      </div>
+          {retentionError && (
+            <Alert color="red" role="alert">
+              {retentionError}
+            </Alert>
+          )}
+          {retentionStatus && <Text>{retentionStatus}</Text>}
+          <Group gap="sm">
+            <Button type="button" onClick={handleSaveRetention}>
+              Save
+            </Button>
+          </Group>
+        </Stack>
+      </Panel>
     </section>
   );
 }

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { Alert, List, Text, Title } from "@mantine/core";
 import { ApiError, getWorkerStatus, type JobRecord } from "../api";
+import { Panel, StatusBadge } from "../ui";
 
 // Poll cadence; the worker writes its heartbeat on a 5s timer, so matching that
 // keeps the "last seen Xs ago" readout fresh without hammering the endpoint.
@@ -26,6 +28,11 @@ function ageSeconds(iso: string | null, now: number): number | null {
  * every 5s (cleared on unmount) and shows whether the worker is alive (heartbeat
  * age < 30s) or stale, how long ago it was last seen, and the job it is
  * currently running (type + status) or "idle". Errors are surfaced minimally.
+ *
+ * Restyled to the Mantine AI-Studio house style (Panel + StatusBadge + List);
+ * the 5s poll + 1s clock intervals and their cleanup, and the
+ * alive/stale/age/current-job logic, are preserved verbatim — only presentation
+ * changed.
  */
 export default function WorkerStatus() {
   const [status, setStatus] = useState<Status | null>(null);
@@ -68,27 +75,39 @@ export default function WorkerStatus() {
 
   return (
     <section className="settings-section">
-      <h2>Worker status</h2>
+      <Title order={2}>Worker status</Title>
+
       {error && (
-        <p className="settings-error" role="alert">
+        <Alert color="red" role="alert" mt="md">
           {error}
-        </p>
+        </Alert>
       )}
+
       {!status && !error ? (
-        <p>Loading…</p>
+        <Text c="dimmed" mt="md">
+          Loading…
+        </Text>
       ) : (
-        <ul>
-          <li>
-            Worker: {age === null ? "unknown" : alive ? "alive" : "stale"}
-          </li>
-          <li>
-            Last seen: {age === null ? "never" : `${age}s ago`}
-          </li>
-          <li>
-            Current job:{" "}
-            {job ? `${job.type} (${job.status})` : "idle"}
-          </li>
-        </ul>
+        <Panel mt="md">
+          <List spacing="xs">
+            <List.Item>
+              Worker:{" "}
+              {age === null ? (
+                <StatusBadge status="never">unknown</StatusBadge>
+              ) : alive ? (
+                <StatusBadge status="ok">alive</StatusBadge>
+              ) : (
+                <StatusBadge status="down">stale</StatusBadge>
+              )}
+            </List.Item>
+            <List.Item>
+              Last seen: {age === null ? "never" : `${age}s ago`}
+            </List.Item>
+            <List.Item>
+              Current job: {job ? `${job.type} (${job.status})` : "idle"}
+            </List.Item>
+          </List>
+        </Panel>
       )}
     </section>
   );
