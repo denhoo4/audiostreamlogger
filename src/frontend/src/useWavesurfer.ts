@@ -312,10 +312,10 @@ export function useWavesurfer(): UseWavesurfer {
     clearRegions();
   }, [clearRegions]);
 
-  // Play ONLY the current selection: seek to its start, play, and auto-pause at
-  // its end. wavesurfer v7's region.play() does not reliably stop at the region
-  // end, so the version-independent guarantee is the timeupdate guard above
-  // (playingRegionEndRef); region.play(true) is a best-effort native attempt.
+  // Play ONLY the current selection: seek to its start and play. The auto-pause
+  // at the region end is guaranteed by the timeupdate guard above
+  // (playingRegionEndRef), which is version-independent and does not rely on
+  // wavesurfer v7's region.play() stopping at the region end on its own.
   const playRegion = useCallback(() => {
     const ws = wsRef.current;
     const region = regionRef.current;
