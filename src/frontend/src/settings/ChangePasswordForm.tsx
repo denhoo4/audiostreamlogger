@@ -1,7 +1,22 @@
 import { useState, type FormEvent } from "react";
+import {
+  Alert,
+  Button,
+  Group,
+  PasswordInput,
+  Stack,
+  Text,
+  Title,
+} from "@mantine/core";
 import { ApiError, changePassword } from "../api";
+import { Panel } from "../ui";
 
-/** Current/new password form -> changePassword(). */
+/**
+ * Current/new password form -> changePassword(). Restyled to the Mantine
+ * AI-Studio house style (Panel + Mantine PasswordInput/Button/Alert); it stays
+ * a real <form onSubmit>, keeps the current-password/new-password autoComplete
+ * hints and the <h2> heading verbatim.
+ */
 export default function ChangePasswordForm() {
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -29,39 +44,42 @@ export default function ChangePasswordForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="settings-form">
-      <h2>Change password</h2>
-      <label>
-        Current password
-        <input
-          type="password"
-          value={currentPassword}
-          autoComplete="current-password"
-          onChange={(e) => setCurrentPassword(e.target.value)}
-        />
-      </label>
-      <label>
-        New password
-        <input
-          type="password"
-          value={newPassword}
-          autoComplete="new-password"
-          onChange={(e) => setNewPassword(e.target.value)}
-        />
-      </label>
-      {error && (
-        <p className="settings-error" role="alert">
-          {error}
-        </p>
-      )}
-      {success && (
-        <p className="settings-success" role="status">
-          Password updated.
-        </p>
-      )}
-      <button type="submit" disabled={submitting}>
-        {submitting ? "Saving…" : "Change password"}
-      </button>
-    </form>
+    <section className="settings-section">
+      <Title order={2}>Change password</Title>
+
+      <Panel mt="md">
+        <form onSubmit={handleSubmit}>
+          <Stack gap="sm">
+            <PasswordInput
+              label="Current password"
+              value={currentPassword}
+              autoComplete="current-password"
+              onChange={(e) => setCurrentPassword(e.currentTarget.value)}
+            />
+            <PasswordInput
+              label="New password"
+              value={newPassword}
+              autoComplete="new-password"
+              onChange={(e) => setNewPassword(e.currentTarget.value)}
+            />
+            {error && (
+              <Alert color="red" role="alert">
+                {error}
+              </Alert>
+            )}
+            {success && (
+              <Text role="status" c="dimmed">
+                Password updated.
+              </Text>
+            )}
+            <Group>
+              <Button type="submit" disabled={submitting}>
+                {submitting ? "Saving…" : "Change password"}
+              </Button>
+            </Group>
+          </Stack>
+        </form>
+      </Panel>
+    </section>
   );
 }

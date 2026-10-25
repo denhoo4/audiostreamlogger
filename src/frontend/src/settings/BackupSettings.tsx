@@ -1,11 +1,22 @@
 import { useRef, useState } from "react";
 import {
+  Alert,
+  Button,
+  FileInput,
+  Group,
+  List,
+  Stack,
+  Text,
+  Title,
+} from "@mantine/core";
+import {
   ApiError,
   downloadDb,
   exportBackup,
   importBackup,
   type ImportResult,
 } from "../api";
+import { Panel } from "../ui";
 
 /**
  * Backup admin section (task feature 5 / S2). Three actions:
@@ -14,13 +25,18 @@ import {
  *   - Import: read the chosen JSON file, POST it, and render a summary of
  *     imported/updated counts plus any skipped streams / config keys.
  * ApiError messages are surfaced the same way as the other settings components.
+ *
+ * Restyled to the Mantine AI-Studio house style (Panel + Mantine
+ * FileInput/Button/List/Alert); the saveBlob/dateStamp helpers, the invalid
+ * JSON inline error, the file-input ref/reset and the <h2> heading are
+ * preserved verbatim.
  */
 export default function BackupSettings() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [file, setFile] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLButtonElement | null>(null);
 
   /** Trigger a browser download of a Blob under the given filename. */
   function saveBlob(blob: Blob, filename: string) {
@@ -101,78 +117,89 @@ export default function BackupSettings() {
 
   return (
     <section className="settings-section">
-      <h2>Backup</h2>
+      <Title order={2}>Backup</Title>
 
-      <div className="settings-form">
-        <h3>Export</h3>
-        <div className="settings-form-actions">
-          <button type="button" onClick={handleExportJson}>
-            Download backup (JSON)
-          </button>
-          <button type="button" onClick={handleExportDb}>
-            Download raw database
-          </button>
-        </div>
-      </div>
+      <Panel mt="md">
+        <Stack gap="sm">
+          <Title order={3}>Export</Title>
+          <Group>
+            <Button type="button" onClick={handleExportJson}>
+              Download backup (JSON)
+            </Button>
+            <Button type="button" variant="default" onClick={handleExportDb}>
+              Download raw database
+            </Button>
+          </Group>
+        </Stack>
+      </Panel>
 
-      <div className="settings-form">
-        <h3>Import</h3>
-        <label>
-          Backup file (JSON)
-          <input
+      <Panel mt="md">
+        <Stack gap="sm">
+          <Title order={3}>Import</Title>
+          <FileInput
             ref={fileInputRef}
-            type="file"
+            label="Backup file (JSON)"
+            placeholder="Choose a file…"
             accept="application/json,.json"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+            value={file}
+            onChange={setFile}
           />
-        </label>
-        <div className="settings-form-actions">
-          <button type="button" onClick={handleImport}>
-            Import
-          </button>
-        </div>
-      </div>
+          <Group>
+            <Button type="button" onClick={handleImport}>
+              Import
+            </Button>
+          </Group>
+        </Stack>
+      </Panel>
 
       {error && (
-        <p className="settings-error" role="alert">
+        <Alert color="red" role="alert" mt="md">
           {error}
-        </p>
+        </Alert>
       )}
-      {status && <p>{status}</p>}
+      {status && (
+        <Text role="status" c="dimmed" mt="md">
+          {status}
+        </Text>
+      )}
 
       {result && (
-        <div className="settings-form">
-          <h3>Import result</h3>
-          <ul>
-            <li>Imported (new): {result.imported}</li>
-            <li>Updated (existing): {result.updated}</li>
-            <li>Config applied: {result.config_applied.join(", ") || "none"}</li>
-          </ul>
-          {result.skipped.length > 0 && (
-            <>
-              <p>Skipped streams:</p>
-              <ul>
-                {result.skipped.map((s, i) => (
-                  <li key={i}>
-                    {s.folder ?? "(no folder)"}: {s.reason}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-          {result.config_skipped && result.config_skipped.length > 0 && (
-            <>
-              <p>Skipped config keys:</p>
-              <ul>
-                {result.config_skipped.map((c, i) => (
-                  <li key={i}>
-                    {c.key}: {c.reason}
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-        </div>
+        <Panel mt="md">
+          <Stack gap="sm">
+            <Title order={3}>Import result</Title>
+            <List>
+              <List.Item>Imported (new): {result.imported}</List.Item>
+              <List.Item>Updated (existing): {result.updated}</List.Item>
+              <List.Item>
+                Config applied: {result.config_applied.join(", ") || "none"}
+              </List.Item>
+            </List>
+            {result.skipped.length > 0 && (
+              <Stack gap="xs">
+                <Text>Skipped streams:</Text>
+                <List>
+                  {result.skipped.map((s, i) => (
+                    <List.Item key={i}>
+                      {s.folder ?? "(no folder)"}: {s.reason}
+                    </List.Item>
+                  ))}
+                </List>
+              </Stack>
+            )}
+            {result.config_skipped && result.config_skipped.length > 0 && (
+              <Stack gap="xs">
+                <Text>Skipped config keys:</Text>
+                <List>
+                  {result.config_skipped.map((c, i) => (
+                    <List.Item key={i}>
+                      {c.key}: {c.reason}
+                    </List.Item>
+                  ))}
+                </List>
+              </Stack>
+            )}
+          </Stack>
+        </Panel>
       )}
     </section>
   );
