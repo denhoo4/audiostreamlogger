@@ -148,8 +148,11 @@ share the styling layer, NOT parallel):
       waveform, playback controls, download/fragment-cut. Most visible screen.
 - [~] Phase 5 — admin per tab (Streams → Recordings & health → Jobs → System), one
       step per tab, reusing the Phase-3 components. Streams done in Phase 3.6/3.7.
-      The remaining three tabs are DONE on branch `ui-admin-tabs-restyle` (NOT yet
-      merged): STYLING/RESKIN ONLY, no api.ts/endpoint/SSE/schema/docker/nginx change.
+      The remaining three tabs (Recordings & health, Jobs, System) are COMPLETE on
+      branch `ui-admin-tabs-restyle` (convergence review APPROVED; NOT yet merged —
+      left ready for the user to review/merge): STYLING/RESKIN ONLY, no
+      api.ts/endpoint/SSE/schema/docker/nginx change. Final cross-feat verify green:
+      `tsc -b` + `vite build` + 103/103 vitest in `node:26-bookworm`.
       - Recordings & health (`RecordingsAnalysis`, `StreamHealth`, `StorageEstimate`):
         content wrapped in the shared `Panel`, data in Mantine `Table` inside
         `Table.ScrollContainer`, gaps form on Mantine inputs; the `recording now`/
@@ -167,8 +170,7 @@ share the styling layer, NOT parallel):
         (no test suites exist for these three).
       Every `<h2>` heading kept verbatim so `SettingsPage.test.tsx` tab-switching
       still resolves each panel by heading role+name. No new dependency (feedback
-      stays inline via `Alert`/status regions, no toasts). Cross-feat verify green:
-      `tsc -b` + `vite build` + 103/103 vitest in `node:26-bookworm`.
+      stays inline via `Alert`/status regions, no toasts).
 - [ ] Phase 6 — polish: responsive/mobile, accessibility (focus states, contrast,
       keyboard), consistent loading/empty/error states, subtle motion.
 Frontend-only (`src/frontend/`). No backend/API/schema change. WaveSurfer behaviour
