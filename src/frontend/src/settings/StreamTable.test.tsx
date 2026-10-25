@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
   fireEvent,
-  render,
+  renderWithMantine,
   screen,
   waitFor,
-} from "@testing-library/react";
+} from "../test/render-with-mantine";
 import StreamTable from "./StreamTable";
 import type { StreamInput, StreamRecord } from "../api";
 
@@ -101,34 +101,39 @@ describe("StreamTable", () => {
 
   it("renders one data row per stream from getStreams()", async () => {
     getStreams.mockResolvedValue(ROWS);
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
 
     // Wait for the list to resolve.
     expect(await screen.findByText("Radio One")).toBeInTheDocument();
-    // Data rows carry a folder cell; group-header rows do not.
-    const dataRows = document.querySelectorAll(
-      ".settings-table tbody tr:not(.settings-group-header)",
-    );
-    expect(dataRows.length).toBe(2);
+    // Behaviour: each stream's name and folder cell render (one data row each).
+    expect(screen.getByText("Radio One")).toBeInTheDocument();
+    expect(screen.getByText("Radio Two")).toBeInTheDocument();
     expect(screen.getByText("radio_one")).toBeInTheDocument();
     expect(screen.getByText("radio_two")).toBeInTheDocument();
   });
 
   it("renders a country-group header for each distinct country", async () => {
     getStreams.mockResolvedValue(ROWS);
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
 
     await screen.findByText("Radio One");
-    const headers = Array.from(
-      document.querySelectorAll(".settings-table tr.settings-group-header th"),
-    ).map((th) => th.textContent);
-    expect(headers).toEqual(["Netherlands", "Belgium"]);
+    // Behaviour: a country group header (a colgroup <th> → columnheader role)
+    // renders for each distinct country, in document order. Querying by role
+    // avoids matching the same names in the Country <select> options.
+    const nl = screen.getByRole("columnheader", { name: "Netherlands" });
+    const be = screen.getByRole("columnheader", { name: "Belgium" });
+    expect(nl).toBeInTheDocument();
+    expect(be).toBeInTheDocument();
+    // Netherlands (NL, first stream) precedes Belgium (BE, second) in the DOM.
+    expect(
+      nl.compareDocumentPosition(be) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("clicking a row's ▼ calls reorderStreams with the swapped id order", async () => {
     getStreams.mockResolvedValue(ROWS);
     reorderStreams.mockResolvedValue({ ok: true });
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
 
     await screen.findByText("Radio One");
     // Move the first stream (id 1) down: order becomes [2, 1].
@@ -141,7 +146,7 @@ describe("StreamTable", () => {
 
   it("disables ▲ on the first row and ▼ on the last row of the flat order", async () => {
     getStreams.mockResolvedValue(ROWS);
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
 
     await screen.findByText("Radio One");
     expect(
@@ -155,7 +160,7 @@ describe("StreamTable", () => {
   it("clicking 'Set default' calls setDefaultStream with that row's folder", async () => {
     getStreams.mockResolvedValue(ROWS);
     setDefaultStream.mockResolvedValue({ default_stream_folder: "radio_one" });
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
 
     await screen.findByText("Radio One");
     const setButtons = screen.getAllByRole("button", { name: "Set default" });
@@ -174,7 +179,7 @@ describe("StreamTable", () => {
       title: "",
       default_stream_folder: "radio_two",
     });
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
 
     expect(await screen.findByText("Default")).toBeInTheDocument();
     // Only one 'Set default' button remains (for the non-default row).
@@ -186,7 +191,7 @@ describe("StreamTable", () => {
   it("submitting the add form calls createStream with the entered fields", async () => {
     getStreams.mockResolvedValue([]);
     createStream.mockResolvedValue(ROWS[0]);
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
 
     // Empty list placeholder confirms the initial load resolved.
     await screen.findByText("No streams yet.");
@@ -222,7 +227,7 @@ describe("StreamTable", () => {
 
   it("selecting flac shows a bit-depth control and hides bitrate; mp3/opus show bitrate", async () => {
     getStreams.mockResolvedValue([]);
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
     await screen.findByText("No streams yet.");
 
     // Default codec is mp3: a Bitrate control is shown, no Bit depth control.
@@ -259,7 +264,7 @@ describe("StreamTable", () => {
   it("submitting flac sends a valid lossless combo (bit_depth set, bitrate null)", async () => {
     getStreams.mockResolvedValue([]);
     createStream.mockResolvedValue(ROWS[0]);
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
     await screen.findByText("No streams yet.");
 
     fireEvent.change(screen.getByRole("combobox", { name: "Country" }), {
@@ -305,7 +310,7 @@ describe("StreamTable", () => {
       contentType: "audio/mpeg",
       detail: "reachable audio stream",
     });
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
     await screen.findByText("No streams yet.");
 
     const textboxes = screen.getAllByRole("textbox");
@@ -329,7 +334,7 @@ describe("StreamTable", () => {
       status: 404,
       detail: "server returned HTTP 404",
     });
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
     await screen.findByText("No streams yet.");
 
     const textboxes = screen.getAllByRole("textbox");
@@ -351,7 +356,7 @@ describe("StreamTable", () => {
       status: 200,
       detail: "reachable audio stream",
     });
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
     await screen.findByText("No streams yet.");
 
     const textboxes = screen.getAllByRole("textbox");
@@ -379,7 +384,7 @@ describe("StreamTable", () => {
       fileCount: 3,
       totalBytes: 2048,
     });
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
     await screen.findByText("Radio One");
 
     // Click the first row's Delete button.
@@ -395,6 +400,25 @@ describe("StreamTable", () => {
     expect(deleteStream).not.toHaveBeenCalled();
   });
 
+  it("the delete confirm renders in a dialog with Confirm disabled on open", async () => {
+    getStreams.mockResolvedValue(ROWS);
+    getDeletionImpact.mockResolvedValue({
+      folder: "radio_one",
+      fileCount: 1,
+      totalBytes: 10,
+    });
+    renderWithMantine(<StreamTable />);
+    await screen.findByText("Radio One");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+
+    // The typed-confirm lives in a Modal dialog, and Confirm starts disabled.
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Confirm delete" }),
+    ).toBeDisabled();
+  });
+
   it("Confirm is disabled until the folder name is typed exactly; then it fires deleteStream", async () => {
     getStreams.mockResolvedValue(ROWS);
     getDeletionImpact.mockResolvedValue({
@@ -403,7 +427,7 @@ describe("StreamTable", () => {
       totalBytes: 10,
     });
     deleteStream.mockResolvedValue(undefined);
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
     await screen.findByText("Radio One");
 
     fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
@@ -437,7 +461,7 @@ describe("StreamTable", () => {
       fileCount: 1,
       totalBytes: 10,
     });
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
     await screen.findByText("Radio One");
 
     fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
@@ -463,7 +487,7 @@ describe("StreamTable", () => {
     deleteStream.mockRejectedValue(
       new MockApiError("stream is recording right now, try again next hour", 409),
     );
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
     await screen.findByText("Radio One");
 
     fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
@@ -485,7 +509,7 @@ describe("StreamTable", () => {
 
   it("the edit form shows the folder-move warning; add mode does not", async () => {
     getStreams.mockResolvedValue(ROWS);
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
     await screen.findByText("Radio One");
 
     // Add mode: no warning.
@@ -505,7 +529,7 @@ describe("StreamTable", () => {
     updateStream.mockRejectedValue(
       new MockApiError("stream is recording right now, try again next hour", 409),
     );
-    render(<StreamTable />);
+    renderWithMantine(<StreamTable />);
     await screen.findByText("Radio One");
 
     fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);

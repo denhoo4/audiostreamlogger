@@ -1,5 +1,18 @@
 import { useEffect, useState, type FormEvent } from "react";
 import {
+  ActionIcon,
+  Alert,
+  Button,
+  Group,
+  Modal,
+  NativeSelect,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title,
+} from "@mantine/core";
+import {
   ApiError,
   createStream,
   deleteStream,
@@ -17,6 +30,7 @@ import {
   type StreamTestResult,
 } from "../api";
 import { COUNTRIES_BY_NAME, countryName } from "./countries";
+import { Panel, StatusBadge } from "../ui";
 
 /**
  * Valid recording-quality combinations per codec, mirroring the api allowlist
@@ -106,6 +120,12 @@ const EMPTY_FORM: StreamInput = {
  * full name) and name/folder/url as text inputs. The table read view maps the
  * stored code to its full name. create/update/delete call the api.ts functions
  * and surface the backend's 400/409 error messages.
+ *
+ * Phase-3 reskin: this screen is rendered with Mantine in the AI-Studio dark
+ * style (Table inside a Panel, NativeSelect/TextInput fields, ActionIcon
+ * reorder, Alert feedback, a Modal for the typed-confirm delete). All behaviour,
+ * accessible names and api.ts calls are preserved — this is a reskin, not a
+ * logic change.
  */
 export default function StreamTable() {
   const [streams, setStreams] = useState<StreamRecord[]>([]);
@@ -334,289 +354,287 @@ export default function StreamTable() {
     }
   }
 
+  const opt = codecOption(form.codec);
+
   return (
     <section className="settings-section">
-      <h2>Streams</h2>
+      <Title order={2}>Streams</Title>
 
       {listError && (
-        <p className="settings-error" role="alert">
+        <Alert color="red" role="alert" mt="md">
           {listError}
-        </p>
+        </Alert>
       )}
 
-      {loading ? (
-        <p>Loading…</p>
-      ) : streams.length === 0 ? (
-        <p>No streams yet.</p>
-      ) : (
-        <table className="settings-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Folder</th>
-              <th>URL</th>
-              <th>Default stream</th>
-              <th>Order</th>
-              <th />
-            </tr>
-          </thead>
-          {groupByCountry(streams).map((group) => (
-            <tbody key={group.country}>
-              <tr className="settings-group-header">
-                <th colSpan={6} scope="colgroup">
-                  {countryName(group.country)}
-                </th>
-              </tr>
-              {group.rows.map((s) => {
-                const flatIndex = streams.findIndex((x) => x.id === s.id);
-                const isDefault = s.folder === defaultFolder;
-                return (
-                  <tr key={s.id}>
-                    <td>{s.name}</td>
-                    <td>{s.folder}</td>
-                    <td>{s.url}</td>
-                    <td>
-                      {isDefault ? (
-                        <span className="settings-default-badge">Default</span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleSetDefault(s.folder)}
-                        >
-                          Set default
-                        </button>
-                      )}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        aria-label={`Move ${s.name} up`}
-                        disabled={flatIndex === 0}
-                        onClick={() => handleReorder(s.id, -1)}
-                      >
-                        ▲
-                      </button>
-                      <button
-                        type="button"
-                        aria-label={`Move ${s.name} down`}
-                        disabled={flatIndex === streams.length - 1}
-                        onClick={() => handleReorder(s.id, 1)}
-                      >
-                        ▼
-                      </button>
-                    </td>
-                    <td>
-                      <button type="button" onClick={() => startEdit(s)}>
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openDeleteConfirm(s)}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-              {deleteTarget &&
-                group.rows.some((r) => r.id === deleteTarget.id) && (
-                  <tr className="settings-delete-confirm">
-                    <td colSpan={6}>
-                      <div role="alertdialog" aria-label="Confirm delete stream">
-                        <p className="settings-error">
-                          This permanently deletes the <b>{deleteTarget.name}</b>{" "}
-                          stream, its recordings rows and its on-disk folder{" "}
-                          <code>{deleteTarget.folder}</code>. This cannot be
-                          undone.
-                        </p>
-                        <p>
-                          {deleteImpact
-                            ? `On disk: ${deleteImpact.fileCount} file(s), ${formatBytes(deleteImpact.totalBytes)}.`
-                            : "Loading impact…"}
-                        </p>
-                        <label>
-                          Type the folder name{" "}
-                          <code>{deleteTarget.folder}</code> to confirm
-                          <input
-                            type="text"
-                            aria-label="Type folder name to confirm delete"
-                            value={deleteTyped}
-                            onChange={(e) => setDeleteTyped(e.target.value)}
-                          />
-                        </label>
-                        {deleteError && (
-                          <p className="settings-error" role="alert">
-                            {deleteError}
-                          </p>
-                        )}
-                        <div className="settings-form-actions">
-                          <button
-                            type="button"
-                            disabled={
-                              deleting ||
-                              deleteTyped !== deleteTarget.folder
-                            }
-                            onClick={handleDeleteConfirm}
+      <Panel mt="md">
+        {loading ? (
+          <Text>Loading…</Text>
+        ) : streams.length === 0 ? (
+          <Text>No streams yet.</Text>
+        ) : (
+          <Table verticalSpacing="sm" horizontalSpacing="md">
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Name</Table.Th>
+                <Table.Th>Folder</Table.Th>
+                <Table.Th>URL</Table.Th>
+                <Table.Th>Default stream</Table.Th>
+                <Table.Th>Order</Table.Th>
+                <Table.Th />
+              </Table.Tr>
+            </Table.Thead>
+            {groupByCountry(streams).map((group) => (
+              <Table.Tbody key={group.country}>
+                <Table.Tr>
+                  <Table.Th colSpan={6} scope="colgroup">
+                    {countryName(group.country)}
+                  </Table.Th>
+                </Table.Tr>
+                {group.rows.map((s) => {
+                  const flatIndex = streams.findIndex((x) => x.id === s.id);
+                  const isDefault = s.folder === defaultFolder;
+                  return (
+                    <Table.Tr key={s.id}>
+                      <Table.Td>{s.name}</Table.Td>
+                      <Table.Td>{s.folder}</Table.Td>
+                      <Table.Td>{s.url}</Table.Td>
+                      <Table.Td>
+                        {isDefault ? (
+                          <StatusBadge status="ok">Default</StatusBadge>
+                        ) : (
+                          <Button
+                            variant="default"
+                            size="xs"
+                            onClick={() => handleSetDefault(s.folder)}
                           >
-                            {deleting ? "Deleting…" : "Confirm delete"}
-                          </button>
-                          <button type="button" onClick={cancelDelete}>
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-            </tbody>
-          ))}
-        </table>
-      )}
+                            Set default
+                          </Button>
+                        )}
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap="xs" wrap="nowrap">
+                          <ActionIcon
+                            variant="default"
+                            aria-label={`Move ${s.name} up`}
+                            disabled={flatIndex === 0}
+                            onClick={() => handleReorder(s.id, -1)}
+                          >
+                            ▲
+                          </ActionIcon>
+                          <ActionIcon
+                            variant="default"
+                            aria-label={`Move ${s.name} down`}
+                            disabled={flatIndex === streams.length - 1}
+                            onClick={() => handleReorder(s.id, 1)}
+                          >
+                            ▼
+                          </ActionIcon>
+                        </Group>
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap="xs" wrap="nowrap">
+                          <Button
+                            variant="default"
+                            size="xs"
+                            onClick={() => startEdit(s)}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            color="red"
+                            variant="light"
+                            size="xs"
+                            onClick={() => openDeleteConfirm(s)}
+                          >
+                            Delete
+                          </Button>
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  );
+                })}
+              </Table.Tbody>
+            ))}
+          </Table>
+        )}
+      </Panel>
 
-      <form onSubmit={handleSubmit} className="settings-form">
-        <h3>{editingId === null ? "Add stream" : "Edit stream"}</h3>
-        <label>
-          Country
-          <select
+      <Modal
+        opened={!!deleteTarget}
+        onClose={cancelDelete}
+        title="Delete stream"
+      >
+        {deleteTarget && (
+          <Stack gap="sm">
+            <Alert color="red" role="alert">
+              This permanently deletes the <b>{deleteTarget.name}</b> stream, its
+              recordings rows and its on-disk folder{" "}
+              <code>{deleteTarget.folder}</code>. This cannot be undone.
+            </Alert>
+            <Text>
+              {deleteImpact
+                ? `On disk: ${deleteImpact.fileCount} file(s), ${formatBytes(deleteImpact.totalBytes)}.`
+                : "Loading impact…"}
+            </Text>
+            <Text size="sm">
+              Type the folder name <code>{deleteTarget.folder}</code> to confirm
+            </Text>
+            <TextInput
+              aria-label="Type folder name to confirm delete"
+              value={deleteTyped}
+              onChange={(e) => setDeleteTyped(e.currentTarget.value)}
+            />
+            {deleteError && (
+              <Alert color="red" role="alert">
+                {deleteError}
+              </Alert>
+            )}
+            <Group justify="flex-end">
+              <Button variant="default" onClick={cancelDelete}>
+                Cancel
+              </Button>
+              <Button
+                color="red"
+                disabled={deleting || deleteTyped !== deleteTarget.folder}
+                onClick={handleDeleteConfirm}
+              >
+                {deleting ? "Deleting…" : "Confirm delete"}
+              </Button>
+            </Group>
+          </Stack>
+        )}
+      </Modal>
+
+      <form onSubmit={handleSubmit}>
+       <Panel mt="md">
+        <Stack gap="sm">
+          <Title order={3}>
+            {editingId === null ? "Add stream" : "Edit stream"}
+          </Title>
+          <NativeSelect
+            label="Country"
             value={form.country}
             onChange={(e) =>
-              setForm({ ...form, country: e.target.value })
+              setForm({ ...form, country: e.currentTarget.value })
             }
-          >
-            <option value="">Select a country…</option>
-            {COUNTRIES_BY_NAME.map((c) => (
-              <option key={c.code} value={c.code}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Name
-          <input
-            type="text"
+            data={[
+              { value: "", label: "Select a country…" },
+              ...COUNTRIES_BY_NAME.map((c) => ({
+                value: c.code,
+                label: c.name,
+              })),
+            ]}
+          />
+          <TextInput
+            label="Name"
             value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            onChange={(e) => setForm({ ...form, name: e.currentTarget.value })}
           />
-        </label>
-        <label>
-          Folder
-          <input
-            type="text"
+          <TextInput
+            label="Folder"
             value={form.folder}
-            onChange={(e) => setForm({ ...form, folder: e.target.value })}
+            onChange={(e) =>
+              setForm({ ...form, folder: e.currentTarget.value })
+            }
           />
-        </label>
-        {editingId !== null && (
-          <p className="settings-warning" role="note">
-            Changing the folder MOVES the existing recordings on disk to the new
-            folder. It is refused while the stream is recording the current hour.
-          </p>
-        )}
-        <label>
-          URL
-          <input
-            type="text"
+          {editingId !== null && (
+            <Alert color="yellow" role="note">
+              Changing the folder MOVES the existing recordings on disk to the
+              new folder. It is refused while the stream is recording the current
+              hour.
+            </Alert>
+          )}
+          <TextInput
+            label="URL"
             value={form.url}
             onChange={(e) => {
-              setForm({ ...form, url: e.target.value });
+              setForm({ ...form, url: e.currentTarget.value });
               clearTest();
             }}
           />
-        </label>
-        <label>
-          Codec
-          <select
+          <NativeSelect
+            label="Codec"
             value={form.codec}
-            onChange={(e) => handleCodecChange(e.target.value as Codec)}
-          >
-            {CODEC_OPTIONS.map((c) => (
-              <option key={c.codec} value={c.codec}>
-                {c.codec}
-              </option>
-            ))}
-          </select>
-        </label>
-        {codecOption(form.codec).kind === "lossy" ? (
-          <label>
-            Bitrate (kbps)
-            <select
+            onChange={(e) => handleCodecChange(e.currentTarget.value as Codec)}
+            data={CODEC_OPTIONS.map((c) => ({
+              value: c.codec,
+              label: c.codec,
+            }))}
+          />
+          {opt.kind === "lossy" ? (
+            <NativeSelect
+              label="Bitrate (kbps)"
               value={form.bitrate_kbps ?? ""}
               onChange={(e) =>
-                setForm({ ...form, bitrate_kbps: Number(e.target.value) })
+                setForm({ ...form, bitrate_kbps: Number(e.currentTarget.value) })
               }
-            >
-              {codecOption(form.codec).bitrates.map((b) => (
-                <option key={b} value={b}>
-                  {b}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <label>
-            Bit depth
-            <select
+              data={opt.bitrates.map((b) => ({
+                value: String(b),
+                label: String(b),
+              }))}
+            />
+          ) : (
+            <NativeSelect
+              label="Bit depth"
               value={form.bit_depth ?? ""}
               onChange={(e) =>
-                setForm({ ...form, bit_depth: Number(e.target.value) })
+                setForm({ ...form, bit_depth: Number(e.currentTarget.value) })
               }
-            >
-              {codecOption(form.codec).bitDepths.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <div className="settings-form-actions">
-          <button
-            type="button"
-            onClick={handleTest}
-            disabled={testing || form.url.trim() === ""}
-          >
-            {testing ? "Testing…" : "Test"}
-          </button>
-        </div>
-        <p className="settings-url-test" role="status" aria-live="polite">
-          {testError ? (
-            <span className="settings-error">Not reachable: {testError}</span>
-          ) : testResult ? (
-            testResult.reachable ? (
-              <span className="settings-success">
-                Reachable
-                {testResult.contentType
-                  ? ` (${testResult.contentType})`
-                  : ""}
-              </span>
-            ) : (
-              <span className="settings-error">
-                Not reachable: {testResult.detail}
-              </span>
-            )
-          ) : null}
-        </p>
-        {formError && (
-          <p className="settings-error" role="alert">
-            {formError}
-          </p>
-        )}
-        <div className="settings-form-actions">
-          <button type="submit" disabled={submitting}>
-            {submitting
-              ? "Saving…"
-              : editingId === null
-                ? "Add stream"
-                : "Save changes"}
-          </button>
-          {editingId !== null && (
-            <button type="button" onClick={resetForm}>
-              Cancel
-            </button>
+              data={opt.bitDepths.map((d) => ({
+                value: String(d),
+                label: String(d),
+              }))}
+            />
           )}
-        </div>
+          <Group>
+            <Button
+              type="button"
+              variant="default"
+              onClick={handleTest}
+              disabled={testing || form.url.trim() === ""}
+            >
+              {testing ? "Testing…" : "Test"}
+            </Button>
+          </Group>
+          <div role="status" aria-live="polite">
+            {testError ? (
+              <Alert color="red">Not reachable: {testError}</Alert>
+            ) : testResult ? (
+              testResult.reachable ? (
+                <Alert color="green">
+                  Reachable
+                  {testResult.contentType
+                    ? ` (${testResult.contentType})`
+                    : ""}
+                </Alert>
+              ) : (
+                <Alert color="red">
+                  Not reachable: {testResult.detail}
+                </Alert>
+              )
+            ) : null}
+          </div>
+          {formError && (
+            <Alert color="red" role="alert">
+              {formError}
+            </Alert>
+          )}
+          <Group>
+            <Button type="submit" disabled={submitting}>
+              {submitting
+                ? "Saving…"
+                : editingId === null
+                  ? "Add stream"
+                  : "Save changes"}
+            </Button>
+            {editingId !== null && (
+              <Button type="button" variant="default" onClick={resetForm}>
+                Cancel
+              </Button>
+            )}
+          </Group>
+        </Stack>
+       </Panel>
       </form>
     </section>
   );

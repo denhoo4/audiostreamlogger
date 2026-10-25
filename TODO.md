@@ -51,9 +51,21 @@ share the styling layer, NOT parallel):
       no panel/player-control restyle, no new dependency. Added a `window.matchMedia`
       stub to the vitest setup and moved `SettingsPage.test.tsx` onto
       `renderWithMantine`. Build + 64 tests green in `node:26-bookworm`.
-- [ ] Phase 3 — shared base components: buttons, inputs, selects, tables, cards/
-      panels, status badges (stream-health states), modals (the delete confirm),
-      toast/feedback — built once on Mantine and reused everywhere.
+- [x] Phase 3 — shared base components + Streams-tab proof: DONE on branch
+      `ui-components-streams` (not yet merged). Added a thin shared `src/ui/` layer —
+      `StatusBadge` (the single stream-health/recording state→colour map) and `Panel`
+      (the AI-Studio dark `Card` surface) — plus a `ui/README.md` documenting the
+      house conventions for using Mantine `Button`/`TextInput`/`NativeSelect`/`Table`/
+      `Alert`/`Modal` directly. `@mantine/notifications` (toasts) was deliberately NOT
+      added: Streams surfaces all feedback inline, so adding it would be an
+      un-requested UX change and a needless lockfile regen (lockfile stays unchanged,
+      `npm ci` still valid). Restyled ONLY the Streams tab (`StreamTable`) to Mantine
+      in the dark style — `Table` inside a `Panel`, `NativeSelect`/`TextInput` form
+      fields, `ActionIcon` reorder, inline `Alert` feedback, and a `Modal` for the
+      typed-confirm delete — preserving every behaviour, accessible name, and api.ts
+      call (reskin, not a logic change). Build + 73 tests green in `node:26-bookworm`
+      (64 baseline + 8 StatusBadge + 1 delete-Modal contract test). Evidence in
+      `.agents/tasks/ui-components-streams-2026-10-23/verification.md`.
 - [ ] Phase 4 — the player (public `/` screen): stream selection, the WaveSurfer
       waveform, playback controls, download/fragment-cut. Most visible screen.
 - [ ] Phase 5 — admin per tab (Streams → Recordings & health → Jobs → System), one
