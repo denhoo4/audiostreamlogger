@@ -39,6 +39,7 @@ import {
   existingHoursFor,
 } from "./player-hours";
 import { sortStreamsByCountryOrder } from "./settings/country-order";
+import { countryName } from "./settings/countries";
 import { fragmentFilename } from "./player-filename";
 import { Panel } from "./ui";
 import { useAppTitle } from "./useAppTitle";
@@ -88,6 +89,36 @@ export function pickInitialFolder(
     return defaultFolder;
   }
   return streams[0].folder;
+}
+
+/**
+ * Build the stream selector's grouped `data` for the Mantine NativeSelect: one
+ * optgroup per country, in the SAME country order the player already uses
+ * (`sortStreamsByCountryOrder` — listed countries first, then the rest
+ * alphabetically by name), with each country's streams kept in their existing
+ * relative order. The optgroup label is the full country NAME (falling back to
+ * the raw code when unknown); optgroup labels are inherently non-selectable and
+ * browsers indent the options beneath them, giving the requested non-selectable
+ * header + indented stations. Returns Mantine's grouped-options object format.
+ */
+export function streamSelectGroups(
+  orderedStreams: Stream[],
+): { group: string; items: { value: string; label: string }[] }[] {
+  const groups: { group: string; items: { value: string; label: string }[] }[] =
+    [];
+  const byCountry = new Map<string, { value: string; label: string }[]>();
+  for (const stream of orderedStreams) {
+    let items = byCountry.get(stream.country);
+    if (!items) {
+      items = [];
+      byCountry.set(stream.country, items);
+      // `orderedStreams` is already country-grouped, so first appearance of a
+      // country is its final position in the optgroup order.
+      groups.push({ group: countryName(stream.country), items });
+    }
+    items.push({ value: stream.folder, label: stream.name });
+  }
+  return groups;
 }
 
 /**
@@ -531,10 +562,7 @@ export default function App() {
             w={{ base: "100%", xs: "auto" }}
             value={selectedFolder}
             onChange={(e) => setSelectedFolder(e.currentTarget.value)}
-            data={orderedStreams.map((s) => ({
-              value: s.folder,
-              label: s.name,
-            }))}
+            data={streamSelectGroups(orderedStreams)}
           />
           <DatePickerInput
             id="dateSelector"

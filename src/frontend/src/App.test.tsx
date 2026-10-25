@@ -1123,6 +1123,156 @@ describe("App play/pause control accessible name", () => {
   });
 });
 
+// --- Stream picker groups stations by country with optgroup headers --------
+
+// Streams spanning three countries, deliberately NOT in country_order so the
+// grouping/ordering is actually exercised. BE + NL are listed in country_order
+// (BE first), FR is unlisted so it falls last (alphabetical by name among the
+// rest). Within NL the two stations keep their input order.
+const GROUP_STREAM_ROWS: Stream[] = [
+  {
+    country: "FR",
+    name: "Radio Six",
+    folder: "radio_six",
+    url: "https://example.com/six",
+    codec: "mp3",
+  },
+  {
+    country: "NL",
+    name: "Radio One",
+    folder: "radio_one",
+    url: "https://example.com/one",
+    codec: "mp3",
+  },
+  {
+    country: "BE",
+    name: "Radio Four",
+    folder: "radio_four",
+    url: "https://example.com/four",
+    codec: "mp3",
+  },
+  {
+    country: "NL",
+    name: "Radio Two",
+    folder: "radio_two",
+    url: "https://example.com/two",
+    codec: "mp3",
+  },
+];
+
+/**
+ * Stub fetch so /api/settings returns the three-country rows, /api/settings2 is
+ * empty, and /api/app-config/public carries the given country_order (listed
+ * countries first). Drives the country-grouped stream picker.
+ */
+function stubFetchForGroups(countryOrder: string[]) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/app-config/public")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              title: "",
+              default_stream_folder: "",
+              country_order: countryOrder,
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      if (url.includes("/api/settings2")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({}), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (url.includes("/api/settings")) {
+        return Promise.resolve(
+          new Response(JSON.stringify(GROUP_STREAM_ROWS), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      return Promise.resolve(new Response("", { status: 404 }));
+    }),
+  );
+}
+
+describe("App stream picker country grouping", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    loadedUrls.length = 0;
+    resetFakeWs();
+  });
+
+  it("renders a non-selectable optgroup per country in country_order with full-name labels and the stations grouped under them", async () => {
+    stubFetchForGroups(["BE", "NL"]);
+    renderWithMantine(<App />);
+    const selector = document.getElementById(
+      "stringSelector",
+    ) as HTMLSelectElement;
+    // Wait for the streams + country_order to settle (first ordered stream of
+    // Belgium is preselected).
+    await waitFor(() => {
+      expect(selector.value).toBe("radio_four");
+    });
+
+    // Country headers are rendered as <optgroup> elements — inherently
+    // non-selectable — in the configured country_order: Belgium, Netherlands,
+    // then the unlisted France last. The labels are the full country NAMES.
+    const groups = Array.from(selector.querySelectorAll("optgroup"));
+    expect(groups.map((g) => g.getAttribute("label"))).toEqual([
+      "Belgium",
+      "Netherlands",
+      "France",
+    ]);
+
+    // Each station is an <option> nested UNDER its country's optgroup (the
+    // native, non-selectable header + indented stations), preserving the
+    // per-country input order (Radio One before Radio Two within NL).
+    const optionsByGroup = groups.map((g) =>
+      Array.from(g.querySelectorAll("option")).map((o) => ({
+        value: o.value,
+        label: o.textContent,
+      })),
+    );
+    expect(optionsByGroup).toEqual([
+      [{ value: "radio_four", label: "Radio Four" }],
+      [
+        { value: "radio_one", label: "Radio One" },
+        { value: "radio_two", label: "Radio Two" },
+      ],
+      [{ value: "radio_six", label: "Radio Six" }],
+    ]);
+  });
+
+  it("still selects a station and drives the existing load behavior", async () => {
+    stubFetchForGroups(["BE", "NL"]);
+    renderWithMantine(<App />);
+    const selector = document.getElementById(
+      "stringSelector",
+    ) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(selector.value).toBe("radio_four");
+    });
+
+    // Selecting a station (nested under its optgroup) updates the value, and
+    // the existing selectedCodec/download wiring follows: the hour-download
+    // anchor picks up the newly-selected stream's folder in its filename.
+    fireEvent.change(selector, { target: { value: "radio_one" } });
+    await waitFor(() => {
+      expect(selector.value).toBe("radio_one");
+    });
+  });
+});
+
 // --- Header no longer renders a color-scheme toggle ------------------------
 
 describe("App header has no color-scheme toggle", () => {

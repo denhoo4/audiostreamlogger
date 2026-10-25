@@ -289,23 +289,25 @@ share the styling layer, NOT parallel):
       Build + 122 vitest green (`tsc -b` clean; review APPROVED, non-blocking
       stale-comment finding fixed; no new dependency). Verification evidence in
       `.agents/tasks/player-fixes-2026-10-23/`.
-- [ ] Player stream list: country GROUP HEADERS (user wish, 2026-10-23, for LATER —
-      do not build yet). On the public `/` player's stream selector, show
-      non-selectable COUNTRY headers above that country's stations, grouped in the
-      configured `country_order` (the same order the admin uses), e.g.:
-        Netherlands
-          Radio 1
-          Radio 2
-        Belgium
-          Radio 4
-      The country label is a heading only (NOT selectable). The player stream picker is
-      currently a Mantine `NativeSelect`; a native `<select>` can do this with
-      `<optgroup label="Netherlands">` (optgroup labels are inherently non-selectable),
-      or switch to a grouped list/combobox — implementer's choice. The stations must be
-      INDENTED one step to the right under their country header so the country→station
-      hierarchy reads at a glance (native `<optgroup>` indents its options automatically;
-      a custom grouped list must apply the indent explicitly). Honors the existing
-      `country_order` from public config (the player already orders by it). Frontend-only.
+- [x] Player stream list: country GROUP HEADERS (user wish, 2026-10-23). DONE on
+      branch `player-country-groups` (NOT yet merged; frontend-only, no
+      api.ts/endpoint/SSE/schema/docker/nginx change, no new dependency). The public
+      `/` player's stream picker stays a Mantine `NativeSelect`, now fed grouped
+      `data` (Mantine's `{ group, items }` object format → one `<optgroup>` per
+      country). Optgroup labels are inherently non-selectable and browsers indent the
+      options beneath them, giving the requested non-selectable country header +
+      one-step-indented stations with zero custom styling. A new exported pure helper
+      `streamSelectGroups(orderedStreams)` in `App.tsx` buckets the already
+      country-ordered streams into optgroups, labelling each with the full country
+      NAME via `countryName()` (falls back to the raw code), preserving the existing
+      `country_order` (`sortStreamsByCountryOrder` — listed countries first, then the
+      rest alphabetically by name) and the per-country stream order. All player
+      behaviour preserved (default-stream preselect, keep-if-valid date/hour on stream
+      change, load, live-poll, selection). Build + 137/137 vitest green in
+      `node:26-bookworm` (`tsc -b` + `vite build` clean; 135 baseline + 2 new
+      country-grouping tests asserting optgroup labels in country_order + option
+      membership + selection still drives load). Visually verify after
+      `docker compose up -d --build frontend`.
 - [x] Jobs tab: remove the SEPARATE Save button under Cleaner → Hours (log-retention)
       (user, 2026-10-23). DONE on branch `cleaner-save` (NOT yet merged; frontend-only,
       no api.ts/endpoint/SSE/schema/docker/nginx change). The standalone Hours Save
