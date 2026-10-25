@@ -69,7 +69,8 @@ describe("JobViewer", () => {
       ]);
     });
 
-    // Two job rows render: one 'skipped' badge and one 'done' badge.
+    // One row per type renders: the cleaner 'skipped' badge and the
+    // peakfilegenerator 'done' badge.
     const skipped = screen.getByText("skipped");
     const done = screen.getByText("done");
     expect(skipped).toBeInTheDocument();
@@ -94,7 +95,48 @@ describe("JobViewer", () => {
     expect(screen.getByText("skipped, busy")).toBeInTheDocument();
   });
 
-  it("merges a changed job row delivered as a 'job' event", () => {
+  it("shows only the newest job per type and renders reconcile as its own row", () => {
+    vi.stubGlobal("EventSource", FakeEventSource);
+    renderWithMantine(<JobViewer />);
+    const src = FakeEventSource.last!;
+
+    act(() => {
+      src.emit("snapshot", [
+        // Two cleaner jobs: the newer (id 2) should win.
+        makeJob({
+          id: 1,
+          type: "cleaner",
+          status: "done",
+          created_at: "2026-10-23 09:00:00",
+        }),
+        makeJob({
+          id: 2,
+          type: "cleaner",
+          status: "failed",
+          created_at: "2026-10-23 11:00:00",
+        }),
+        // A reconcile job renders as its own row.
+        makeJob({
+          id: 3,
+          type: "reconcile",
+          status: "running",
+          created_at: "2026-10-23 10:00:00",
+        }),
+      ]);
+    });
+
+    // The newest cleaner (failed) is shown; the older cleaner (done) is not.
+    expect(screen.getByText("failed")).toBeInTheDocument();
+    expect(screen.queryByText("done")).not.toBeInTheDocument();
+    // The reconcile row renders with its own type label and status.
+    expect(screen.getByText("reconcile")).toBeInTheDocument();
+    expect(screen.getByText("running")).toBeInTheDocument();
+    // Exactly two rows (cleaner + reconcile); no peakfilegenerator present.
+    expect(screen.getAllByText(/^cleaner$|^reconcile$/)).toHaveLength(2);
+    expect(screen.queryByText("peakfilegenerator")).not.toBeInTheDocument();
+  });
+
+  it("merges a changed job row delivered as a 'job' event (updates the latest row of that type)", () => {
     vi.stubGlobal("EventSource", FakeEventSource);
     renderWithMantine(<JobViewer />);
     const src = FakeEventSource.last!;

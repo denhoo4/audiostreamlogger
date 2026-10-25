@@ -37,15 +37,46 @@ function mergeJob(jobs: JobRecord[], changed: JobRecord): JobRecord[] {
   return next;
 }
 
+/** The job types shown, one row each, in this display order. */
+const DISPLAY_TYPES: JobRecord["type"][] = [
+  "cleaner",
+  "peakfilegenerator",
+  "reconcile",
+];
+
+/**
+ * Reduce the full job list to at most one row per type: for each display type
+ * pick the job with the newest created_at, tie-broken by the highest id. Types
+ * with no job are omitted. Result is ordered per DISPLAY_TYPES.
+ */
+function latestPerType(jobs: JobRecord[]): JobRecord[] {
+  const best = new Map<JobRecord["type"], JobRecord>();
+  for (const job of jobs) {
+    const current = best.get(job.type);
+    if (
+      !current ||
+      job.created_at > current.created_at ||
+      (job.created_at === current.created_at && job.id > current.id)
+    ) {
+      best.set(job.type, job);
+    }
+  }
+  return DISPLAY_TYPES.map((type) => best.get(type)).filter(
+    (job): job is JobRecord => job !== undefined,
+  );
+}
+
 /**
  * Live job viewer (design §6.4). Opens an EventSource on /api/jobs/stream, keeps
- * the recent-jobs list in sync as snapshot/job events arrive, and renders each
- * job's status badge, trigger source, timestamps, and captured output. The
+ * the job list in sync as snapshot/job events arrive, and renders only the most
+ * recent job of each type (cleaner, peakfilegenerator, reconcile) with its
+ * status badge, trigger source, timestamps, and captured output. The
  * EventSource is closed on unmount.
  *
  * Restyled to the Mantine AI-Studio house style (Panel + Mantine Badge/Code);
  * the openJobStream EventSource lifecycle and the mergeJob behaviour are
- * preserved verbatim — only presentation changed.
+ * preserved verbatim — only the display is reduced to one row per type via
+ * latestPerType.
  */
 export default function JobViewer() {
   const [jobs, setJobs] = useState<JobRecord[]>([]);
@@ -60,15 +91,17 @@ export default function JobViewer() {
     };
   }, []);
 
+  const displayJobs = latestPerType(jobs);
+
   return (
     <section className="settings-section">
       <Title order={2}>Recent jobs</Title>
       <Panel mt="md">
-        {jobs.length === 0 ? (
+        {displayJobs.length === 0 ? (
           <Text c="dimmed">No jobs yet.</Text>
         ) : (
           <Stack gap="sm">
-            {jobs.map((job) => {
+            {displayJobs.map((job) => {
               const { color, variant } = badgeProps(job);
               return (
                 <Stack key={job.id} gap="xs">

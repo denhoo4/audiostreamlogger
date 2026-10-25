@@ -44,7 +44,8 @@ const FREQUENCIES: ScheduleRecord["frequency"][] = [
  * anchor inputs (minute for hourly; hour+minute for daily; day-of-week +
  * hour+minute for weekly), a Save button (PUT /api/jobs/schedules/:type) and a
  * Run now button (POST /api/jobs {type}). A log_retention (hours) input with its
- * own Save (PUT /api/jobs/config/log_retention) sits below the schedule cards.
+ * own Save (PUT /api/jobs/config/log_retention) renders inside the cleaner card,
+ * between the Enabled toggle and the Frequency select.
  *
  * Restyled to the Mantine AI-Studio house style (Panel + Mantine
  * Switch/NativeSelect/NumberInput/Button); every api.ts call, the enabled 0|1
@@ -193,6 +194,33 @@ export default function SchedulerConfig() {
                   }
                 />
 
+                {s.type === "cleaner" && (
+                  <>
+                    <NumberInput
+                      label="Hours"
+                      min={1}
+                      max={8760}
+                      value={
+                        retentionHours === "" ? "" : Number(retentionHours)
+                      }
+                      onChange={(value) =>
+                        setRetentionHours(value === "" ? "" : String(value))
+                      }
+                    />
+                    {retentionError && (
+                      <Alert color="red" role="alert">
+                        {retentionError}
+                      </Alert>
+                    )}
+                    {retentionStatus && <Text>{retentionStatus}</Text>}
+                    <Group gap="sm">
+                      <Button type="button" onClick={handleSaveRetention}>
+                        Save
+                      </Button>
+                    </Group>
+                  </>
+                )}
+
                 <NativeSelect
                   label="Frequency"
                   value={s.frequency}
@@ -267,30 +295,6 @@ export default function SchedulerConfig() {
           ))}
         </Stack>
       )}
-
-      <Panel mt="md">
-        <Stack gap="sm">
-          <Title order={3}>Log retention</Title>
-          <NumberInput
-            label="Hours"
-            min={1}
-            max={8760}
-            value={retentionHours === "" ? "" : Number(retentionHours)}
-            onChange={(value) => setRetentionHours(value === "" ? "" : String(value))}
-          />
-          {retentionError && (
-            <Alert color="red" role="alert">
-              {retentionError}
-            </Alert>
-          )}
-          {retentionStatus && <Text>{retentionStatus}</Text>}
-          <Group gap="sm">
-            <Button type="button" onClick={handleSaveRetention}>
-              Save
-            </Button>
-          </Group>
-        </Stack>
-      </Panel>
     </section>
   );
 }
