@@ -11,6 +11,7 @@ import {
   Text,
   TextInput,
   Title,
+  Tooltip,
 } from "@mantine/core";
 import {
   ApiError,
@@ -372,15 +373,16 @@ export default function StreamTable() {
         ) : streams.length === 0 ? (
           <Text>No streams yet.</Text>
         ) : (
-          <Table verticalSpacing="sm" horizontalSpacing="md">
+          <Table.ScrollContainer minWidth={720} type="native">
+          <Table verticalSpacing="sm" horizontalSpacing="md" layout="fixed">
             <Table.Thead>
               <Table.Tr>
                 <Table.Th>Name</Table.Th>
                 <Table.Th>Folder</Table.Th>
                 <Table.Th>URL</Table.Th>
-                <Table.Th>Default stream</Table.Th>
-                <Table.Th>Order</Table.Th>
-                <Table.Th />
+                <Table.Th style={{ width: 120 }}>Default stream</Table.Th>
+                <Table.Th style={{ width: 96 }}>Order</Table.Th>
+                <Table.Th style={{ width: 160 }} />
               </Table.Tr>
             </Table.Thead>
             {groupByCountry(streams).map((group) => (
@@ -397,7 +399,13 @@ export default function StreamTable() {
                     <Table.Tr key={s.id}>
                       <Table.Td>{s.name}</Table.Td>
                       <Table.Td>{s.folder}</Table.Td>
-                      <Table.Td>{s.url}</Table.Td>
+                      <Table.Td>
+                        <Tooltip label={s.url} multiline maw={520}>
+                          <Text truncate title={s.url}>
+                            {s.url}
+                          </Text>
+                        </Tooltip>
+                      </Table.Td>
                       <Table.Td>
                         {isDefault ? (
                           <StatusBadge status="ok">Default</StatusBadge>
@@ -456,6 +464,7 @@ export default function StreamTable() {
               </Table.Tbody>
             ))}
           </Table>
+          </Table.ScrollContainer>
         )}
       </Panel>
 

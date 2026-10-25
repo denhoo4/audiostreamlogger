@@ -67,6 +67,14 @@ share the styling layer, NOT parallel):
       call (reskin, not a logic change). Build + 73 tests green in `node:26-bookworm`
       (64 baseline + 8 StatusBadge + 1 delete-Modal contract test). Evidence in
       `.agents/tasks/ui-components-streams-2026-10-23/verification.md`.
+      - Follow-up fix (branch `fix-streamtable-overflow`): the restyled `Table`
+        overflowed its `Panel`/`Container` to the right (long un-wrapping URLs forced
+        the table wider than the container), clipping the URL tail and the Edit/Delete
+        actions column. Fixed as layout-only: `layout="fixed"` with stable widths for
+        the Default/Order/actions columns, the URL cell truncates with an ellipsis and
+        keeps the full value in a `Tooltip` + `title`, and the table is wrapped in
+        `Table.ScrollContainer type="native"` (minWidth 720) as a narrow-viewport
+        fallback. No behaviour/api change; build + 73 tests still green.
 - [ ] Phase 4 — the player (public `/` screen): stream selection, the WaveSurfer
       waveform, playback controls, download/fragment-cut. Most visible screen.
 - [ ] Phase 5 — admin per tab (Streams → Recordings & health → Jobs → System), one
