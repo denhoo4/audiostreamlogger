@@ -8,6 +8,11 @@ and merged to `origin/main`. For the story of what was built and why, see
 
 Last updated: 2026-10-23.
 
+> Branch `peakfile-revert` (not yet merged): reverts the backend live current-hour
+> peak regeneration (worker half) and folds the player's live reload into Load while
+> decoding the current hour client-side + removing the redundant Refresh button
+> (frontend half). Integration green. See the peakfile-revert item under Open items.
+
 > Branch `country-order-polish` (not yet merged): manual country ordering +
 > Streams-table polish. See the Phase-3.7 entry below.
 > Branch `ui-admin-tabs-restyle` (not yet merged): Phase-5 restyle of the remaining
@@ -307,7 +312,7 @@ share the styling layer, NOT parallel):
       cleaner parameters (enable toggle + schedule/frequency) — one Save persists all
       three together. Frontend-only (fold the retention value into the cleaner card's
       shared save handler / app_config write).
-- [ ] FIX peak files + REVERT the live-hour peak regeneration (user diagnosis,
+- [x] FIX peak files + REVERT the live-hour peak regeneration (user diagnosis,
       2026-10-23). SYMPTOM: the current-hour peak `.json` is for the WHOLE hour's width
       but looks like a SHORT fragment stretched across the whole hour. ROOT CAUSE (user):
       this started with item 24's "refresh the waveform" feature — the live-hour peak
@@ -326,11 +331,18 @@ share the styling layer, NOT parallel):
       for past hours and fall back to client-side decoding for the current hour.
       (The player's live-hour refresh/reload still works for the growing mp3; it just no
       longer relies on a backend-regenerated peak file.) Touches worker + frontend.
-      IN PROGRESS on branch `peakfile-revert`: the FRONTEND half is DONE (FEAT-002) —
+      DONE on branch `peakfile-revert` (both halves). FRONTEND (FEAT-002):
       `App.tsx` `reload()` now decodes the CURRENT Amsterdam hour client-side (cache-
       busted mp3, no `.json` fetch) and PAST hours load the `.json` with a graceful
-      client-decode fallback when it is missing. The WORKER half (delete
-      `currenthourpeaks.js` + its timer/import/export + test) is FEAT-001.
+      client-decode fallback when it is missing. WORKER (FEAT-001): deleted
+      `currenthourpeaks.js` + its test and stripped the independent
+      `CURRENT_HOUR_PEAK_MS` setInterval timer, import, exports, and shutdown-clear from
+      `worker.js`; `peakfilegenerator.js` (with its current-hour skip + `currentHourStamp`
+      export) is unchanged, so completed hours are still peaked on schedule. Integration
+      verified in `node:26-bookworm`: worker Docker image builds + 58/58 `node --test`,
+      frontend `tsc -b`/`vite build` clean + 133/133 vitest, no dangling
+      `currenthourpeaks`/`CURRENT_HOUR_PEAK`/`regenerateCurrentHourPeaks`/
+      `currentHourPeakTimer` references in `src/`.
 - [x] Player: remove the REFRESH button if it's redundant with LOAD (user, 2026-10-23).
       DONE on branch `peakfile-revert` (FEAT-002, frontend-only). The live-refresh
       behaviour was folded into LOAD: `App.tsx` `reload()` now always cache-busts the
