@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import {
   ActionIcon,
   Alert,
@@ -13,7 +13,16 @@ import {
   Title,
   Tooltip,
 } from "@mantine/core";
-import { IconPencil, IconX } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconChevronDown,
+  IconChevronUp,
+  IconPencil,
+  IconPlus,
+  IconStar,
+  IconStarFilled,
+  IconX,
+} from "@tabler/icons-react";
 import {
   ApiError,
   createStream,
@@ -32,14 +41,15 @@ import {
   type StreamTestResult,
 } from "../api";
 import { COUNTRIES_BY_NAME, countryName } from "./countries";
-import { Panel, StatusBadge } from "../ui";
+import { deriveFolder } from "./derive-folder";
+import { Panel } from "../ui";
 import classes from "./StreamTable.module.css";
 
 /**
  * Valid recording-quality combinations per codec, mirroring the api allowlist
  * (src/api/lib/validate-stream.js CODECS). A lossy codec carries a bitrate from
  * its set and no bit-depth; a lossless codec carries a bit-depth and no
- * bitrate. The form only ever offers combos from this table, so it can never
+ * bitrate. The editor only ever offers combos from this table, so it can never
  * submit a combination the backend would reject (AC-10).
  */
 const CODEC_OPTIONS: {
@@ -65,9 +75,18 @@ const CODEC_OPTIONS: {
 
 /** Look up a codec's option descriptor (defaults to mp3 for an unknown codec). */
 function codecOption(codec: Codec) {
-  return (
-    CODEC_OPTIONS.find((c) => c.codec === codec) ?? CODEC_OPTIONS[0]
-  );
+  return CODEC_OPTIONS.find((c) => c.codec === codec) ?? CODEC_OPTIONS[0];
+}
+
+/** Compact read-view label for a row's codec + quality, e.g. 'mp3 @ 160' / 'flac 24-bit'. */
+function qualityLabel(row: {
+  codec: Codec;
+  bitrate_kbps: number | null;
+  bit_depth: number | null;
+}): string {
+  if (row.bit_depth != null) return `${row.codec} ${row.bit_depth}-bit`;
+  if (row.bitrate_kbps != null) return `${row.codec} @ ${row.bitrate_kbps}`;
+  return row.codec;
 }
 
 /**
@@ -106,7 +125,7 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(1)} ${units[i]}`;
 }
 
-/** Empty add/edit form state (behaviour-preserving mp3@160 quality default). */
+/** Empty draft state (behaviour-preserving mp3@160 quality default). */
 const EMPTY_FORM: StreamInput = {
   country: "",
   name: "",
@@ -118,17 +137,28 @@ const EMPTY_FORM: StreamInput = {
 };
 
 /**
- * Admin stream CRUD table. Lists getStreams(); an add/edit form renders country
- * as a <select> of ISO 3166-1 countries (option value = alpha-2 code, label =
- * full name) and name/folder/url as text inputs. The table read view maps the
- * stored code to its full name. create/update/delete call the api.ts functions
- * and surface the backend's 400/409 error messages.
- *
- * Phase-3 reskin: this screen is rendered with Mantine in the AI-Studio dark
- * style (Table inside a Panel, NativeSelect/TextInput fields, ActionIcon
- * reorder, Alert feedback, a Modal for the typed-confirm delete). All behaviour,
- * accessible names and api.ts calls are preserved — this is a reskin, not a
- * logic change.
+ * Discriminated inline-edit state. `null` = no row is being edited.
+ * `id: "new"` = the blank new-stream row (Save -> createStream with a DERIVED
+ * folder). A numeric `id` = that existing row is in edit mode (Save ->
+ * updateStream with the ORIGINAL stored folder, never re-derived). `draft`
+ * holds the in-progress field values. One row is editable at a time.
+ */
+type EditState = { id: number | "new"; draft: StreamInput } | null;
+
+/** Column count of the table (used for the full-width new-row + headers). */
+const COLSPAN = 6;
+
+/**
+ * Admin stream CRUD table with INLINE row editing. Lists getStreams(); clicking
+ * the pencil turns that row into inputs in place (name/url TextInput, country +
+ * codec + bitrate/bit-depth NativeSelect, inline URL reachability Test). Save
+ * commits via createStream (new row, derived folder) or updateStream (existing
+ * row, original folder kept verbatim); Cancel reverts. The Folder column is
+ * hidden (folder still travels in every payload because the api validator
+ * requires it). A '+ New stream' button inserts a blank editable row. Reorder
+ * arrows are stacked vertically; set-default is a star toggle. Delete is a
+ * typed-confirm Modal. All api.ts calls, accessible names and both light/dark
+ * schemes are preserved.
  */
 export default function StreamTable() {
   const [streams, setStreams] = useState<StreamRecord[]>([]);
@@ -136,24 +166,19 @@ export default function StreamTable() {
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
-  // null id => the form is in "add" mode; a number => editing that row.
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<StreamInput>(EMPTY_FORM);
+  // Single inline-edit state (replaces the old bottom form).
+  const [editing, setEditing] = useState<EditState>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // Notice shown after a create whose derived folder collided and was suffixed.
+  const [folderNotice, setFolderNotice] = useState<string | null>(null);
 
-  // Advisory URL reachability "Test" state. Independent of the save path:
-  // `testing` drives the pending label, `testResult` holds the probe outcome,
-  // and `testError` holds an ApiError message (e.g. the backend's 400 on a
-  // malformed url). None of these gate create/update.
+  // Advisory URL reachability "Test" state (operates on editing.draft.url).
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<StreamTestResult | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
 
-  // Typed-confirm DELETE flow (TODO item 25). `deleteTarget` is the row being
-  // deleted (null when no confirm panel is open); `deleteImpact` is the advisory
-  // file/byte snapshot; `deleteTyped` is what the admin has typed to confirm;
-  // `deleteError` surfaces a 409 ('recording right now') or other delete error.
+  // Typed-confirm DELETE flow (unchanged from the previous behaviour).
   const [deleteTarget, setDeleteTarget] = useState<StreamRecord | null>(null);
   const [deleteImpact, setDeleteImpact] = useState<DeletionImpact | null>(null);
   const [deleteTyped, setDeleteTyped] = useState("");
@@ -206,11 +231,17 @@ export default function StreamTable() {
     }
   }
 
-  /** Mark the clicked stream's folder as the player's default stream. */
-  async function handleSetDefault(folder: string) {
+  /**
+   * Toggle a row's default: clicking an unfilled star sets this folder as the
+   * default; clicking the filled (default) star clears it (the backend accepts
+   * an empty folder to clear).
+   */
+  async function handleToggleDefault(folder: string, isDefault: boolean) {
     setListError(null);
     try {
-      const { default_stream_folder } = await setDefaultStream(folder);
+      const { default_stream_folder } = await setDefaultStream(
+        isDefault ? "" : folder,
+      );
       setDefaultFolder(default_stream_folder);
     } catch (err) {
       setListError(
@@ -223,39 +254,57 @@ export default function StreamTable() {
     void refresh();
   }, []);
 
-  function resetForm() {
-    setEditingId(null);
-    setForm(EMPTY_FORM);
+  /** Clear the inline editor and its transient Test/error state. */
+  function cancelEdit() {
+    setEditing(null);
     setFormError(null);
     clearTest();
   }
 
+  /** Enter edit mode for an existing row, seeding the draft from its values. */
   function startEdit(stream: StreamRecord) {
-    setEditingId(stream.id);
-    setForm({
-      country: stream.country,
-      name: stream.name,
-      folder: stream.folder,
-      url: stream.url,
-      codec: stream.codec,
-      bitrate_kbps: stream.bitrate_kbps,
-      bit_depth: stream.bit_depth,
+    setEditing({
+      id: stream.id,
+      draft: {
+        country: stream.country,
+        name: stream.name,
+        folder: stream.folder,
+        url: stream.url,
+        codec: stream.codec,
+        bitrate_kbps: stream.bitrate_kbps,
+        bit_depth: stream.bit_depth,
+      },
     });
     setFormError(null);
+    setFolderNotice(null);
     clearTest();
+  }
+
+  /** Open a blank editable "new stream" row. */
+  function startNew() {
+    setEditing({ id: "new", draft: { ...EMPTY_FORM } });
+    setFormError(null);
+    setFolderNotice(null);
+    clearTest();
+  }
+
+  /** Patch the current draft (no-op if nothing is being edited). */
+  function patchDraft(patch: Partial<StreamInput>) {
+    setEditing((cur) =>
+      cur === null ? cur : { ...cur, draft: { ...cur.draft, ...patch } },
+    );
   }
 
   /**
-   * Switch the form's codec and reset the dependent quality fields to a valid
+   * Switch the draft's codec and reset the dependent quality fields to a valid
    * combo for the new codec: a lossy codec gets its first bitrate and a null
    * bit-depth; a lossless codec gets its first bit-depth and a null bitrate.
-   * This keeps the form from ever holding (and submitting) an invalid
+   * This keeps the editor from ever holding (and submitting) an invalid
    * codec/bitrate/bit-depth combination (AC-10).
    */
   function handleCodecChange(codec: Codec) {
     const opt = codecOption(codec);
-    setForm({
-      ...form,
+    patchDraft({
       codec,
       bitrate_kbps: opt.kind === "lossy" ? opt.bitrates[0] : null,
       bit_depth: opt.kind === "lossless" ? opt.bitDepths[0] : null,
@@ -263,16 +312,17 @@ export default function StreamTable() {
   }
 
   /**
-   * Run the advisory reachability probe for the current url. NON-BLOCKING:
-   * this never saves and never blocks the submit button; it only shows an
-   * inline reachable / not-reachable result. Guards against an empty url.
+   * Run the advisory reachability probe for the draft's url. NON-BLOCKING:
+   * this never saves and never blocks Save; it only shows an inline reachable /
+   * not-reachable result. Guards against an empty url.
    */
   async function handleTest() {
-    if (form.url.trim() === "") return;
+    const url = editing?.draft.url.trim() ?? "";
+    if (url === "") return;
     setTesting(true);
     clearTest();
     try {
-      setTestResult(await testStreamUrl(form.url));
+      setTestResult(await testStreamUrl(url));
     } catch (err) {
       setTestError(
         err instanceof ApiError ? err.message : "Could not test the URL",
@@ -282,17 +332,39 @@ export default function StreamTable() {
     }
   }
 
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  /**
+   * Commit the inline editor. A NEW row calls createStream with a DERIVED
+   * folder (and surfaces a notice when the derivation collided and was
+   * suffixed). An EXISTING row calls updateStream with the ORIGINAL stored
+   * folder kept verbatim — the folder is never re-derived on a name edit, so
+   * existing recordings never move.
+   */
+  async function handleSave() {
+    if (!editing) return;
     setFormError(null);
+    setFolderNotice(null);
     setSubmitting(true);
     try {
-      if (editingId === null) {
-        await createStream(form);
+      if (editing.id === "new") {
+        const { folder, collided } = deriveFolder(
+          editing.draft.name,
+          streams.map((s) => s.folder),
+        );
+        await createStream({ ...editing.draft, folder });
+        if (collided) {
+          setFolderNotice(
+            `Folder name already in use — saved as “${folder}”.`,
+          );
+        }
       } else {
-        await updateStream(editingId, form);
+        const original = streams.find((s) => s.id === editing.id);
+        await updateStream(editing.id, {
+          ...editing.draft,
+          // Keep the STORED folder verbatim; never re-derive on a name edit.
+          folder: original ? original.folder : editing.draft.folder,
+        });
       }
-      resetForm();
+      cancelEdit();
       await refresh();
     } catch (err) {
       setFormError(
@@ -316,8 +388,6 @@ export default function StreamTable() {
     try {
       setDeleteImpact(await getDeletionImpact(stream.id));
     } catch (err) {
-      // The count is advisory; a failure to load it must not block the typed
-      // confirm. Show the reason but keep the panel open.
       setDeleteError(
         err instanceof ApiError
           ? err.message
@@ -345,7 +415,7 @@ export default function StreamTable() {
     setDeleteError(null);
     try {
       await deleteStream(deleteTarget.id);
-      if (editingId === deleteTarget.id) resetForm();
+      if (editing && editing.id === deleteTarget.id) cancelEdit();
       cancelDelete();
       await refresh();
     } catch (err) {
@@ -357,125 +427,330 @@ export default function StreamTable() {
     }
   }
 
-  const opt = codecOption(form.codec);
+  /** Country <select> options shared by every editable row. */
+  const countryData = [
+    { value: "", label: "Select a country…" },
+    ...COUNTRIES_BY_NAME.map((c) => ({ value: c.code, label: c.name })),
+  ];
+
+  /**
+   * Render the inline editor cells for the current draft. Used both for an
+   * existing row in edit mode and for the blank new-stream row. `nameLabel`
+   * feeds the Save/Cancel accessible names.
+   */
+  function renderEditorRow(nameLabel: string, isNew: boolean) {
+    if (!editing) return null;
+    const draft = editing.draft;
+    const opt = codecOption(draft.codec);
+    return (
+      <>
+        <Table.Td className={classes.streamNameCell}>
+          <TextInput
+            aria-label="Name"
+            value={draft.name}
+            onChange={(e) => patchDraft({ name: e.currentTarget.value })}
+          />
+        </Table.Td>
+        <Table.Td>
+          <NativeSelect
+            aria-label="Country"
+            value={draft.country}
+            onChange={(e) => patchDraft({ country: e.currentTarget.value })}
+            data={countryData}
+          />
+        </Table.Td>
+        <Table.Td>
+          <Stack gap="xs">
+            <TextInput
+              aria-label="URL"
+              value={draft.url}
+              onChange={(e) => {
+                patchDraft({ url: e.currentTarget.value });
+                clearTest();
+              }}
+            />
+            <Group gap="xs" wrap="nowrap">
+              <Button
+                type="button"
+                variant="default"
+                size="xs"
+                onClick={handleTest}
+                disabled={testing || draft.url.trim() === ""}
+              >
+                {testing ? "Testing…" : "Test"}
+              </Button>
+              <div role="status" aria-live="polite">
+                {testError ? (
+                  <Text size="xs" c="red">
+                    Not reachable: {testError}
+                  </Text>
+                ) : testResult ? (
+                  testResult.reachable ? (
+                    <Text size="xs" c="green">
+                      Reachable
+                      {testResult.contentType
+                        ? ` (${testResult.contentType})`
+                        : ""}
+                    </Text>
+                  ) : (
+                    <Text size="xs" c="red">
+                      Not reachable: {testResult.detail}
+                    </Text>
+                  )
+                ) : null}
+              </div>
+            </Group>
+          </Stack>
+        </Table.Td>
+        <Table.Td>
+          <Stack gap="xs">
+            <NativeSelect
+              aria-label="Codec"
+              value={draft.codec}
+              onChange={(e) =>
+                handleCodecChange(e.currentTarget.value as Codec)
+              }
+              data={CODEC_OPTIONS.map((c) => ({
+                value: c.codec,
+                label: c.codec,
+              }))}
+            />
+            {opt.kind === "lossy" ? (
+              <NativeSelect
+                aria-label="Bitrate (kbps)"
+                value={draft.bitrate_kbps ?? ""}
+                onChange={(e) =>
+                  patchDraft({ bitrate_kbps: Number(e.currentTarget.value) })
+                }
+                data={opt.bitrates.map((b) => ({
+                  value: String(b),
+                  label: String(b),
+                }))}
+              />
+            ) : (
+              <NativeSelect
+                aria-label="Bit depth"
+                value={draft.bit_depth ?? ""}
+                onChange={(e) =>
+                  patchDraft({ bit_depth: Number(e.currentTarget.value) })
+                }
+                data={opt.bitDepths.map((d) => ({
+                  value: String(d),
+                  label: String(d),
+                }))}
+              />
+            )}
+          </Stack>
+        </Table.Td>
+        {/* No star control while editing. */}
+        <Table.Td />
+        <Table.Td>
+          <Group gap="xs" wrap="nowrap">
+            <Tooltip label="Save">
+              <ActionIcon
+                variant="filled"
+                aria-label={isNew ? "Save new stream" : `Save ${nameLabel}`}
+                loading={submitting}
+                onClick={handleSave}
+              >
+                <IconCheck size={16} />
+              </ActionIcon>
+            </Tooltip>
+            <Tooltip label="Cancel edit">
+              <ActionIcon
+                variant="default"
+                aria-label="Cancel edit"
+                disabled={submitting}
+                onClick={cancelEdit}
+              >
+                <IconX size={16} />
+              </ActionIcon>
+            </Tooltip>
+          </Group>
+        </Table.Td>
+      </>
+    );
+  }
 
   return (
     <section className="settings-section">
-      <Title order={2}>Streams</Title>
+      <Group justify="space-between" align="center">
+        <Title order={2}>Streams</Title>
+        <Button
+          leftSection={<IconPlus size={16} />}
+          onClick={startNew}
+          disabled={editing !== null}
+        >
+          New stream
+        </Button>
+      </Group>
 
       {listError && (
         <Alert color="red" role="alert" mt="md">
           {listError}
         </Alert>
       )}
+      {folderNotice && (
+        <Alert color="blue" role="status" mt="md" withCloseButton
+          onClose={() => setFolderNotice(null)}>
+          {folderNotice}
+        </Alert>
+      )}
+      {formError && (
+        <Alert color="red" role="alert" mt="md">
+          {formError}
+        </Alert>
+      )}
 
       <Panel mt="md">
         {loading ? (
           <Text>Loading…</Text>
-        ) : streams.length === 0 ? (
+        ) : streams.length === 0 && editing?.id !== "new" ? (
           <Text>No streams yet.</Text>
         ) : (
           <Table.ScrollContainer minWidth={720} type="native">
-          <Table verticalSpacing="sm" horizontalSpacing="md" layout="fixed">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th>Name</Table.Th>
-                <Table.Th>Folder</Table.Th>
-                <Table.Th>URL</Table.Th>
-                <Table.Th style={{ width: 120 }}>Default stream</Table.Th>
-                <Table.Th style={{ width: 96 }}>Order</Table.Th>
-                <Table.Th style={{ width: 160 }} />
-              </Table.Tr>
-            </Table.Thead>
-            {groupByCountry(streams).map((group) => (
-              <Table.Tbody key={group.country}>
+            <Table verticalSpacing="sm" horizontalSpacing="md" layout="fixed">
+              <Table.Thead>
                 <Table.Tr>
-                  <Table.Th
-                    colSpan={6}
-                    scope="colgroup"
-                    className={classes.countryHeaderCell}
-                  >
-                    {countryName(group.country)}
-                  </Table.Th>
+                  <Table.Th>Name</Table.Th>
+                  <Table.Th style={{ width: 160 }}>Country</Table.Th>
+                  <Table.Th>URL</Table.Th>
+                  <Table.Th style={{ width: 150 }}>Quality</Table.Th>
+                  <Table.Th style={{ width: 72 }}>Default</Table.Th>
+                  <Table.Th style={{ width: 120 }}>Actions</Table.Th>
                 </Table.Tr>
-                {group.rows.map((s) => {
-                  const flatIndex = streams.findIndex((x) => x.id === s.id);
-                  const isDefault = s.folder === defaultFolder;
-                  return (
-                    <Table.Tr key={s.id}>
-                      <Table.Td className={classes.streamNameCell}>
-                        {s.name}
-                      </Table.Td>
-                      <Table.Td>{s.folder}</Table.Td>
-                      <Table.Td>
-                        <Tooltip label={s.url} multiline maw={520}>
-                          <Text truncate title={s.url}>
-                            {s.url}
-                          </Text>
-                        </Tooltip>
-                      </Table.Td>
-                      <Table.Td>
-                        {isDefault ? (
-                          <StatusBadge status="ok">Default</StatusBadge>
-                        ) : (
-                          <Button
-                            variant="default"
-                            size="xs"
-                            onClick={() => handleSetDefault(s.folder)}
+              </Table.Thead>
+
+              {editing?.id === "new" && (
+                <Table.Tbody>
+                  <Table.Tr>
+                    <Table.Th
+                      colSpan={COLSPAN}
+                      scope="colgroup"
+                      className={classes.countryHeaderCell}
+                    >
+                      New stream
+                    </Table.Th>
+                  </Table.Tr>
+                  <Table.Tr>{renderEditorRow("new stream", true)}</Table.Tr>
+                </Table.Tbody>
+              )}
+
+              {groupByCountry(streams).map((group) => (
+                <Table.Tbody key={group.country}>
+                  <Table.Tr>
+                    <Table.Th
+                      colSpan={COLSPAN}
+                      scope="colgroup"
+                      className={classes.countryHeaderCell}
+                    >
+                      {countryName(group.country)}
+                    </Table.Th>
+                  </Table.Tr>
+                  {group.rows.map((s) => {
+                    const flatIndex = streams.findIndex((x) => x.id === s.id);
+                    const isDefault = s.folder === defaultFolder;
+                    const isEditingThis =
+                      editing !== null && editing.id === s.id;
+                    if (isEditingThis) {
+                      return (
+                        <Table.Tr key={s.id}>
+                          {renderEditorRow(s.name, false)}
+                        </Table.Tr>
+                      );
+                    }
+                    return (
+                      <Table.Tr key={s.id}>
+                        <Table.Td className={classes.streamNameCell}>
+                          {s.name}
+                        </Table.Td>
+                        <Table.Td>{countryName(s.country)}</Table.Td>
+                        <Table.Td>
+                          <Tooltip label={s.url} multiline maw={520}>
+                            <Text truncate title={s.url}>
+                              {s.url}
+                            </Text>
+                          </Tooltip>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="sm">{qualityLabel(s)}</Text>
+                        </Table.Td>
+                        <Table.Td>
+                          <Tooltip
+                            label={isDefault ? "Default stream" : "Set as default"}
                           >
-                            Set default
-                          </Button>
-                        )}
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap="xs" wrap="nowrap">
-                          <ActionIcon
-                            variant="default"
-                            aria-label={`Move ${s.name} up`}
-                            disabled={flatIndex === 0}
-                            onClick={() => handleReorder(s.id, -1)}
-                          >
-                            ▲
-                          </ActionIcon>
-                          <ActionIcon
-                            variant="default"
-                            aria-label={`Move ${s.name} down`}
-                            disabled={flatIndex === streams.length - 1}
-                            onClick={() => handleReorder(s.id, 1)}
-                          >
-                            ▼
-                          </ActionIcon>
-                        </Group>
-                      </Table.Td>
-                      <Table.Td>
-                        <Group gap="xs" wrap="nowrap">
-                          <Tooltip label={`Edit ${s.name}`}>
                             <ActionIcon
-                              variant="default"
-                              aria-label={`Edit ${s.name}`}
-                              onClick={() => startEdit(s)}
+                              variant={isDefault ? "light" : "default"}
+                              color={isDefault ? "yellow" : undefined}
+                              aria-label={
+                                isDefault ? "Default stream" : "Set as default"
+                              }
+                              onClick={() =>
+                                handleToggleDefault(s.folder, isDefault)
+                              }
                             >
-                              <IconPencil size={16} />
+                              {isDefault ? (
+                                <IconStarFilled size={16} />
+                              ) : (
+                                <IconStar size={16} />
+                              )}
                             </ActionIcon>
                           </Tooltip>
-                          <Tooltip label={`Delete ${s.name}`}>
-                            <ActionIcon
-                              color="red"
-                              variant="light"
-                              aria-label={`Delete ${s.name}`}
-                              onClick={() => openDeleteConfirm(s)}
-                            >
-                              <IconX size={16} />
-                            </ActionIcon>
-                          </Tooltip>
-                        </Group>
-                      </Table.Td>
-                    </Table.Tr>
-                  );
-                })}
-              </Table.Tbody>
-            ))}
-          </Table>
+                        </Table.Td>
+                        <Table.Td>
+                          <Group gap="xs" wrap="nowrap" align="center">
+                            <Stack gap={0}>
+                              <ActionIcon
+                                variant="default"
+                                size="sm"
+                                aria-label={`Move ${s.name} up`}
+                                disabled={flatIndex === 0 || editing !== null}
+                                onClick={() => handleReorder(s.id, -1)}
+                              >
+                                <IconChevronUp size={14} />
+                              </ActionIcon>
+                              <ActionIcon
+                                variant="default"
+                                size="sm"
+                                aria-label={`Move ${s.name} down`}
+                                disabled={
+                                  flatIndex === streams.length - 1 ||
+                                  editing !== null
+                                }
+                                onClick={() => handleReorder(s.id, 1)}
+                              >
+                                <IconChevronDown size={14} />
+                              </ActionIcon>
+                            </Stack>
+                            <Tooltip label={`Edit ${s.name}`}>
+                              <ActionIcon
+                                variant="default"
+                                aria-label={`Edit ${s.name}`}
+                                disabled={editing !== null}
+                                onClick={() => startEdit(s)}
+                              >
+                                <IconPencil size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                            <Tooltip label={`Delete ${s.name}`}>
+                              <ActionIcon
+                                color="red"
+                                variant="light"
+                                aria-label={`Delete ${s.name}`}
+                                disabled={editing !== null}
+                                onClick={() => openDeleteConfirm(s)}
+                              >
+                                <IconX size={16} />
+                              </ActionIcon>
+                            </Tooltip>
+                          </Group>
+                        </Table.Td>
+                      </Table.Tr>
+                    );
+                  })}
+                </Table.Tbody>
+              ))}
+            </Table>
           </Table.ScrollContainer>
         )}
       </Panel>
@@ -525,138 +800,6 @@ export default function StreamTable() {
           </Stack>
         )}
       </Modal>
-
-      <form onSubmit={handleSubmit}>
-       <Panel mt="md">
-        <Stack gap="sm">
-          <Title order={3}>
-            {editingId === null ? "Add stream" : "Edit stream"}
-          </Title>
-          <NativeSelect
-            label="Country"
-            value={form.country}
-            onChange={(e) =>
-              setForm({ ...form, country: e.currentTarget.value })
-            }
-            data={[
-              { value: "", label: "Select a country…" },
-              ...COUNTRIES_BY_NAME.map((c) => ({
-                value: c.code,
-                label: c.name,
-              })),
-            ]}
-          />
-          <TextInput
-            label="Name"
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.currentTarget.value })}
-          />
-          <TextInput
-            label="Folder"
-            value={form.folder}
-            onChange={(e) =>
-              setForm({ ...form, folder: e.currentTarget.value })
-            }
-          />
-          {editingId !== null && (
-            <Alert color="yellow" role="note">
-              Changing the folder MOVES the existing recordings on disk to the
-              new folder. It is refused while the stream is recording the current
-              hour.
-            </Alert>
-          )}
-          <TextInput
-            label="URL"
-            value={form.url}
-            onChange={(e) => {
-              setForm({ ...form, url: e.currentTarget.value });
-              clearTest();
-            }}
-          />
-          <NativeSelect
-            label="Codec"
-            value={form.codec}
-            onChange={(e) => handleCodecChange(e.currentTarget.value as Codec)}
-            data={CODEC_OPTIONS.map((c) => ({
-              value: c.codec,
-              label: c.codec,
-            }))}
-          />
-          {opt.kind === "lossy" ? (
-            <NativeSelect
-              label="Bitrate (kbps)"
-              value={form.bitrate_kbps ?? ""}
-              onChange={(e) =>
-                setForm({ ...form, bitrate_kbps: Number(e.currentTarget.value) })
-              }
-              data={opt.bitrates.map((b) => ({
-                value: String(b),
-                label: String(b),
-              }))}
-            />
-          ) : (
-            <NativeSelect
-              label="Bit depth"
-              value={form.bit_depth ?? ""}
-              onChange={(e) =>
-                setForm({ ...form, bit_depth: Number(e.currentTarget.value) })
-              }
-              data={opt.bitDepths.map((d) => ({
-                value: String(d),
-                label: String(d),
-              }))}
-            />
-          )}
-          <Group>
-            <Button
-              type="button"
-              variant="default"
-              onClick={handleTest}
-              disabled={testing || form.url.trim() === ""}
-            >
-              {testing ? "Testing…" : "Test"}
-            </Button>
-          </Group>
-          <div role="status" aria-live="polite">
-            {testError ? (
-              <Alert color="red">Not reachable: {testError}</Alert>
-            ) : testResult ? (
-              testResult.reachable ? (
-                <Alert color="green">
-                  Reachable
-                  {testResult.contentType
-                    ? ` (${testResult.contentType})`
-                    : ""}
-                </Alert>
-              ) : (
-                <Alert color="red">
-                  Not reachable: {testResult.detail}
-                </Alert>
-              )
-            ) : null}
-          </div>
-          {formError && (
-            <Alert color="red" role="alert">
-              {formError}
-            </Alert>
-          )}
-          <Group>
-            <Button type="submit" disabled={submitting}>
-              {submitting
-                ? "Saving…"
-                : editingId === null
-                  ? "Add stream"
-                  : "Save changes"}
-            </Button>
-            {editingId !== null && (
-              <Button type="button" variant="default" onClick={resetForm}>
-                Cancel
-              </Button>
-            )}
-          </Group>
-        </Stack>
-       </Panel>
-      </form>
     </section>
   );
 }

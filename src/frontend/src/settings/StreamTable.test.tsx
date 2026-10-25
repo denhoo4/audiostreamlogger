@@ -5,15 +5,19 @@ import {
   renderWithMantine,
   screen,
   waitFor,
+  within,
 } from "../test/render-with-mantine";
 import StreamTable from "./StreamTable";
 import type { StreamInput, StreamRecord } from "../api";
 
 /**
  * StreamTable lists getStreams() and drives create/update/delete through the
- * api.ts clients. We mock those clients (mirroring RecordingsAnalysis.test.tsx)
- * so the table renders against fixed data and one meaningful interaction — a
- * create submit — is asserted to call createStream with the entered fields.
+ * api.ts clients, now with INLINE row editing (no bottom form). We mock those
+ * clients so the table renders against fixed data and assert BEHAVIOUR: the
+ * right api call + payload for create (via '+ New stream' with a DERIVED
+ * folder), update (via the pencil, keeping the ORIGINAL folder), the typed-
+ * confirm delete Modal, reorder, and the set-default star toggle. Assertions
+ * target accessible names + api payloads, never class names.
  */
 const getStreams = vi.fn<() => Promise<StreamRecord[]>>();
 const createStream = vi.fn<(body: StreamInput) => Promise<StreamRecord>>();
@@ -27,9 +31,7 @@ const getPublicConfig =
   vi.fn<() => Promise<{ title: string; default_stream_folder: string }>>();
 
 // A minimal ApiError stand-in so the component's `err instanceof ApiError`
-// branch (which surfaces the backend message, e.g. a 409) is exercised. Defined
-// via vi.hoisted so it is available inside the hoisted vi.mock factory AND to
-// the test bodies that throw it.
+// branch (which surfaces the backend message, e.g. a 409) is exercised.
 const { MockApiError } = vi.hoisted(() => ({
   MockApiError: class MockApiError extends Error {
     status: number;
@@ -85,6 +87,11 @@ const ROWS: StreamRecord[] = [
   },
 ];
 
+/** Open the blank new-stream editor row via the '+ New stream' button. */
+function openNewRow() {
+  fireEvent.click(screen.getByRole("button", { name: "New stream" }));
+}
+
 describe("StreamTable", () => {
   beforeEach(() => {
     // Default: no configured default stream. Individual tests override.
@@ -103,13 +110,13 @@ describe("StreamTable", () => {
     getStreams.mockResolvedValue(ROWS);
     renderWithMantine(<StreamTable />);
 
-    // Wait for the list to resolve.
     expect(await screen.findByText("Radio One")).toBeInTheDocument();
-    // Behaviour: each stream's name and folder cell render (one data row each).
-    expect(screen.getByText("Radio One")).toBeInTheDocument();
     expect(screen.getByText("Radio Two")).toBeInTheDocument();
-    expect(screen.getByText("radio_one")).toBeInTheDocument();
-    expect(screen.getByText("radio_two")).toBeInTheDocument();
+    // The URL is shown in the read view.
+    expect(screen.getByText("https://example.com/one")).toBeInTheDocument();
+    // The Folder column is gone, so the folder string is NOT rendered.
+    expect(screen.queryByText("radio_one")).not.toBeInTheDocument();
+    expect(screen.queryByText("radio_two")).not.toBeInTheDocument();
   });
 
   it("renders a country-group header for each distinct country", async () => {
@@ -117,20 +124,16 @@ describe("StreamTable", () => {
     renderWithMantine(<StreamTable />);
 
     await screen.findByText("Radio One");
-    // Behaviour: a country group header (a colgroup <th> → columnheader role)
-    // renders for each distinct country, in document order. Querying by role
-    // avoids matching the same names in the Country <select> options.
     const nl = screen.getByRole("columnheader", { name: "Netherlands" });
     const be = screen.getByRole("columnheader", { name: "Belgium" });
     expect(nl).toBeInTheDocument();
     expect(be).toBeInTheDocument();
-    // Netherlands (NL, first stream) precedes Belgium (BE, second) in the DOM.
     expect(
       nl.compareDocumentPosition(be) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
-  it("clicking a row's ▼ calls reorderStreams with the swapped id order", async () => {
+  it("clicking a row's down arrow calls reorderStreams with the swapped id order", async () => {
     getStreams.mockResolvedValue(ROWS);
     reorderStreams.mockResolvedValue({ ok: true });
     renderWithMantine(<StreamTable />);
@@ -144,7 +147,7 @@ describe("StreamTable", () => {
     });
   });
 
-  it("disables ▲ on the first row and ▼ on the last row of the flat order", async () => {
+  it("disables up on the first row and down on the last row of the flat order", async () => {
     getStreams.mockResolvedValue(ROWS);
     renderWithMantine(<StreamTable />);
 
@@ -157,23 +160,26 @@ describe("StreamTable", () => {
     ).toBeDisabled();
   });
 
-  it("clicking 'Set default' calls setDefaultStream with that row's folder", async () => {
+  it("clicking the star toggle calls setDefaultStream with that row's folder", async () => {
     getStreams.mockResolvedValue(ROWS);
     setDefaultStream.mockResolvedValue({ default_stream_folder: "radio_one" });
     renderWithMantine(<StreamTable />);
 
     await screen.findByText("Radio One");
-    const setButtons = screen.getAllByRole("button", { name: "Set default" });
-    fireEvent.click(setButtons[0]);
+    // Both rows start unfilled ("Set as default").
+    const stars = screen.getAllByRole("button", { name: "Set as default" });
+    fireEvent.click(stars[0]);
 
     await waitFor(() => {
       expect(setDefaultStream).toHaveBeenCalledWith("radio_one");
     });
-    // The marked row now shows the Default badge.
-    expect(await screen.findByText("Default")).toBeInTheDocument();
+    // The marked row now shows the filled-star "Default stream" control.
+    expect(
+      await screen.findByRole("button", { name: "Default stream" }),
+    ).toBeInTheDocument();
   });
 
-  it("marks the row whose folder matches default_stream_folder", async () => {
+  it("marks the row whose folder matches default_stream_folder with a filled star", async () => {
     getStreams.mockResolvedValue(ROWS);
     getPublicConfig.mockResolvedValue({
       title: "",
@@ -181,39 +187,65 @@ describe("StreamTable", () => {
     });
     renderWithMantine(<StreamTable />);
 
-    expect(await screen.findByText("Default")).toBeInTheDocument();
-    // Only one 'Set default' button remains (for the non-default row).
-    expect(screen.getAllByRole("button", { name: "Set default" }).length).toBe(
-      1,
-    );
+    await screen.findByText("Radio One");
+    // Exactly one filled "Default stream" star; one unfilled "Set as default".
+    expect(
+      screen.getByRole("button", { name: "Default stream" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: "Set as default" }).length,
+    ).toBe(1);
   });
 
-  it("submitting the add form calls createStream with the entered fields", async () => {
+  it("clicking a filled star clears the default via setDefaultStream('')", async () => {
+    getStreams.mockResolvedValue(ROWS);
+    getPublicConfig.mockResolvedValue({
+      title: "",
+      default_stream_folder: "radio_one",
+    });
+    setDefaultStream.mockResolvedValue({ default_stream_folder: "" });
+    renderWithMantine(<StreamTable />);
+
+    await screen.findByText("Radio One");
+    fireEvent.click(screen.getByRole("button", { name: "Default stream" }));
+
+    await waitFor(() => {
+      expect(setDefaultStream).toHaveBeenCalledWith("");
+    });
+  });
+
+  // --- CREATE via the inline '+ New stream' row ---------------------------
+
+  it("'+ New stream' -> fill the inline row -> Save calls createStream with a DERIVED folder", async () => {
     getStreams.mockResolvedValue([]);
     createStream.mockResolvedValue(ROWS[0]);
     renderWithMantine(<StreamTable />);
 
-    // Empty list placeholder confirms the initial load resolved.
     await screen.findByText("No streams yet.");
+    openNewRow();
 
-    // Fill the add form. The country <select> is the combobox labelled Country.
+    // The blank editable row renders inside a "New stream" group.
+    const newRowHeader = await screen.findByRole("columnheader", {
+      name: "New stream",
+    });
+    expect(newRowHeader).toBeInTheDocument();
+
     fireEvent.change(screen.getByRole("combobox", { name: "Country" }), {
       target: { value: "NL" },
     });
-    const textboxes = screen.getAllByRole("textbox");
-    // Order in the form: Name, Folder, URL.
-    fireEvent.change(textboxes[0], { target: { value: "Radio One" } });
-    fireEvent.change(textboxes[1], { target: { value: "radio_one" } });
-    fireEvent.change(textboxes[2], {
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "Radio One" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "URL" }), {
       target: { value: "https://example.com/one" },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Add stream" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save new stream" }));
 
     await waitFor(() => {
       expect(createStream).toHaveBeenCalledTimes(1);
     });
-    // Quality defaults to the behaviour-preserving mp3@160 combo.
+    // Folder is DERIVED from the name ('Radio One' -> 'radio_one').
     expect(createStream).toHaveBeenCalledWith({
       country: "NL",
       name: "Radio One",
@@ -225,12 +257,41 @@ describe("StreamTable", () => {
     });
   });
 
-  it("selecting flac shows a bit-depth control and hides bitrate; mp3/opus show bitrate", async () => {
+  it("a create whose derived folder collides is suffixed and a notice is shown", async () => {
+    getStreams.mockResolvedValue(ROWS); // existing folder radio_one
+    createStream.mockResolvedValue(ROWS[0]);
+    renderWithMantine(<StreamTable />);
+
+    await screen.findByText("Radio One");
+    openNewRow();
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Country" }), {
+      target: { value: "NL" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "Radio One" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "URL" }), {
+      target: { value: "https://example.com/dup" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save new stream" }));
+
+    await waitFor(() => {
+      expect(createStream).toHaveBeenCalledTimes(1);
+    });
+    expect(createStream).toHaveBeenCalledWith(
+      expect.objectContaining({ folder: "radio_one_2" }),
+    );
+    expect(await screen.findByText(/radio_one_2/)).toBeInTheDocument();
+  });
+
+  it("selecting flac in the new row shows bit-depth and hides bitrate; opus restores bitrate", async () => {
     getStreams.mockResolvedValue([]);
     renderWithMantine(<StreamTable />);
     await screen.findByText("No streams yet.");
+    openNewRow();
 
-    // Default codec is mp3: a Bitrate control is shown, no Bit depth control.
+    // Default codec mp3: Bitrate shown, no Bit depth.
     expect(
       screen.getByRole("combobox", { name: "Bitrate (kbps)" }),
     ).toBeInTheDocument();
@@ -238,7 +299,6 @@ describe("StreamTable", () => {
       screen.queryByRole("combobox", { name: "Bit depth" }),
     ).not.toBeInTheDocument();
 
-    // Switch to flac: Bit depth appears, Bitrate disappears.
     fireEvent.change(screen.getByRole("combobox", { name: "Codec" }), {
       target: { value: "flac" },
     });
@@ -249,7 +309,6 @@ describe("StreamTable", () => {
       screen.queryByRole("combobox", { name: "Bitrate (kbps)" }),
     ).not.toBeInTheDocument();
 
-    // Switch to opus (lossy): Bitrate is back, Bit depth hidden again.
     fireEvent.change(screen.getByRole("combobox", { name: "Codec" }), {
       target: { value: "opus" },
     });
@@ -261,32 +320,31 @@ describe("StreamTable", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("submitting flac sends a valid lossless combo (bit_depth set, bitrate null)", async () => {
+  it("creating a flac stream sends a valid lossless combo (bit_depth set, bitrate null)", async () => {
     getStreams.mockResolvedValue([]);
     createStream.mockResolvedValue(ROWS[0]);
     renderWithMantine(<StreamTable />);
     await screen.findByText("No streams yet.");
+    openNewRow();
 
     fireEvent.change(screen.getByRole("combobox", { name: "Country" }), {
       target: { value: "NL" },
     });
-    const textboxes = screen.getAllByRole("textbox");
-    fireEvent.change(textboxes[0], { target: { value: "Radio Flac" } });
-    fireEvent.change(textboxes[1], { target: { value: "radio_flac" } });
-    fireEvent.change(textboxes[2], {
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "Radio Flac" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "URL" }), {
       target: { value: "https://example.com/flac" },
     });
 
-    // Switching to flac resets to a valid lossless combo (bit_depth=16).
     fireEvent.change(screen.getByRole("combobox", { name: "Codec" }), {
       target: { value: "flac" },
     });
-    // Pick the 24-bit option to confirm the control drives bit_depth.
     fireEvent.change(screen.getByRole("combobox", { name: "Bit depth" }), {
       target: { value: "24" },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Add stream" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save new stream" }));
 
     await waitFor(() => {
       expect(createStream).toHaveBeenCalledTimes(1);
@@ -302,7 +360,114 @@ describe("StreamTable", () => {
     });
   });
 
-  it("clicking Test with a filled url calls testStreamUrl and shows 'Reachable'", async () => {
+  it("Cancel discards the new row without calling createStream", async () => {
+    getStreams.mockResolvedValue([]);
+    renderWithMantine(<StreamTable />);
+    await screen.findByText("No streams yet.");
+    openNewRow();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "Throwaway" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel edit" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("textbox", { name: "Name" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(createStream).not.toHaveBeenCalled();
+  });
+
+  // --- EDIT an existing row inline ----------------------------------------
+
+  it("editing an existing stream's name calls updateStream with the ORIGINAL folder", async () => {
+    getStreams.mockResolvedValue(ROWS);
+    updateStream.mockResolvedValue(ROWS[0]);
+    renderWithMantine(<StreamTable />);
+    await screen.findByText("Radio One");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Radio One" }));
+
+    // The row is now editable in place; change the name.
+    const nameInput = screen.getByRole("textbox", { name: "Name" });
+    expect((nameInput as HTMLInputElement).value).toBe("Radio One");
+    fireEvent.change(nameInput, { target: { value: "Radio One Renamed" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Save Radio One" }));
+
+    await waitFor(() => {
+      expect(updateStream).toHaveBeenCalledTimes(1);
+    });
+    // The folder is the ORIGINAL stored value, NOT re-derived from the new name.
+    expect(updateStream).toHaveBeenCalledWith(1, {
+      country: "NL",
+      name: "Radio One Renamed",
+      folder: "radio_one",
+      url: "https://example.com/one",
+      codec: "mp3",
+      bitrate_kbps: 160,
+      bit_depth: null,
+    });
+  });
+
+  it("Cancel on an edit reverts without calling updateStream", async () => {
+    getStreams.mockResolvedValue(ROWS);
+    renderWithMantine(<StreamTable />);
+    await screen.findByText("Radio One");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Radio One" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "Changed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel edit" }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("textbox", { name: "Name" }),
+      ).not.toBeInTheDocument();
+    });
+    expect(updateStream).not.toHaveBeenCalled();
+    // The original name is still shown.
+    expect(screen.getByText("Radio One")).toBeInTheDocument();
+  });
+
+  it("a plain name edit does NOT show any folder-move warning", async () => {
+    getStreams.mockResolvedValue(ROWS);
+    renderWithMantine(<StreamTable />);
+    await screen.findByText("Radio One");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Radio One" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "Radio One Renamed" },
+    });
+
+    // The old folder-move warning must never appear (there is no folder field).
+    expect(
+      screen.queryByText(/Changing the folder MOVES the existing recordings/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("surfaces a 409 from updateStream inline", async () => {
+    getStreams.mockResolvedValue(ROWS);
+    updateStream.mockRejectedValue(
+      new MockApiError("stream is recording right now, try again next hour", 409),
+    );
+    renderWithMantine(<StreamTable />);
+    await screen.findByText("Radio One");
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Radio One" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "Radio One Renamed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save Radio One" }));
+
+    expect(await screen.findByText(/recording right now/)).toBeInTheDocument();
+  });
+
+  // --- Inline URL Test ----------------------------------------------------
+
+  it("clicking Test inside the editor calls testStreamUrl and shows 'Reachable'", async () => {
     getStreams.mockResolvedValue([]);
     testStreamUrl.mockResolvedValue({
       reachable: true,
@@ -312,13 +477,11 @@ describe("StreamTable", () => {
     });
     renderWithMantine(<StreamTable />);
     await screen.findByText("No streams yet.");
+    openNewRow();
 
-    const textboxes = screen.getAllByRole("textbox");
-    // Order in the form: Name, Folder, URL.
-    fireEvent.change(textboxes[2], {
+    fireEvent.change(screen.getByRole("textbox", { name: "URL" }), {
       target: { value: "https://example.com/one" },
     });
-
     fireEvent.click(screen.getByRole("button", { name: "Test" }));
 
     await waitFor(() => {
@@ -336,12 +499,11 @@ describe("StreamTable", () => {
     });
     renderWithMantine(<StreamTable />);
     await screen.findByText("No streams yet.");
+    openNewRow();
 
-    const textboxes = screen.getAllByRole("textbox");
-    fireEvent.change(textboxes[2], {
+    fireEvent.change(screen.getByRole("textbox", { name: "URL" }), {
       target: { value: "https://example.com/missing" },
     });
-
     fireEvent.click(screen.getByRole("button", { name: "Test" }));
 
     expect(
@@ -358,15 +520,13 @@ describe("StreamTable", () => {
     });
     renderWithMantine(<StreamTable />);
     await screen.findByText("No streams yet.");
+    openNewRow();
 
-    const textboxes = screen.getAllByRole("textbox");
-    fireEvent.change(textboxes[2], {
+    fireEvent.change(screen.getByRole("textbox", { name: "URL" }), {
       target: { value: "https://example.com/one" },
     });
-
     const testButton = screen.getByRole("button", { name: "Test" });
     expect(testButton).toHaveAttribute("type", "button");
-
     fireEvent.click(testButton);
 
     await waitFor(() => {
@@ -375,7 +535,7 @@ describe("StreamTable", () => {
     expect(createStream).not.toHaveBeenCalled();
   });
 
-  // --- DELETE: typed-folder confirmation (TODO item 25) -------------------
+  // --- DELETE: typed-folder confirmation (unchanged behaviour) ------------
 
   it("Delete opens a typed-confirm panel showing the advisory file/byte count", async () => {
     getStreams.mockResolvedValue(ROWS);
@@ -387,16 +547,13 @@ describe("StreamTable", () => {
     renderWithMantine(<StreamTable />);
     await screen.findByText("Radio One");
 
-    // Click the first row's Delete button.
     fireEvent.click(screen.getByRole("button", { name: "Delete Radio One" }));
 
     await waitFor(() => {
       expect(getDeletionImpact).toHaveBeenCalledWith(1);
     });
-    // Advisory count is shown.
     expect(await screen.findByText(/3 file\(s\)/)).toBeInTheDocument();
     expect(screen.getByText(/2\.0 KB/)).toBeInTheDocument();
-    // Delete has NOT fired yet (still needs the typed confirm).
     expect(deleteStream).not.toHaveBeenCalled();
   });
 
@@ -412,7 +569,6 @@ describe("StreamTable", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Delete Radio One" }));
 
-    // The typed-confirm lives in a Modal dialog, and Confirm starts disabled.
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Confirm delete" }),
@@ -433,18 +589,19 @@ describe("StreamTable", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete Radio One" }));
     await screen.findByText(/1 file\(s\)/);
 
-    const confirmBtn = screen.getByRole("button", { name: "Confirm delete" });
+    const dialog = await screen.findByRole("dialog");
+    const confirmBtn = within(dialog).getByRole("button", {
+      name: "Confirm delete",
+    });
     expect(confirmBtn).toBeDisabled();
 
     const input = screen.getByRole("textbox", {
       name: "Type folder name to confirm delete",
     });
-    // A wrong value keeps it disabled.
     fireEvent.change(input, { target: { value: "wrong" } });
     expect(confirmBtn).toBeDisabled();
     expect(deleteStream).not.toHaveBeenCalled();
 
-    // The exact folder name enables + fires the delete.
     fireEvent.change(input, { target: { value: "radio_one" } });
     expect(confirmBtn).not.toBeDisabled();
     fireEvent.click(confirmBtn);
@@ -454,7 +611,7 @@ describe("StreamTable", () => {
     });
   });
 
-  it("Cancel aborts: no deleteStream call and the panel closes", async () => {
+  it("Cancel aborts the delete: no deleteStream call and the panel closes", async () => {
     getStreams.mockResolvedValue(ROWS);
     getDeletionImpact.mockResolvedValue({
       folder: "radio_one",
@@ -467,7 +624,8 @@ describe("StreamTable", () => {
     fireEvent.click(screen.getByRole("button", { name: "Delete Radio One" }));
     await screen.findByText(/1 file\(s\)/);
 
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
 
     await waitFor(() => {
       expect(
@@ -498,49 +656,11 @@ describe("StreamTable", () => {
       }),
       { target: { value: "radio_one" } },
     );
-    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
-
-    expect(
-      await screen.findByText(/recording right now/),
-    ).toBeInTheDocument();
-  });
-
-  // --- RENAME: edit-form warning + 409 handling (TODO item 26) ------------
-
-  it("the edit form shows the folder-move warning; add mode does not", async () => {
-    getStreams.mockResolvedValue(ROWS);
-    renderWithMantine(<StreamTable />);
-    await screen.findByText("Radio One");
-
-    // Add mode: no warning.
-    expect(
-      screen.queryByText(/Changing the folder MOVES the existing recordings/),
-    ).not.toBeInTheDocument();
-
-    // Enter edit mode for the first row.
-    fireEvent.click(screen.getByRole("button", { name: "Edit Radio One" }));
-    expect(
-      screen.getByText(/Changing the folder MOVES the existing recordings/),
-    ).toBeInTheDocument();
-  });
-
-  it("surfaces a 409 from updateStream when a folder rename hits a recording hour", async () => {
-    getStreams.mockResolvedValue(ROWS);
-    updateStream.mockRejectedValue(
-      new MockApiError("stream is recording right now, try again next hour", 409),
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Confirm delete" }),
     );
-    renderWithMantine(<StreamTable />);
-    await screen.findByText("Radio One");
 
-    fireEvent.click(screen.getByRole("button", { name: "Edit Radio One" }));
-
-    // Change the folder, then save.
-    const folderInput = screen.getAllByRole("textbox")[1]; // Name, Folder, URL
-    fireEvent.change(folderInput, { target: { value: "radio_renamed" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
-
-    expect(
-      await screen.findByText(/recording right now/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/recording right now/)).toBeInTheDocument();
   });
 });

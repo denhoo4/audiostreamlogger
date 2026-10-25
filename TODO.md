@@ -98,6 +98,27 @@ share the styling layer, NOT parallel):
       `@tabler/icons-react@^3.49.0` (only new dep; lockfile regenerated, `npm ci`
       reproduces it). Build + 75 tests green in `node:26-bookworm` (73 baseline + 2
       ColorSchemeToggle). Evidence in `src/frontend/.plan/verification.md`.
+- [x] Phase 3.6 — Streams tab INLINE row editing + tightened layout: DONE on branch
+      `streams-inline-edit` (frontend-only; no backend/API/schema/compose/nginx
+      change). The bottom add/edit `<form>` is gone: clicking `IconPencil` turns THAT
+      row into inputs in place (Name/URL `TextInput`, Country/Codec/Bitrate-or-Bit-
+      depth `NativeSelect` reusing the per-codec valid-combo logic), with Save
+      (`IconCheck`) + Cancel (`IconX`) in the actions cell and the URL `Test`
+      reachability button + inline result available while editing. A `+ New stream`
+      button inserts a blank editable row whose Save calls `createStream`. The Folder
+      column is removed from display (DEV-only, new streams only); folder still
+      travels in every payload (api validator requires `^[a-z0-9_-]+$`). A new pure
+      `settings/derive-folder.ts` derives the folder from the name for NEW streams
+      (lowercase, spaces→`_`, strip non-allowlist, collapse repeats, `stream`
+      fallback, `_2/_3` collision suffix + notice); EXISTING streams keep their STORED
+      folder verbatim on update (never re-derived on a name edit, so recordings never
+      move). Reorder arrows are stacked vertically (`IconChevronUp`/`IconChevronDown`);
+      set-default became a compact star toggle (`IconStar`/`IconStarFilled`, filled =
+      default, click to set/clear). `Table.ScrollContainer` fallback, accessibility,
+      and both light/dark schemes preserved. Build + 92 tests green in
+      `node:26-bookworm` (75 baseline + 12 derive-folder + net new StreamTable inline
+      tests). Evidence in
+      `.agents/tasks/audiostreamlogger-streams-inline-edit-2026-10-23/verification.md`.
 - [ ] Phase 4 — the player (public `/` screen): stream selection, the WaveSurfer
       waveform, playback controls, download/fragment-cut. Most visible screen.
 - [ ] Phase 5 — admin per tab (Streams → Recordings & health → Jobs → System), one
