@@ -60,7 +60,9 @@ It listens internally on port 3000 and is **not** published to the host.
 A React + Vite single-page app, built to static assets and served by nginx. The
 same nginx config serves the recorded audio under `/audio` and
 reverse-proxies `/api`, `/util`, and `/auth` to the api service, so the whole app
-is **same-origin** (no CORS). The admin screen lives at `/settings`.
+is **same-origin** (no CORS). The admin screen lives at `/settings`. UI styling is
+built on **Mantine** (`@mantine/core` + `@mantine/hooks`), configured dark-only via
+a `MantineProvider` + `src/theme.ts` token set (Google-AI-Studio-inspired).
 
 ## How the services communicate
 
