@@ -167,7 +167,7 @@ describe("SettingsPage auth gate", () => {
     ).toBeInTheDocument();
     // A panel from another tab is not mounted yet.
     expect(
-      screen.queryByRole("heading", { name: "Stream health" }),
+      screen.queryByRole("heading", { name: "Recordings & health" }),
     ).not.toBeInTheDocument();
   });
 
@@ -177,16 +177,11 @@ describe("SettingsPage auth gate", () => {
 
     await screen.findByText("Signed in as admin");
 
-    // Open Recordings & health -> its panels appear, the Streams panel hides.
+    // Open Recordings & health -> its single merged panel appears, the Streams
+    // panel hides.
     fireEvent.click(screen.getByRole("tab", { name: "Recordings & health" }));
     expect(
-      await screen.findByRole("heading", { name: "Recordings analysis" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Stream health" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Storage estimate" }),
+      await screen.findByRole("heading", { name: "Recordings & health" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "Streams" }),
@@ -204,7 +199,7 @@ describe("SettingsPage auth gate", () => {
       screen.getByRole("heading", { name: "Worker status" }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "Recordings analysis" }),
+      screen.queryByRole("heading", { name: "Recordings & health" }),
     ).not.toBeInTheDocument();
 
     // Open System -> system panels appear.

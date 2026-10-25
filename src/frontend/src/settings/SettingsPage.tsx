@@ -8,9 +8,7 @@ import JobViewer from "./JobViewer";
 import ChangePasswordForm from "./ChangePasswordForm";
 import BrandingSettings from "./BrandingSettings";
 import WorkerStatus from "./WorkerStatus";
-import StreamHealth from "./StreamHealth";
-import RecordingsAnalysis from "./RecordingsAnalysis";
-import StorageEstimate from "./StorageEstimate";
+import RecordingsHealth from "./RecordingsHealth";
 import BackupSettings from "./BackupSettings";
 import { useAppTitle } from "../useAppTitle";
 
@@ -121,9 +119,7 @@ export default function SettingsPage() {
         </Tabs.Panel>
 
         <Tabs.Panel value="recordings">
-          <RecordingsAnalysis />
-          <StreamHealth />
-          <StorageEstimate />
+          <RecordingsHealth />
         </Tabs.Panel>
 
         <Tabs.Panel value="jobs">
