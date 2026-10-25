@@ -306,12 +306,22 @@ share the styling layer, NOT parallel):
       hierarchy reads at a glance (native `<optgroup>` indents its options automatically;
       a custom grouped list must apply the indent explicitly). Honors the existing
       `country_order` from public config (the player already orders by it). Frontend-only.
-- [ ] Jobs tab: remove the SEPARATE Save button under Cleaner → Hours (log-retention)
-      (user, 2026-10-23). The log-retention Hours field in the cleaner card should NOT
-      have its own Save; it should be saved by the SAME save button as the other two
-      cleaner parameters (enable toggle + schedule/frequency) — one Save persists all
-      three together. Frontend-only (fold the retention value into the cleaner card's
-      shared save handler / app_config write).
+- [x] Jobs tab: remove the SEPARATE Save button under Cleaner → Hours (log-retention)
+      (user, 2026-10-23). DONE on branch `cleaner-save` (NOT yet merged; frontend-only,
+      no api.ts/endpoint/SSE/schema/docker/nginx change). The standalone Hours Save
+      button and its `handleSaveRetention` handler were removed from `SchedulerConfig`;
+      the Hours input stays between the Enabled toggle and the Frequency select but is
+      now persisted by the cleaner card's SHARED Save: `handleSave` folds a
+      `setLogRetention(Number(retentionHours))` call (cleaner only) in after
+      `updateSchedule`, so one click persists enabled + schedule + retention with a
+      single combined status/error (via the shared `rowStatus`/`rowError`; the
+      retention validation bounds `min={1}`/`max={8760}` and the load-error alert are
+      preserved). Other job types (peakfilegenerator, reconcile) untouched;
+      `setLogRetention` fires only for the cleaner. `SchedulerConfig.test.tsx` updated
+      to the single-save model (three Save buttons, not four; cleaner Save calls both
+      `updateSchedule` and `setLogRetention`; non-cleaner Saves never call
+      `setLogRetention`). Build + 135/135 vitest green in `node:26-bookworm`
+      (`tsc -b` + `vite build` clean; 133 baseline + 2 new cleaner-save tests).
 - [x] FIX peak files + REVERT the live-hour peak regeneration (user diagnosis,
       2026-10-23). SYMPTOM: the current-hour peak `.json` is for the WHOLE hour's width
       but looks like a SHORT fragment stretched across the whole hour. ROOT CAUSE (user):

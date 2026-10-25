@@ -44,9 +44,11 @@ const FREQUENCIES: ScheduleRecord["frequency"][] = [
  * an enable toggle, a frequency select that conditionally shows the matching
  * anchor inputs (minute for hourly; hour+minute for daily; day-of-week +
  * hour+minute for weekly), a Save button (PUT /api/jobs/schedules/:type) and a
- * Run now button (POST /api/jobs {type}). A log_retention (hours) input with its
- * own Save (PUT /api/jobs/config/log_retention) renders inside the cleaner card,
- * between the Enabled toggle and the Frequency select.
+ * Run now button (POST /api/jobs {type}). A log_retention (hours) input renders
+ * inside the cleaner card, between the Enabled toggle and the Frequency select;
+ * it has no Save of its own — the single cleaner Save persists the schedule
+ * (PUT /api/jobs/schedules/cleaner) and the retention
+ * (PUT /api/jobs/config/log_retention) together on one click.
  *
  * Restyled to the Mantine AI-Studio house style (Panel + Mantine
  * Switch/NativeSelect/NumberInput/Button); every api.ts call, the enabled 0|1
@@ -64,7 +66,6 @@ export default function SchedulerConfig() {
 
   const [retentionHours, setRetentionHours] = useState<string>("");
   const [retentionError, setRetentionError] = useState<string | null>(null);
-  const [retentionStatus, setRetentionStatus] = useState<string | null>(null);
 
   async function refresh() {
     setLoading(true);
@@ -106,6 +107,7 @@ export default function SchedulerConfig() {
 
   async function handleSave(schedule: ScheduleRecord) {
     setRowError({ ...rowError, [schedule.type]: null });
+    setRetentionError(null);
     setRowStatus({ ...rowStatus, [schedule.type]: "Saving…" });
     try {
       await updateSchedule(schedule.type, {
@@ -115,6 +117,12 @@ export default function SchedulerConfig() {
         hour: schedule.hour,
         day_of_week: schedule.day_of_week,
       });
+      // The cleaner card folds its log_retention (Hours) value into the same
+      // Save: one click persists both the schedule and the retention.
+      if (schedule.type === "cleaner") {
+        const saved = await setLogRetention(Number(retentionHours));
+        setRetentionHours(String(saved.hours));
+      }
       setRowStatus({ ...rowStatus, [schedule.type]: "Saved" });
       await refresh();
     } catch (err) {
@@ -139,24 +147,6 @@ export default function SchedulerConfig() {
         ...rowError,
         [type]: err instanceof ApiError ? err.message : "Could not run job",
       });
-    }
-  }
-
-  async function handleSaveRetention() {
-    setRetentionError(null);
-    setRetentionStatus("Saving…");
-    const hours = Number(retentionHours);
-    try {
-      const saved = await setLogRetention(hours);
-      setRetentionHours(String(saved.hours));
-      setRetentionStatus("Saved");
-    } catch (err) {
-      setRetentionStatus(null);
-      setRetentionError(
-        err instanceof ApiError
-          ? err.message
-          : "Could not save log retention",
-      );
     }
   }
 
@@ -205,12 +195,6 @@ export default function SchedulerConfig() {
                         {retentionError}
                       </Alert>
                     )}
-                    {retentionStatus && <Text>{retentionStatus}</Text>}
-                    <Group gap="sm">
-                      <Button type="button" onClick={handleSaveRetention}>
-                        Save
-                      </Button>
-                    </Group>
                   </>
                 )}
 

@@ -83,25 +83,68 @@ describe("SchedulerConfig", () => {
     }
   });
 
-  it("gives each card an Enabled switch, a Save button and a Run now button", async () => {
+  it("gives each card exactly one Enabled switch, one Save button and one Run now button", async () => {
     await renderReady();
     // Three Enabled switches (one per card). Mantine's Switch exposes
     // role="switch".
     expect(screen.getAllByRole("switch", { name: "Enabled" })).toHaveLength(3);
-    // Each card has a Save button and a Run now button. There are three Run now
-    // buttons (one per card) and four Save buttons (one per card plus the
-    // log-retention Save inside the cleaner card).
+    // Each card has a single Save button and a single Run now button. There are
+    // three Run now buttons and three Save buttons (one per card) — the cleaner
+    // card no longer carries a separate log-retention Save.
     expect(screen.getAllByRole("button", { name: "Run now" })).toHaveLength(3);
-    expect(screen.getAllByRole("button", { name: "Save" })).toHaveLength(4);
+    expect(screen.getAllByRole("button", { name: "Save" })).toHaveLength(3);
     for (const type of ["cleaner", "peakfilegenerator", "reconcile"]) {
       const card = cardFor(type);
       expect(
         within(card).getByRole("button", { name: "Run now" }),
       ).toBeInTheDocument();
       expect(
-        within(card).getAllByRole("button", { name: "Save" }).length,
-      ).toBeGreaterThanOrEqual(1);
+        within(card).getAllByRole("button", { name: "Save" }),
+      ).toHaveLength(1);
     }
+  });
+
+  it("persists both the schedule and the log retention from the single cleaner Save", async () => {
+    await renderReady();
+    updateSchedule.mockResolvedValue(SCHEDULES[0]);
+    setLogRetention.mockResolvedValue({ hours: 48 });
+
+    const cleanerCard = cardFor("cleaner");
+
+    // Change the retention Hours value.
+    const hoursInput = within(cleanerCard).getByRole("textbox", {
+      name: "Hours",
+    });
+    fireEvent.change(hoursInput, { target: { value: "48" } });
+
+    // One Save button, one click — both writes fire.
+    fireEvent.click(within(cleanerCard).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(updateSchedule).toHaveBeenCalledWith(
+        "cleaner",
+        expect.any(Object),
+      ),
+    );
+    expect(setLogRetention).toHaveBeenCalledWith(48);
+  });
+
+  it("does not persist log retention from the non-cleaner card Saves", async () => {
+    await renderReady();
+    updateSchedule.mockResolvedValue(SCHEDULES[2]);
+
+    const reconcileCard = cardFor("reconcile");
+    fireEvent.click(
+      within(reconcileCard).getByRole("button", { name: "Save" }),
+    );
+
+    await waitFor(() =>
+      expect(updateSchedule).toHaveBeenCalledWith(
+        "reconcile",
+        expect.any(Object),
+      ),
+    );
+    expect(setLogRetention).not.toHaveBeenCalled();
   });
 
   it("enqueues a reconcile job when reconcile's Run now is clicked", async () => {
