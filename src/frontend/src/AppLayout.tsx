@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
-import { Box, Container, Group, Title } from "@mantine/core";
+import { Box, Container, Title } from "@mantine/core";
 import type { MantineSize } from "@mantine/core";
-import { ColorSchemeToggle } from "./ui";
 import { DEFAULT_APP_TITLE } from "./useAppTitle";
 import classes from "./AppLayout.module.css";
 
@@ -11,9 +10,11 @@ import classes from "./AppLayout.module.css";
  * each view's existing content — no panel/control restyle.
  *
  * Shape: a top header/app bar on a scheme-aware surface with a subtle 1px
- * bottom border, holding a brand title on the left and a color-scheme toggle
- * on the right; below it a centered, max-width Container with generous padding
- * that renders the page content. The header surface/border flip per color
+ * bottom border, holding a brand title on the left; below it a centered,
+ * max-width Container with generous padding that renders the page content.
+ * The color scheme always follows the browser's prefers-color-scheme (set up
+ * in main.tsx) — there is no manual override control. The header surface/border
+ * flip per color
  * scheme via `AppLayout.module.css` (`light-dark()` + `--mantine-color-*`
  * vars); the body uses the scheme-aware `--mantine-color-body`. Dark mode is
  * visually unchanged; light mode gets a clean near-white header.
@@ -42,15 +43,9 @@ export default function AppLayout({
       }}
     >
       <Box component="header" px="lg" py="md" className={classes.header}>
-        <Group justify="space-between" wrap="wrap">
-          <Title order={1} size="h4">
-            {title}
-          </Title>
-          {/* Right-side slot: the color-scheme toggle (System/Light/Dark). */}
-          <Group gap="sm">
-            <ColorSchemeToggle />
-          </Group>
-        </Group>
+        <Title order={1} size="h4">
+          {title}
+        </Title>
       </Box>
       <Container size={size} py="lg">
         {children}

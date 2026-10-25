@@ -6,7 +6,7 @@ import { getPublicConfig } from "./api";
  * document.title fallback (useAppTitle), the brand fallback (useBrandTitle),
  * and AppLayout's default prop never drift apart.
  */
-export const DEFAULT_APP_TITLE = "Dé radiologger";
+export const DEFAULT_APP_TITLE = "Audio Stream Logger";
 
 /**
  * Set document.title at runtime from the public branding config, falling back

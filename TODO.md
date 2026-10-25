@@ -16,6 +16,10 @@ Last updated: 2026-10-23.
 > Branch `admin-content-reworks` (not yet merged): Phase-5.5 admin content reworks
 > (merged Recordings & health table, Jobs tab log-retention + latest-per-type job
 > view + reconcile controls, header brand from app_title). See the Phase-5.5 entry.
+> Branch `player-fixes` (not yet merged): Phase-5.7 player & admin UI fixes
+> (English-only UI, fragment download filename, keep date/hour on stream change,
+> header color-scheme toggle removed, waveform loading state, play-selection stops
+> at the region end). See the Phase-5.7 entry below.
 
 ## Current state
 
@@ -245,6 +249,44 @@ share the styling layer, NOT parallel):
         the AppLayout, on BOTH the main player page and the settings pages (currently
         the header shows a hardcoded "Dé radiologger"). Wire the header to the
         `app_title` from public config so it updates everywhere when the title changes.
+- [x] Phase 5.7 — player & admin UI fixes (user, 2026-10-23): DONE on branch
+      `player-fixes` (NOT yet merged; frontend-only, no api.ts/endpoint/SSE/schema/
+      docker/nginx change, no new dependency). Six fixes:
+      1. Translated every remaining Dutch UI string in the frontend to English
+         (player chrome in `App.tsx` — labels, button text, the play/pause
+         aria-label, DatePicker label/placeholder, hour label, the select-a-day
+         alert, the download-wait text, the four `console.error` messages — plus the
+         matching `App.test.tsx` accessible-name assertions). `DEFAULT_APP_TITLE`
+         default brand changed "Dé radiologger" → "Audio Stream Logger" (the admin's
+         user-entered title is untouched; stream/country/folder DATA values untouched).
+      2. Fragment download SAVED filename is now
+         `<streamname>_<start>_<end>.<ext>` with absolute wall-clock
+         `YYYY-MM-DD_HH-MM-SS` stamps (recording hour base + region offsets) via a
+         new pure `player-filename.ts` (`fragmentFilename`). The export REQUEST body
+         is unchanged; the whole-hour download name is unchanged.
+      3. Switching stream now KEEPS the current date + hour when BOTH still exist for
+         the newly-selected stream (via `existingDaysFor`/`existingHoursFor`), clears
+         both when the date is unavailable, keeps the date and clears only the hour
+         when the day exists but the hour does not (replacing the old always-clear
+         rule).
+      4. Removed the header `ColorSchemeToggle` (component + its test deleted,
+         re-export dropped, `AppLayout` header simplified). The scheme ALWAYS follows
+         the browser `prefers-color-scheme` — `MantineProvider defaultColorScheme="auto"`
+         + `ColorSchemeScript` stay; there is no manual override. (Supersedes the
+         Phase-3.5 "header toggle" — both light and dark themes still work.)
+      5. Waveform loading feedback: `useWavesurfer` now exposes `isLoading`/`loadError`
+         (wired to WaveSurfer load-start → `ready`/`error`); `App.tsx` shows a
+         `LoadingOverlay` over the waveform zone + a time `Skeleton` while loading,
+         an inline error on failure, and reveals the waveform/time on ready.
+      6. Play selection now plays ONLY the selection: seeks to the region start, plays,
+         and auto-pauses exactly at the region end via a `timeupdate` guard (cleared on
+         any manual transport so normal playback is never truncated). Normal play/pause
+         unchanged; the button stays disabled with no selection.
+      Build + 122 vitest green in `node:26-bookworm` (112 baseline − 2 removed
+      ColorSchemeToggle + 12 new: 4 filename, 3 stream-change, 2 loading, 1
+      play-selection, 1 AppLayout no-toggle; `npm ci` reproduces the lockfile, no new
+      dependency). Verification evidence appended to
+      `.agents/tasks/player-fixes-2026-10-23/plan.md`.
 - [ ] Phase 6 — polish: responsive/mobile, accessibility (focus states, contrast,
       keyboard), consistent loading/empty/error states, subtle motion.
 Frontend-only (`src/frontend/`). No backend/API/schema change. WaveSurfer behaviour

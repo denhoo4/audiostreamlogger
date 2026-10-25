@@ -10,10 +10,10 @@ import "@testing-library/jest-dom/vitest";
 // DETERMINISTIC under jsdom: a never-matching `prefers-color-scheme: dark`
 // means `auto` always resolves to light here, so scheme-dependent assertions
 // stay stable. Do not make this value random.
-// jsdom also lacks ResizeObserver, which Mantine's SegmentedControl
-// (FloatingIndicator) observes to position its moving highlight. The
-// ColorSchemeToggle renders a SegmentedControl, so provide a no-op stub; the
-// suites assert roles/behaviour, not layout measurements.
+// jsdom also lacks ResizeObserver, which several Mantine components
+// (FloatingIndicator-based controls) observe to position moving highlights.
+// Provide a no-op stub so those renders do not throw; the suites assert
+// roles/behaviour, not layout measurements.
 if (!window.ResizeObserver) {
   window.ResizeObserver = class {
     observe() {}

@@ -39,8 +39,8 @@ createRoot(document.getElementById("root")!).render(
     {/* Writes data-mantine-color-scheme before first paint from the device's
         prefers-color-scheme → the UI follows the OS light/dark setting on first
         paint with no flash, and switches live when the device setting changes.
-        A header toggle (ColorSchemeToggle) lets the user override to
-        light/dark or return to 'auto' (follow device). */}
+        There is no manual override control: the scheme always follows the
+        browser. */}
     <ColorSchemeScript defaultColorScheme="auto" />
     <MantineProvider theme={theme} defaultColorScheme="auto">
       <Root />

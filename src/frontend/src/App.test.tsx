@@ -8,25 +8,69 @@ import type { Settings2, Stream } from "./api";
 // assert the per-codec extension used for the player load.
 const loadedUrls: string[] = [];
 
+// Handle to the single live fake WaveSurfer instance so tests can fire its
+// captured lifecycle handlers ('ready'/'error') and transport spies. Reset in
+// each suite's afterEach via resetFakeWs().
+interface FakeWsHandle {
+  handlers: Record<string, ((arg?: unknown) => void)[]>;
+  emit: (event: string, arg?: unknown) => void;
+  setTimeCalls: number[];
+  playCalls: number;
+  pauseCalls: number;
+}
+let fakeWs: FakeWsHandle | null = null;
+
+function resetFakeWs() {
+  fakeWs = null;
+}
+
 // Guard WaveSurfer so it never tries to decode real audio in jsdom. We stub the
-// module with a minimal instance that records event handlers but does nothing.
+// module with a minimal instance that records event handlers + transport calls
+// so the loading-state and play-selection suites can drive and observe it.
 vi.mock("wavesurfer.js", () => {
   class FakeWaveSurfer {
+    handlers: Record<string, ((arg?: unknown) => void)[]> = {};
+    setTimeCalls: number[] = [];
+    playCalls = 0;
+    pauseCalls = 0;
     static create() {
-      return new FakeWaveSurfer();
+      const inst = new FakeWaveSurfer();
+      fakeWs = {
+        handlers: inst.handlers,
+        emit: (event, arg) => {
+          (inst.handlers[event] ?? []).forEach((h) => h(arg));
+        },
+        setTimeCalls: inst.setTimeCalls,
+        get playCalls() {
+          return inst.playCalls;
+        },
+        get pauseCalls() {
+          return inst.pauseCalls;
+        },
+      } as FakeWsHandle;
+      return inst;
     }
     registerPlugin<T>(p: T): T {
       return p;
     }
-    on() {}
+    on(event: string, handler: (arg?: unknown) => void) {
+      (this.handlers[event] ??= []).push(handler);
+    }
     load(url: string) {
       loadedUrls.push(url);
     }
     playPause() {}
+    play() {
+      this.playCalls += 1;
+    }
     skip() {}
     seekTo() {}
-    setTime() {}
-    pause() {}
+    setTime(t: number) {
+      this.setTimeCalls.push(t);
+    }
+    pause() {
+      this.pauseCalls += 1;
+    }
     getCurrentTime() {
       return 0;
     }
@@ -38,15 +82,30 @@ vi.mock("wavesurfer.js", () => {
   return { default: FakeWaveSurfer };
 });
 
+// The single region created by addRegion(); exposed so a play-selection test
+// can read its start/end. Reset per suite.
+let fakeRegion: { start: number; end: number } | null = null;
+
 vi.mock("wavesurfer.js/dist/plugins/regions.esm.js", () => {
   class FakeRegions {
     static create() {
       return new FakeRegions();
     }
-    addRegion() {
-      return { start: 0, end: 10, setOptions() {}, play() {} };
+    addRegion(opts: { start: number; end: number }) {
+      fakeRegion = {
+        start: opts.start,
+        end: opts.end,
+        setOptions(o: { start: number; end: number }) {
+          fakeRegion!.start = o.start;
+          fakeRegion!.end = o.end;
+        },
+        play() {},
+      } as unknown as { start: number; end: number };
+      return fakeRegion;
     }
-    clearRegions() {}
+    clearRegions() {
+      fakeRegion = null;
+    }
   }
   return { default: FakeRegions };
 });
@@ -85,7 +144,7 @@ async function pickDate(isoDate: string): Promise<void> {
     });
   };
 
-  const trigger = screen.getByLabelText("Datum");
+  const trigger = screen.getByLabelText("Date");
   // The pointer-down + click sequence is what opens the Mantine popover under
   // jsdom (a bare click does not flip aria-expanded).
   await act(async () => {
@@ -211,30 +270,30 @@ describe("App smoke test", () => {
       ).toBeInTheDocument();
     }
     // The play/pause button is icon-only; it is found by its aria-label
-    // ("Afspelen" when paused).
+    // ("Play" when paused).
     expect(
-      screen.getByRole("button", { name: "Afspelen" }),
+      screen.getByRole("button", { name: "Play" }),
     ).toBeInTheDocument();
 
     // Selection controls
     expect(document.getElementById("downloadbutton")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Selectie start" }),
+      screen.getByRole("button", { name: "Selection start" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Selectie einde" }),
+      screen.getByRole("button", { name: "Selection end" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Selectie wissen" }),
+      screen.getByRole("button", { name: "Clear selection" }),
     ).toBeInTheDocument();
     expect(document.getElementById("playRegionButton")).toBeDisabled();
     expect(document.getElementById("downloadRegionButton")).toBeDisabled();
 
     // Selector row
     expect(document.getElementById("stringSelector")).toBeInTheDocument();
-    expect(screen.getByLabelText("Datum")).toBeInTheDocument();
+    expect(screen.getByLabelText("Date")).toBeInTheDocument();
     expect(document.getElementById("hourSelector")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Inladen!" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Load" })).toBeInTheDocument();
 
     // Hidden wait message
     const wait = document.getElementById("downloadWait");
@@ -452,7 +511,7 @@ describe("App non-mp3 player load", () => {
       // "09" is already present for this stream + day.
       fireEvent.change(hourSelect, { target: { value: "09" } });
 
-      fireEvent.click(screen.getByRole("button", { name: "Inladen!" }));
+      fireEvent.click(screen.getByRole("button", { name: "Load" }));
 
       await waitFor(() => {
         expect(
@@ -538,7 +597,7 @@ function stubFetchForLive(peaksOk: boolean) {
 
 /**
  * Pick the given date via the calendar + set the given hour via the native
- * select, then click "Inladen!". The stream is already preselected (the caller
+ * select, then click "Load". The stream is already preselected (the caller
  * settles the settings fetch first). The day + hour must exist in LIVE_TREE for
  * them to be selectable.
  */
@@ -548,7 +607,7 @@ async function loadHour(date: string, hour: string) {
     "hourSelector",
   ) as HTMLSelectElement;
   fireEvent.change(hourSelect, { target: { value: hour } });
-  fireEvent.click(screen.getByRole("button", { name: "Inladen!" }));
+  fireEvent.click(screen.getByRole("button", { name: "Load" }));
 }
 
 describe("App live-hour auto-refresh", () => {
@@ -594,7 +653,7 @@ describe("App live-hour auto-refresh", () => {
     ).toBe(true);
   });
 
-  it("clicking 'Ververs' triggers an immediate cache-busted reload", async () => {
+  it("clicking 'Refresh' triggers an immediate cache-busted reload", async () => {
     stubFetchForLive(true);
     renderWithMantine(<App />);
 
@@ -615,7 +674,7 @@ describe("App live-hour auto-refresh", () => {
       ).toBe(true);
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Ververs" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => {
       expect(
         loadedUrls.some((u) =>
@@ -691,5 +750,317 @@ describe("pickInitialFolder", () => {
 
   it("returns '' when there are no streams", () => {
     expect(pickInitialFolder([], "radio_one")).toBe("");
+  });
+});
+
+// --- Stream-change: preserve date/hour when valid for the new stream -------
+
+const PRESERVE_STREAM_ROWS: Stream[] = [
+  {
+    country: "NL",
+    name: "Alpha Radio",
+    folder: "alpha_radio",
+    url: "https://example.com/alpha",
+    codec: "mp3",
+  },
+  {
+    country: "NL",
+    name: "Bravo Radio",
+    folder: "bravo_radio",
+    url: "https://example.com/bravo",
+    codec: "mp3",
+  },
+];
+
+/**
+ * Build a settings2 stub for the two preserve-streams. Alpha always has
+ * 2026-10-23 @ 09 + 10. Bravo's slots vary per case so the keep-vs-clear rule
+ * can be exercised:
+ *   - "shared":   Bravo has 2026-10-23 @ 09 (keep both date + hour)
+ *   - "no-day":   Bravo has only 2026-11-01 (clear date + hour)
+ *   - "no-hour":  Bravo has 2026-10-23 @ 15 (keep date, clear hour)
+ */
+function preserveTree(kind: "shared" | "no-day" | "no-hour"): Settings2 {
+  const bravo =
+    kind === "shared"
+      ? { "2026": { "10": { "23": ["09"] } } }
+      : kind === "no-day"
+        ? { "2026": { "11": { "01": ["09"] } } }
+        : { "2026": { "10": { "23": ["15"] } } };
+  return {
+    "Alpha Radio": {
+      "2026": { "10": { "23": ["09", "10"] } },
+    } as unknown as Settings2[string],
+    "Bravo Radio": bravo as unknown as Settings2[string],
+  };
+}
+
+function stubFetchForPreserve(kind: "shared" | "no-day" | "no-hour") {
+  const tree = preserveTree(kind);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/app-config/public")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ title: "", default_stream_folder: "alpha_radio" }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      if (url.includes("/api/settings2")) {
+        return Promise.resolve(
+          new Response(JSON.stringify(tree), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (url.includes("/api/settings")) {
+        return Promise.resolve(
+          new Response(JSON.stringify(PRESERVE_STREAM_ROWS), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      return Promise.resolve(new Response("", { status: 404 }));
+    }),
+  );
+}
+
+describe("App stream-change date/hour preservation", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    loadedUrls.length = 0;
+    resetFakeWs();
+    fakeRegion = null;
+  });
+
+  async function setupAlphaSelection(
+    kind: "shared" | "no-day" | "no-hour",
+  ): Promise<HTMLSelectElement> {
+    stubFetchForPreserve(kind);
+    renderWithMantine(<App />);
+    const selector = document.getElementById(
+      "stringSelector",
+    ) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(selector.value).toBe("alpha_radio");
+    });
+    // Pick Alpha's shared day + hour 09.
+    await pickDate("2026-10-23");
+    const hourSelect = document.getElementById(
+      "hourSelector",
+    ) as HTMLSelectElement;
+    fireEvent.change(hourSelect, { target: { value: "09" } });
+    // The DatePickerInput trigger shows the formatted value (not the
+    // placeholder) once a day is chosen; the hour native-select holds "09".
+    expect(dateSelectionText()).not.toBe("Pick a day");
+    expect(hourSelect.value).toBe("09");
+    return selector;
+  }
+
+  // Text shown on the DatePickerInput trigger: the formatted date when a day is
+  // selected, or the "Pick a day" placeholder when it is cleared. Read from the
+  // labelled trigger element.
+  function dateSelectionText(): string {
+    return (screen.getByLabelText("Date").textContent ?? "").trim();
+  }
+
+  it("keeps date + hour when the new stream also has that exact day + hour", async () => {
+    const selector = await setupAlphaSelection("shared");
+    const hourSelect = document.getElementById(
+      "hourSelector",
+    ) as HTMLSelectElement;
+    const keptDate = dateSelectionText();
+
+    fireEvent.change(selector, { target: { value: "bravo_radio" } });
+
+    await waitFor(() => {
+      expect(selector.value).toBe("bravo_radio");
+    });
+    // Both preserved: the shared day + hour survive the switch.
+    expect(dateSelectionText()).toBe(keptDate);
+    expect(hourSelect.value).toBe("09");
+  });
+
+  it("clears date + hour when the new stream lacks that day", async () => {
+    const selector = await setupAlphaSelection("no-day");
+    const hourSelect = document.getElementById(
+      "hourSelector",
+    ) as HTMLSelectElement;
+
+    fireEvent.change(selector, { target: { value: "bravo_radio" } });
+
+    await waitFor(() => {
+      expect(selector.value).toBe("bravo_radio");
+    });
+    expect(dateSelectionText()).toBe("Pick a day");
+    expect(hourSelect.value).toBe("");
+  });
+
+  it("keeps the date but clears the hour when the new stream has the day but not the hour", async () => {
+    const selector = await setupAlphaSelection("no-hour");
+    const hourSelect = document.getElementById(
+      "hourSelector",
+    ) as HTMLSelectElement;
+    const keptDate = dateSelectionText();
+
+    fireEvent.change(selector, { target: { value: "bravo_radio" } });
+
+    await waitFor(() => {
+      expect(selector.value).toBe("bravo_radio");
+    });
+    expect(dateSelectionText()).toBe(keptDate);
+    expect(dateSelectionText()).not.toBe("Pick a day");
+    expect(hourSelect.value).toBe("");
+  });
+});
+
+// --- Loading feedback over the waveform during a load ----------------------
+
+describe("App loading feedback", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    loadedUrls.length = 0;
+    resetFakeWs();
+    fakeRegion = null;
+  });
+
+  it("shows a loading state after Load and clears it on the WaveSurfer 'ready' event", async () => {
+    stubFetchForLive(false);
+    renderWithMantine(<App />);
+    const selector = document.getElementById(
+      "stringSelector",
+    ) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(selector.value).toBe("live_radio");
+    });
+
+    await loadHour("2026-07-15", "10");
+    // The load() set isLoading=true: the time placeholder shows and the
+    // numeric readout is gone.
+    await waitFor(() => {
+      expect(screen.getByTestId("time-loading")).toBeInTheDocument();
+    });
+    expect(document.getElementById("time-total")).not.toBeInTheDocument();
+
+    // Fire WaveSurfer 'ready': loading clears and the time readout returns.
+    await act(async () => {
+      fakeWs?.emit("ready", 120);
+    });
+    await waitFor(() => {
+      expect(document.getElementById("time-total")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("time-loading")).not.toBeInTheDocument();
+    expect(document.getElementById("waveform-error")).not.toBeInTheDocument();
+  });
+
+  it("clears loading and shows an error message on the WaveSurfer 'error' event", async () => {
+    stubFetchForLive(false);
+    renderWithMantine(<App />);
+    const selector = document.getElementById(
+      "stringSelector",
+    ) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(selector.value).toBe("live_radio");
+    });
+
+    await loadHour("2026-07-15", "10");
+    await waitFor(() => {
+      expect(screen.getByTestId("time-loading")).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      fakeWs?.emit("error", new Error("decode failed"));
+    });
+    await waitFor(() => {
+      expect(document.getElementById("waveform-error")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("time-loading")).not.toBeInTheDocument();
+  });
+});
+
+// --- Play selection stops exactly at the region end ------------------------
+
+describe("App play-selection stops at region end", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    loadedUrls.length = 0;
+    resetFakeWs();
+    fakeRegion = null;
+  });
+
+  it("seeks to the region start, plays, and auto-pauses only when the end is reached", async () => {
+    stubFetchForLive(false);
+    renderWithMantine(<App />);
+    const selector = document.getElementById(
+      "stringSelector",
+    ) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(selector.value).toBe("live_radio");
+    });
+    await loadHour("2026-07-15", "10");
+    await act(async () => {
+      fakeWs?.emit("ready", 120);
+    });
+
+    // Create a selection (Selection start makes { start: t, end: t+10 } with
+    // t = currentTime = 0 under the fake).
+    fireEvent.click(screen.getByRole("button", { name: "Selection start" }));
+    expect(fakeRegion).not.toBeNull();
+    const regionEnd = fakeRegion!.end;
+
+    const playsBefore = fakeWs!.playCalls;
+    const pausesBefore = fakeWs!.pauseCalls;
+
+    fireEvent.click(screen.getByRole("button", { name: "Play selection" }));
+    // Seeked to the region start and started playing.
+    expect(fakeWs!.setTimeCalls[fakeWs!.setTimeCalls.length - 1]).toBe(
+      fakeRegion!.start,
+    );
+    expect(fakeWs!.playCalls).toBe(playsBefore + 1);
+
+    // A timeupdate before the end does NOT pause.
+    await act(async () => {
+      fakeWs?.emit("timeupdate", regionEnd - 1);
+    });
+    expect(fakeWs!.pauseCalls).toBe(pausesBefore);
+
+    // A timeupdate at the end pauses exactly once.
+    await act(async () => {
+      fakeWs?.emit("timeupdate", regionEnd);
+    });
+    expect(fakeWs!.pauseCalls).toBe(pausesBefore + 1);
+
+    // A later timeupdate does NOT pause again (guard cleared).
+    await act(async () => {
+      fakeWs?.emit("timeupdate", regionEnd + 5);
+    });
+    expect(fakeWs!.pauseCalls).toBe(pausesBefore + 1);
+  });
+});
+
+// --- Header no longer renders a color-scheme toggle ------------------------
+
+describe("App header has no color-scheme toggle", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders no 'Color scheme' control in the player view", () => {
+    renderWithMantine(<App />);
+    expect(
+      screen.queryByRole("radiogroup", { name: /color scheme/i }),
+    ).toBeNull();
+    expect(screen.queryByLabelText(/color scheme/i)).toBeNull();
   });
 });

@@ -73,4 +73,20 @@ describe("AppLayout", () => {
       );
     });
   });
+
+  it("renders no color-scheme toggle in the header (scheme follows the browser)", () => {
+    renderWithMantine(
+      <AppLayout title="My Station">
+        <div />
+      </AppLayout>,
+    );
+    // The removed ColorSchemeToggle was a SegmentedControl labelled
+    // "Color scheme"; neither the group nor its options should exist now.
+    expect(
+      screen.queryByRole("radiogroup", { name: /color scheme/i }),
+    ).toBeNull();
+    expect(screen.queryByRole("radio", { name: /system/i })).toBeNull();
+    expect(screen.queryByRole("radio", { name: /light/i })).toBeNull();
+    expect(screen.queryByRole("radio", { name: /dark/i })).toBeNull();
+  });
 });

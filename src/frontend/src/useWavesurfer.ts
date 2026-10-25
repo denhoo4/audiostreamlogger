@@ -49,6 +49,10 @@ export interface UseWavesurfer {
   duration: number;
   isPlaying: boolean;
   hasRegion: boolean;
+  /** True from the start of load() until WaveSurfer fires 'ready' (or 'error'). */
+  isLoading: boolean;
+  /** True when the last load() failed (WaveSurfer 'error'); cleared on the next load(). */
+  loadError: boolean;
   load: (audioUrl: string, peaks?: number[][]) => void;
   playPause: () => void;
   skip: (seconds: number) => void;
@@ -85,6 +89,13 @@ export function useWavesurfer(): UseWavesurfer {
   const [duration, setDuration] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasRegion, setHasRegion] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+
+  // When a selection is being played, the region's end (seconds). The
+  // timeupdate guard pauses playback once currentTime reaches it, then clears
+  // this back to null. null means "normal playback" (never auto-paused).
+  const playingRegionEndRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -101,10 +112,21 @@ export function useWavesurfer(): UseWavesurfer {
     wsRef.current = ws;
     regionsRef.current = regions;
 
-    const onTimeupdate = (t: number) => setCurrentTime(t);
+    const onTimeupdate = (t: number) => {
+      setCurrentTime(t);
+      // Play-selection guard: once the playhead reaches the region end, pause
+      // and stop guarding so normal playback afterwards is never truncated.
+      const end = playingRegionEndRef.current;
+      if (end != null && t >= end) {
+        playingRegionEndRef.current = null;
+        ws.pause();
+      }
+    };
     const onReady = (d: number) => {
       setDuration(d);
       setCurrentTime(ws.getCurrentTime());
+      setIsLoading(false);
+      setLoadError(false);
     };
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
@@ -112,6 +134,11 @@ export function useWavesurfer(): UseWavesurfer {
       ws.setTime(0);
       setCurrentTime(0);
       setIsPlaying(false);
+      playingRegionEndRef.current = null;
+    };
+    const onError = () => {
+      setIsLoading(false);
+      setLoadError(true);
     };
 
     ws.on("timeupdate", onTimeupdate);
@@ -120,6 +147,7 @@ export function useWavesurfer(): UseWavesurfer {
     ws.on("play", onPlay);
     ws.on("pause", onPause);
     ws.on("finish", onFinish);
+    ws.on("error", onError);
 
     // Mouse interactions scoped to the waveform element only (not the page):
     //   double-click  -> play
@@ -183,6 +211,10 @@ export function useWavesurfer(): UseWavesurfer {
   const load = useCallback((audioUrl: string, peaks?: number[][]) => {
     const ws = wsRef.current;
     if (!ws) return;
+    // Enter the loading state AFTER any preceding reset()/clear so the overlay
+    // shows until 'ready' (or 'error') fires for this load.
+    setIsLoading(true);
+    setLoadError(false);
     if (peaks) {
       ws.load(audioUrl, peaks);
     } else {
@@ -191,18 +223,23 @@ export function useWavesurfer(): UseWavesurfer {
   }, []);
 
   const playPause = useCallback(() => {
+    // A manual transport cancels any pending play-selection auto-pause.
+    playingRegionEndRef.current = null;
     wsRef.current?.playPause();
   }, []);
 
   const skip = useCallback((seconds: number) => {
+    playingRegionEndRef.current = null;
     wsRef.current?.skip(seconds);
   }, []);
 
   const seekTo = useCallback((progress: number) => {
+    playingRegionEndRef.current = null;
     wsRef.current?.seekTo(progress);
   }, []);
 
   const pause = useCallback(() => {
+    playingRegionEndRef.current = null;
     wsRef.current?.pause();
   }, []);
 
@@ -213,6 +250,7 @@ export function useWavesurfer(): UseWavesurfer {
   }, []);
 
   const reset = useCallback(() => {
+    playingRegionEndRef.current = null;
     clearRegions();
     wsRef.current?.seekTo(0);
     wsRef.current?.pause();
@@ -274,8 +312,17 @@ export function useWavesurfer(): UseWavesurfer {
     clearRegions();
   }, [clearRegions]);
 
+  // Play ONLY the current selection: seek to its start, play, and auto-pause at
+  // its end. wavesurfer v7's region.play() does not reliably stop at the region
+  // end, so the version-independent guarantee is the timeupdate guard above
+  // (playingRegionEndRef); region.play(true) is a best-effort native attempt.
   const playRegion = useCallback(() => {
-    regionRef.current?.play();
+    const ws = wsRef.current;
+    const region = regionRef.current;
+    if (!ws || !region) return;
+    playingRegionEndRef.current = region.end;
+    ws.setTime(region.start);
+    ws.play();
   }, []);
 
   const getRegion = useCallback(() => {
@@ -290,6 +337,8 @@ export function useWavesurfer(): UseWavesurfer {
     duration,
     isPlaying,
     hasRegion,
+    isLoading,
+    loadError,
     load,
     playPause,
     skip,

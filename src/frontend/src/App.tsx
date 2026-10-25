@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActionIcon,
+  Box,
   Button,
   Group,
+  LoadingOverlay,
   NativeSelect,
+  Skeleton,
   Stack,
   Text,
 } from "@mantine/core";
@@ -35,6 +38,7 @@ import {
   existingHoursFor,
 } from "./player-hours";
 import { sortStreamsByCountryOrder } from "./settings/country-order";
+import { fragmentFilename } from "./player-filename";
 import { Panel } from "./ui";
 import { useAppTitle } from "./useAppTitle";
 import { formatTime, useWavesurfer } from "./useWavesurfer";
@@ -159,7 +163,7 @@ export default function App() {
   // Hours that actually have a recording for the selected stream + date, derived
   // from the public /api/settings2 tree. Empty until a valid stream + date are
   // chosen (or when that day has no recordings), so the selector then shows only
-  // the "Uur" placeholder.
+  // the "Hour" placeholder.
   const availableHours = (() => {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
     if (!selectedFolder || !m || selectedDisplayName === null) return [];
@@ -192,7 +196,7 @@ export default function App() {
           defaultFolder = config.default_stream_folder;
           order = config.country_order;
         } catch (err) {
-          console.error("Kon standaardstream niet laden:", err);
+          console.error("Failed to load default stream:", err);
         }
         if (!cancelled) {
           setCountryOrder(order);
@@ -201,7 +205,7 @@ export default function App() {
         }
       })
       .catch((err) => {
-        console.error("Kon streams niet laden:", err);
+        console.error("Failed to load streams:", err);
       });
     return () => {
       cancelled = true;
@@ -218,7 +222,7 @@ export default function App() {
         if (!cancelled) setTree(data);
       })
       .catch((err) => {
-        console.error("Kon opnames niet laden:", err);
+        console.error("Failed to load recordings:", err);
       });
     return () => {
       cancelled = true;
@@ -229,18 +233,46 @@ export default function App() {
   // the /settings admin route via useAppTitle).
   useAppTitle();
 
-  // DETERMINISTIC rule: whenever the selected STREAM changes, clear the date +
-  // hour. This prevents ever rendering a highlighted-but-disabled calendar day
-  // (a day that exists for the previous stream but not the new one) or an
-  // out-of-range hour value carried over from the previous stream.
+  // On a STREAM change, KEEP the current date + hour when they are both still
+  // valid for the newly-selected stream, so switching A -> B where B also has
+  // that selection leaves it visible. Otherwise fall back: clear the date (and
+  // its hour) when the date is not available for the new stream; keep the date
+  // but clear only the hour when the date exists but that hour does not. This
+  // never leaves a highlighted-but-disabled day or an out-of-range hour behind.
   const prevFolderRef = useRef(selectedFolder);
   useEffect(() => {
-    if (prevFolderRef.current !== selectedFolder) {
-      prevFolderRef.current = selectedFolder;
+    if (prevFolderRef.current === selectedFolder) return;
+    prevFolderRef.current = selectedFolder;
+
+    const newName = selectedFolder
+      ? displayNameForFolder(streams, selectedFolder)
+      : null;
+    if (!newName) {
       setDate("");
       setHour("");
+      return;
     }
-  }, [selectedFolder]);
+
+    const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+    const dateAvailable = parts !== null && existingDaysFor(tree, newName).has(date);
+    if (!dateAvailable) {
+      setDate("");
+      setHour("");
+      return;
+    }
+
+    // Date kept; keep the hour only when it exists for the new stream + date.
+    const hoursForDate = existingHoursFor(
+      tree,
+      newName,
+      parts[1],
+      parts[2],
+      parts[3],
+    );
+    if (!hoursForDate.includes(hour)) {
+      setHour("");
+    }
+  }, [selectedFolder, streams, tree, date, hour]);
 
   // Spacebar toggles play/pause (document keydown).
   useEffect(() => {
@@ -259,7 +291,7 @@ export default function App() {
   }, [ws]);
 
   // Core load body, shared by the initial load, the live-poll interval and the
-  // manual "Ververs" button. Rebuilds the media + peaks URLs for `sel` (passing
+  // manual "Refresh" button. Rebuilds the media + peaks URLs for `sel` (passing
   // an optional cache-busting `?t=` so a grown current-hour file/json is not
   // served stale), updates the download anchor, and tries the peaks JSON before
   // falling back to decoding the audio directly — preserving the graceful
@@ -287,13 +319,13 @@ export default function App() {
     [ws],
   );
 
-  // Load (#load): validate the day/hour (NaN guard with the Dutch alert), record
-  // the loaded selection (so the live-hour poll can key off it), then perform
-  // the shared load.
+  // Load (#load): validate the day/hour (NaN guard with an alert), record the
+  // loaded selection (so the live-hour poll can key off it), then perform the
+  // shared load.
   const handleLoad = useCallback(async () => {
     const parts = parseDateParts(date, hour);
     if (!selectedFolder || !parts) {
-      alert("Wel ff een dag en uur selecteren hè!");
+      alert("Please select a day and an hour first.");
       return;
     }
     const sel: LoadedSelection = {
@@ -313,7 +345,7 @@ export default function App() {
   const loadedRef = useRef<LoadedSelection | null>(loaded);
   loadedRef.current = loaded;
 
-  // Manual "Ververs" fallback: reload the currently loaded recording right away
+  // Manual "Refresh" fallback: reload the currently loaded recording right away
   // with a fresh cache-busting param. No-op before anything is loaded.
   const handleRefresh = useCallback(() => {
     const sel = loadedRef.current;
@@ -363,13 +395,23 @@ export default function App() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `Leuk fragmentje.${selectedCodec}`;
+      // SAVED filename only (the export REQUEST above is unchanged):
+      // <streamname>_<start>_<end>.<ext> with absolute wall-clock stamps built
+      // from the loaded recording's hour base + the region offsets. The folder
+      // is already a safe [a-z0-9_-] slug, so it is the <streamname> base.
+      a.download = fragmentFilename(
+        selectedFolder,
+        { year: parts.year, month: parts.month, day: parts.day, hour: parts.hour },
+        round1(region.start),
+        round1(region.end),
+        selectedCodec,
+      );
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      console.error("Download selectie mislukt:", err);
+      console.error("Selection download failed:", err);
     } finally {
       setDownloadWaiting(false);
     }
@@ -380,19 +422,44 @@ export default function App() {
   return (
     <Panel>
       <Stack gap="md">
-        {/* Waveform + time readout. */}
+        {/* Waveform + time readout. While a load is in flight a LoadingOverlay
+            covers the waveform zone and the time readout shows a placeholder,
+            so it is clear the player is working; both clear on 'ready'. On an
+            error the overlay clears and an inline error message shows. */}
         <Stack gap="xs">
-          <div id="waveform" ref={ws.containerRef}></div>
-          <Group justify="center" gap="xs">
-            <Text id="time-total" size="sm" c="dimmed" ff="monospace">
-              {formatTime(ws.currentTime)} / {formatTime(ws.duration)}
+          <Box pos="relative">
+            <LoadingOverlay
+              visible={ws.isLoading}
+              data-testid="waveform-loading"
+              zIndex={1}
+              overlayProps={{ blur: 1 }}
+            />
+            <div id="waveform" ref={ws.containerRef}></div>
+          </Box>
+          {ws.loadError && (
+            <Text id="waveform-error" size="sm" c="red" ta="center">
+              Failed to load the recording. Please try again.
             </Text>
+          )}
+          <Group justify="center" gap="xs">
+            {ws.isLoading ? (
+              <Skeleton
+                data-testid="time-loading"
+                height={16}
+                width={90}
+                radius="sm"
+              />
+            ) : (
+              <Text id="time-total" size="sm" c="dimmed" ff="monospace">
+                {formatTime(ws.currentTime)} / {formatTime(ws.duration)}
+              </Text>
+            )}
             <Text size="xs" c="dimmed">
               <IconZoomScan
                 size={14}
                 style={{ verticalAlign: "-2px", marginRight: 4 }}
               />
-              Scroll over de golfvorm om te zoomen
+              Scroll over the waveform to zoom
             </Text>
           </Group>
         </Stack>
@@ -413,7 +480,7 @@ export default function App() {
           ))}
           <ActionIcon
             id="playPauseButton"
-            aria-label={ws.isPlaying ? "Pauzeren" : "Afspelen"}
+            aria-label={ws.isPlaying ? "Pause" : "Play"}
             variant="filled"
             size="lg"
             radius="xl"
@@ -453,8 +520,8 @@ export default function App() {
           />
           <DatePickerInput
             id="dateSelector"
-            label="Datum"
-            placeholder="Kies een dag"
+            label="Date"
+            placeholder="Pick a day"
             firstDayOfWeek={1}
             value={date === "" ? null : date}
             onChange={(value) => setDate(value ?? "")}
@@ -465,16 +532,16 @@ export default function App() {
           />
           <NativeSelect
             id="hourSelector"
-            label="Uur"
+            label="Hour"
             value={hour}
             onChange={(e) => setHour(e.currentTarget.value)}
             data={[
-              { value: "", label: "Uur" },
+              { value: "", label: "Hour" },
               ...availableHours.map((h) => ({ value: h, label: `${h}:00` })),
             ]}
           />
           <Button id="load" onClick={handleLoad}>
-            Inladen!
+            Load
           </Button>
           <Button
             id="refresh"
@@ -483,7 +550,7 @@ export default function App() {
             disabled={loaded === null}
             onClick={handleRefresh}
           >
-            Ververs
+            Refresh
           </Button>
         </Group>
 
@@ -497,7 +564,7 @@ export default function App() {
             href={downloadHref}
             download={downloadName}
           >
-            Download uur
+            Download hour
           </Button>
           <Button
             id="createStartButton"
@@ -505,7 +572,7 @@ export default function App() {
             size="xs"
             onClick={() => ws.selectionStart()}
           >
-            Selectie start
+            Selection start
           </Button>
           <Button
             id="createEndButton"
@@ -513,7 +580,7 @@ export default function App() {
             size="xs"
             onClick={() => ws.selectionEnd()}
           >
-            Selectie einde
+            Selection end
           </Button>
           <Button
             id="deleteRegionButton"
@@ -521,7 +588,7 @@ export default function App() {
             size="xs"
             onClick={() => ws.deleteRegion()}
           >
-            Selectie wissen
+            Clear selection
           </Button>
           <Button
             id="playRegionButton"
@@ -530,7 +597,7 @@ export default function App() {
             disabled={!selectionEnabled}
             onClick={() => ws.playRegion()}
           >
-            Selectie afspelen
+            Play selection
           </Button>
           <Button
             id="downloadRegionButton"
@@ -540,7 +607,7 @@ export default function App() {
             disabled={!selectionEnabled}
             onClick={handleDownloadSelection}
           >
-            Fragment downloaden
+            Download fragment
           </Button>
         </Group>
 
@@ -551,7 +618,7 @@ export default function App() {
           ta="center"
           style={{ display: downloadWaiting ? "block" : "none" }}
         >
-          Download aan het voorbereiden, even geduld!
+          Preparing download, please wait…
         </Text>
       </Stack>
     </Panel>
