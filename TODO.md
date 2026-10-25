@@ -41,8 +41,16 @@ share the styling layer, NOT parallel):
       tokens (near-black body, lighter panels, subtle 1px borders, one blue accent,
       system sans, rounded corners, generous spacing). No screen restyled. Build +
       64 tests still green in `node:26-bookworm`.
-- [ ] Phase 2 — layout shell: global header, the admin tab navigation (already
-      functional from item 27) restyled, page width/container, responsive behaviour.
+- [x] Phase 2 — layout shell: DONE and merged to `origin/main` (branch
+      `ui-layout-shell`). Shell-only pass: new shared `AppLayout` (dark AI-Studio header bar on
+      `dark-6` with a 1px `dark-4` bottom border + centered max-width `Container`),
+      wrapped around BOTH routes in `src/main.tsx` (App.tsx kept Mantine-free so its
+      direct-render test stays green). Admin tab nav converted from the hand-rolled
+      button tablist to Mantine `<Tabs keepMounted={false}>` (same 4 tabs/grouping,
+      login stays outside the tabs). Only Phase-1 theme tokens used, no new colours,
+      no panel/player-control restyle, no new dependency. Added a `window.matchMedia`
+      stub to the vitest setup and moved `SettingsPage.test.tsx` onto
+      `renderWithMantine`. Build + 64 tests green in `node:26-bookworm`.
 - [ ] Phase 3 — shared base components: buttons, inputs, selects, tables, cards/
       panels, status badges (stream-health states), modals (the delete confirm),
       toast/feedback — built once on Mantine and reused everywhere.
