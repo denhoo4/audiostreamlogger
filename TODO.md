@@ -16,10 +16,6 @@ Last updated: 2026-10-23.
 > Branch `admin-content-reworks` (not yet merged): Phase-5.5 admin content reworks
 > (merged Recordings & health table, Jobs tab log-retention + latest-per-type job
 > view + reconcile controls, header brand from app_title). See the Phase-5.5 entry.
-> Branch `player-fixes` (not yet merged): Phase-5.7 player & admin UI fixes
-> (English-only UI, fragment download filename, keep date/hour on stream change,
-> header color-scheme toggle removed, waveform loading state, play-selection stops
-> at the region end). See the Phase-5.7 entry below.
 
 ## Current state
 
@@ -249,9 +245,9 @@ share the styling layer, NOT parallel):
         the AppLayout, on BOTH the main player page and the settings pages (currently
         the header shows a hardcoded "Dé radiologger"). Wire the header to the
         `app_title` from public config so it updates everywhere when the title changes.
-- [x] Phase 5.7 — player & admin UI fixes (user, 2026-10-23): DONE on branch
-      `player-fixes` (NOT yet merged; frontend-only, no api.ts/endpoint/SSE/schema/
-      docker/nginx change, no new dependency). Six fixes:
+- [x] Phase 5.7 — player & admin UI fixes (user, 2026-10-23): DONE and MERGED to
+      `main` (frontend-only, no api.ts/endpoint/SSE/schema/docker/nginx change, no new
+      dependency). Six fixes:
       1. Translated every remaining Dutch UI string in the frontend to English
          (player chrome in `App.tsx` — labels, button text, the play/pause
          aria-label, DatePicker label/placeholder, hour label, the select-a-day
@@ -282,11 +278,26 @@ share the styling layer, NOT parallel):
          and auto-pauses exactly at the region end via a `timeupdate` guard (cleared on
          any manual transport so normal playback is never truncated). Normal play/pause
          unchanged; the button stays disabled with no selection.
-      Build + 122 vitest green in `node:26-bookworm` (112 baseline − 2 removed
-      ColorSchemeToggle + 12 new: 4 filename, 3 stream-change, 2 loading, 1
-      play-selection, 1 AppLayout no-toggle; `npm ci` reproduces the lockfile, no new
-      dependency). Verification evidence appended to
-      `.agents/tasks/player-fixes-2026-10-23/plan.md`.
+      Build + 122 vitest green (`tsc -b` clean; review APPROVED, non-blocking
+      stale-comment finding fixed; no new dependency). Verification evidence in
+      `.agents/tasks/player-fixes-2026-10-23/`.
+- [ ] Player stream list: country GROUP HEADERS (user wish, 2026-10-23, for LATER —
+      do not build yet). On the public `/` player's stream selector, show
+      non-selectable COUNTRY headers above that country's stations, grouped in the
+      configured `country_order` (the same order the admin uses), e.g.:
+        Netherlands
+          Radio 1
+          Radio 2
+        Belgium
+          Radio 4
+      The country label is a heading only (NOT selectable). The player stream picker is
+      currently a Mantine `NativeSelect`; a native `<select>` can do this with
+      `<optgroup label="Netherlands">` (optgroup labels are inherently non-selectable),
+      or switch to a grouped list/combobox — implementer's choice. The stations must be
+      INDENTED one step to the right under their country header so the country→station
+      hierarchy reads at a glance (native `<optgroup>` indents its options automatically;
+      a custom grouped list must apply the indent explicitly). Honors the existing
+      `country_order` from public config (the player already orders by it). Frontend-only.
 - [ ] Phase 6 — polish: responsive/mobile, accessibility (focus states, contrast,
       keyboard), consistent loading/empty/error states, subtle motion.
 Frontend-only (`src/frontend/`). No backend/API/schema change. WaveSurfer behaviour
