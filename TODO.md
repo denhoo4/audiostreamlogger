@@ -146,11 +146,25 @@ share the styling layer, NOT parallel):
       0-fail, in `node:26-bookworm`.
 - [ ] Phase 4 — the player (public `/` screen): stream selection, the WaveSurfer
       waveform, playback controls, download/fragment-cut. Most visible screen.
-- [~] Phase 5 — admin per tab (Streams → Recordings & health → Jobs → System), one
+      USER REQUESTS for the Phase-4 design round (2026-10-23):
+      - Replace the plain date/hour input with a real CALENDAR (Mantine
+        `DatePickerInput`/`DatePicker`, likely needs `@mantine/dates`) where MONDAY is
+        the first day of the week (`firstDayOfWeek={1}`). For the SELECTED stream, only
+        days that actually HAVE recordings are selectable/active — disable/grey out
+        days with none. Data is in `/api/settings2` (browse tree stream → year → month
+        → day → hours[]); extend the existing `player-hours` "existing hours" logic to
+        whole DAYS. Keep the hour selector constrained to existing hours for the chosen
+        day. Consider the same calendar for the gaps date-range in RecordingsAnalysis.
+      - Redesign the player's CONTROL LAYOUT — it is too basic now. Group/arrange the
+        controls (play/pause, stream/day/hour selectors, download, fragment-cut, zoom)
+        into a cleaner, more considered layout. The current layout MAY be changed
+        freely (user approved), as long as all controls/behaviour remain (WaveSurfer
+        incl. scroll-to-zoom, selection export, download). A design decision, not just
+        a reskin of existing positions.
+- [x] Phase 5 — admin per tab (Streams → Recordings & health → Jobs → System), one
       step per tab, reusing the Phase-3 components. Streams done in Phase 3.6/3.7.
-      The remaining three tabs (Recordings & health, Jobs, System) are COMPLETE on
-      branch `ui-admin-tabs-restyle` (convergence review APPROVED; NOT yet merged —
-      left ready for the user to review/merge): STYLING/RESKIN ONLY, no
+      The remaining three tabs (Recordings & health, Jobs, System) are DONE and merged
+      to `origin/main` (branch `ui-admin-tabs-restyle`): STYLING/RESKIN ONLY, no
       api.ts/endpoint/SSE/schema/docker/nginx change. Final cross-feat verify green:
       `tsc -b` + `vite build` + 103/103 vitest in `node:26-bookworm`.
       - Recordings & health (`RecordingsAnalysis`, `StreamHealth`, `StorageEstimate`):
@@ -171,6 +185,32 @@ share the styling layer, NOT parallel):
       Every `<h2>` heading kept verbatim so `SettingsPage.test.tsx` tab-switching
       still resolves each panel by heading role+name. No new dependency (feedback
       stays inline via `Alert`/status regions, no toasts).
+- [ ] Phase 5.5 — admin content reworks (user, 2026-10-23), not just styling:
+      - Recordings & health: MERGE the three tables (analysis summary + stream-health
+        + storage-estimate) into ONE per-stream table with columns: Stream, Total
+        hours, Storage (current stored bytes), Range (earliest–latest), Health (the
+        "Now" recording status, renamed from "Now" to "Health"), Bytes/hour, Projected
+        size (per-stream steady-state projection). Above the table, show two summary
+        lines separately (not in the table): "Projected total: <X> over <N>h retention"
+        and "Currently on disk: <Y>". Improve wording where clearer. REMOVE the Gaps &
+        coverage panel entirely. Combine the data client-side from the existing
+        summary / stream-health / storage-estimate endpoints (no backend change
+        expected).
+      - Jobs: add LOG RETENTION (`log_retention`, hours) as a field INSIDE the cleaner
+        block, positioned between the on/off toggle and the frequency/anchor fields
+        (reuse the existing app_config `log_retention` setter). Change the job log view
+        to show, for EVERY job type, only its MOST RECENT job — i.e. the latest
+        cleaner, the latest peakfilegenerator, AND the latest reconcile (one row per
+        type; drop the full live feed list). Also ensure RECONCILE is a first-class
+        type in the scheduler block like the other two: an enable toggle + schedule +
+        a Run-now button to trigger the reconciliation job on demand (the reconcile
+        job type + daily schedule already exist on the backend from item 18; this
+        exposes its schedule/Run-now controls in the admin UI if they are not already
+        there).
+      - System: the page-title (`app_title`) must ALSO drive the HEADER brand name in
+        the AppLayout, on BOTH the main player page and the settings pages (currently
+        the header shows a hardcoded "Dé radiologger"). Wire the header to the
+        `app_title` from public config so it updates everywhere when the title changes.
 - [ ] Phase 6 — polish: responsive/mobile, accessibility (focus states, contrast,
       keyboard), consistent loading/empty/error states, subtle motion.
 Frontend-only (`src/frontend/`). No backend/API/schema change. WaveSurfer behaviour
