@@ -416,9 +416,29 @@ function buildOpenApiDocument() {
                     z.object({
                         title: z.string(),
                         default_stream_folder: z.string(),
+                        country_order: z.array(z.string()),
                     })
                 ),
             },
+            ...serverErr,
+        },
+    });
+    registry.registerPath({
+        method: 'put',
+        path: '/api/app-config/country-order',
+        tags: ['streams'],
+        summary: 'Set the explicit admin ordering of countries (ISO alpha-2 codes)',
+        security: authed,
+        request: {
+            body: { content: json(z.object({ codes: z.array(z.string()) })) },
+        },
+        responses: {
+            200: {
+                description: 'updated country order',
+                content: json(z.object({ country_order: z.array(z.string()) })),
+            },
+            ...validationErr,
+            ...authErr,
             ...serverErr,
         },
     });

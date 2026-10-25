@@ -417,6 +417,7 @@ export async function exportSelection(body: SelectionExportBody): Promise<Blob> 
 export async function getPublicConfig(): Promise<{
   title: string;
   default_stream_folder: string;
+  country_order: string[];
 }> {
   const res = await fetch(
     `${window.location.origin}/api/app-config/public`,
@@ -424,9 +425,16 @@ export async function getPublicConfig(): Promise<{
   if (!res.ok) {
     throw await toApiError(res);
   }
-  return (await res.json()) as {
+  const body = (await res.json()) as {
     title: string;
     default_stream_folder: string;
+    country_order?: string[];
+  };
+  return {
+    title: body.title,
+    default_stream_folder: body.default_stream_folder,
+    // Default to [] for resilience if an older server omits the field.
+    country_order: Array.isArray(body.country_order) ? body.country_order : [],
   };
 }
 
@@ -452,6 +460,30 @@ export async function setDefaultStream(
     throw await toApiError(res);
   }
   return (await res.json()) as { default_stream_folder: string };
+}
+
+/**
+ * PUT /api/app-config/country-order {codes} -> set the explicit admin ordering
+ * of countries. `codes` is an array of ISO alpha-2 code strings; the backend
+ * uppercases + stores them and returns the normalised country_order. Throws
+ * ApiError on the 400 {field:'country_order'} responses (non-array/bad code).
+ */
+export async function setCountryOrder(
+  codes: string[],
+): Promise<{ country_order: string[] }> {
+  const res = await fetch(
+    `${window.location.origin}/api/app-config/country-order`,
+    {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ codes }),
+    },
+  );
+  if (!res.ok) {
+    throw await toApiError(res);
+  }
+  return (await res.json()) as { country_order: string[] };
 }
 
 /** PUT /api/app-config/title {title} -> update the editable page title. */

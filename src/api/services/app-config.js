@@ -108,6 +108,33 @@ function validateConfig(key, value) {
         return;
     }
 
+    // country_order is the explicit admin-chosen ordering of countries, stored as
+    // a JSON string array of ISO alpha-2 codes. The route normalises the codes to
+    // uppercase and JSON.stringifies them before calling setConfig, so here we only
+    // validate that the stored string parses to an array whose every element is a
+    // two-letter code. parseCountryOrder re-validates defensively on read.
+    if (key === 'country_order') {
+        let parsed;
+        try {
+            parsed = JSON.parse(value);
+        } catch {
+            throw new ConfigValidationError(
+                key,
+                'country_order must be a JSON array of ISO alpha-2 codes'
+            );
+        }
+        if (
+            !Array.isArray(parsed) ||
+            !parsed.every((c) => typeof c === 'string' && /^[A-Za-z]{2}$/.test(c))
+        ) {
+            throw new ConfigValidationError(
+                key,
+                'country_order must be a JSON array of ISO alpha-2 codes'
+            );
+        }
+        return;
+    }
+
     // favicon_path / favicon_mime are written only by the api (after a validated
     // upload), so a non-empty string is the only constraint here.
     if (key === 'favicon_path' || key === 'favicon_mime') {
@@ -135,9 +162,35 @@ function validateConfig(key, value) {
     throw new ConfigValidationError(key, `unknown config key: ${key}`);
 }
 
+/**
+ * Parse the stored country_order value into a string[] of ISO alpha-2 codes.
+ * Defensive (like parseOutputRetentionCount): returns [] when the key is absent
+ * or the stored string is malformed/not an array of two-letter codes, so a
+ * hand-edited app_config row can never crash the public read.
+ */
+function parseCountryOrder(value) {
+    if (typeof value !== 'string') {
+        return [];
+    }
+    let parsed;
+    try {
+        parsed = JSON.parse(value);
+    } catch {
+        return [];
+    }
+    if (
+        !Array.isArray(parsed) ||
+        !parsed.every((c) => typeof c === 'string' && /^[A-Za-z]{2}$/.test(c))
+    ) {
+        return [];
+    }
+    return parsed;
+}
+
 module.exports = {
     getConfig,
     setConfig,
     parseOutputRetentionCount,
+    parseCountryOrder,
     ConfigValidationError,
 };

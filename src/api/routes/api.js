@@ -19,6 +19,7 @@ const { buildSettings2 } = require('../services/browse');
 const {
     getConfig,
     setConfig,
+    parseCountryOrder,
     ConfigValidationError,
 } = require('../services/app-config');
 const { getJob } = require('../services/jobs');
@@ -80,7 +81,8 @@ router.get('/app-config/public', (req, res) => {
     try {
         const title = getConfig('app_title') ?? DEFAULT_APP_TITLE;
         const default_stream_folder = getConfig('default_stream_folder') ?? '';
-        res.json({ title, default_stream_folder });
+        const country_order = parseCountryOrder(getConfig('country_order'));
+        res.json({ title, default_stream_folder, country_order });
     } catch (err) {
         console.error('Error reading public app-config:', err);
         res.status(500).json({ error: `Internal Server Error: ${err.message}` });
@@ -112,6 +114,35 @@ router.put('/app-config/default-stream', requireAuth, (req, res) => {
             return res.status(400).json({ error: err.error, field: 'folder' });
         }
         console.error('Error updating default_stream_folder:', err);
+        return res.status(500).json({ error: `Internal Server Error: ${err.message}` });
+    }
+});
+
+// PUT /api/app-config/country-order (requireAuth) — set the explicit admin
+// ordering of countries. Body `{ codes }` must be an array of two-letter ISO
+// alpha-2 code strings; the codes are uppercased and stored as a JSON array.
+router.put('/app-config/country-order', requireAuth, (req, res) => {
+    const codes = (req.body || {}).codes;
+
+    const valid =
+        Array.isArray(codes) && codes.every((c) => typeof c === 'string');
+    if (!valid) {
+        return res
+            .status(400)
+            .json({ error: 'codes must be an array of strings', field: 'country_order' });
+    }
+
+    try {
+        setConfig(
+            'country_order',
+            JSON.stringify(codes.map((c) => c.toUpperCase()))
+        );
+        return res.json({ country_order: parseCountryOrder(getConfig('country_order')) });
+    } catch (err) {
+        if (err instanceof ConfigValidationError) {
+            return res.status(400).json({ error: err.error, field: 'country_order' });
+        }
+        console.error('Error updating country_order:', err);
         return res.status(500).json({ error: `Internal Server Error: ${err.message}` });
     }
 });

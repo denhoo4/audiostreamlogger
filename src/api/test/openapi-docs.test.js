@@ -30,6 +30,7 @@ const REQUIRED_PATHS = [
     '/api/streams/{id}',
     '/api/streams/reorder',
     '/api/app-config/default-stream',
+    '/api/app-config/country-order',
     '/api/jobs',
     '/api/jobs/schedules/{type}',
     '/api/jobs/config/log_retention',
@@ -62,6 +63,10 @@ test('buildOpenApiDocument() returns a valid-shaped OpenAPI 3 document', () => {
     assert.ok(
         doc.paths['/api/app-config/default-stream'].put,
         'missing PUT /api/app-config/default-stream'
+    );
+    assert.ok(
+        doc.paths['/api/app-config/country-order'].put,
+        'missing PUT /api/app-config/country-order'
     );
     // The session-cookie security scheme is declared and used by authed routes.
     assert.ok(
