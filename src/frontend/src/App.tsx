@@ -9,7 +9,9 @@ import {
   Skeleton,
   Stack,
   Text,
+  Transition,
 } from "@mantine/core";
+import { useReducedMotion } from "@mantine/hooks";
 import { DatePickerInput } from "@mantine/dates";
 import {
   IconDownload,
@@ -419,9 +421,21 @@ export default function App() {
 
   const orderedStreams = sortStreamsByCountryOrder(streams, countryOrder);
 
+  // Gentle first-mount fade for the player surface; honour the OS
+  // reduced-motion preference by skipping the JS-driven fade entirely (the
+  // panel then renders immediately, fully opaque).
+  const reduceMotion = useReducedMotion();
+
   return (
-    <Panel>
-      <Stack gap="md">
+    <Transition
+      mounted
+      transition="fade"
+      duration={reduceMotion ? 0 : 200}
+      timingFunction="ease"
+    >
+      {(styles) => (
+        <Panel style={styles}>
+          <Stack gap="md">
         {/* Waveform + time readout. While a load is in flight a LoadingOverlay
             covers the waveform zone and the time readout shows a placeholder,
             so it is clear the player is working; both clear on 'ready'. On an
@@ -620,7 +634,9 @@ export default function App() {
         >
           Preparing download, please wait…
         </Text>
-      </Stack>
-    </Panel>
+          </Stack>
+        </Panel>
+      )}
+    </Transition>
   );
 }

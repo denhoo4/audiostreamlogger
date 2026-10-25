@@ -44,7 +44,7 @@ import {
 import { COUNTRIES_BY_NAME, countryName } from "./countries";
 import { orderCountries } from "./country-order";
 import { deriveFolder } from "./derive-folder";
-import { Panel } from "../ui";
+import { AsyncState, Panel } from "../ui";
 import classes from "./StreamTable.module.css";
 
 /**
@@ -640,11 +640,11 @@ export default function StreamTable() {
       )}
 
       <Panel mt="md">
-        {loading ? (
-          <Text>Loading…</Text>
-        ) : streams.length === 0 && editing?.id !== "new" ? (
-          <Text>No streams yet.</Text>
-        ) : (
+        <AsyncState
+          loading={loading}
+          empty={streams.length === 0 && editing?.id !== "new"}
+          emptyMessage="No streams yet."
+        >
           <Table.ScrollContainer minWidth={720} type="native">
             <Table verticalSpacing="xs" horizontalSpacing="sm" layout="fixed">
               <Table.Thead>
@@ -853,7 +853,7 @@ export default function StreamTable() {
               })()}
             </Table>
           </Table.ScrollContainer>
-        )}
+        </AsyncState>
       </Panel>
 
       <Modal

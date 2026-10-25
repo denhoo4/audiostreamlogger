@@ -9,7 +9,7 @@ import {
   type MantineColor,
 } from "@mantine/core";
 import { openJobStream, type JobRecord } from "../api";
-import { Panel } from "../ui";
+import { AsyncState, Panel } from "../ui";
 
 /**
  * Map a job status to a badge colour + variant. A job that was skipped because
@@ -97,9 +97,10 @@ export default function JobViewer() {
     <section className="settings-section">
       <Title order={2}>Recent jobs</Title>
       <Panel mt="md">
-        {displayJobs.length === 0 ? (
-          <Text c="dimmed">No jobs yet.</Text>
-        ) : (
+        <AsyncState
+          empty={displayJobs.length === 0}
+          emptyMessage="No jobs yet."
+        >
           <Stack gap="sm">
             {displayJobs.map((job) => {
               const { color, variant } = badgeProps(job);
@@ -130,7 +131,7 @@ export default function JobViewer() {
               );
             })}
           </Stack>
-        )}
+        </AsyncState>
       </Panel>
     </section>
   );

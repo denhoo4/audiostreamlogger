@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { Tabs } from "@mantine/core";
+import { Tabs, Transition } from "@mantine/core";
+import { useReducedMotion } from "@mantine/hooks";
 import { getAuthMe, postLogout } from "../api";
 import LoginForm from "./LoginForm";
 import StreamTable from "./StreamTable";
@@ -43,6 +44,11 @@ export default function SettingsPage() {
   // Set the page title from the configured app_title, same source as the player
   // route. Called unconditionally before the early returns to respect hook rules.
   useAppTitle();
+
+  // Gentle mount fade for the authenticated tab content; skipped under the OS
+  // reduced-motion preference. Called before the early returns to respect the
+  // rules of hooks.
+  const reduceMotion = useReducedMotion();
 
   const checkAuth = useCallback(async () => {
     setChecking(true);
@@ -101,6 +107,14 @@ export default function SettingsPage() {
           </button>
         </div>
       </div>
+      <Transition
+        mounted
+        transition="fade"
+        duration={reduceMotion ? 0 : 200}
+        timingFunction="ease"
+      >
+        {(styles) => (
+          <div style={styles}>
       <Tabs
         value={activeTab}
         onChange={(value) => setActiveTab(value as TabId)}
@@ -134,6 +148,9 @@ export default function SettingsPage() {
           <ChangePasswordForm />
         </Tabs.Panel>
       </Tabs>
+          </div>
+        )}
+      </Transition>
     </main>
   );
 }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Alert, List, Text, Title } from "@mantine/core";
+import { Box, List, Title } from "@mantine/core";
 import { ApiError, getWorkerStatus, type JobRecord } from "../api";
-import { Panel, StatusBadge } from "../ui";
+import { AsyncState, Panel, StatusBadge } from "../ui";
 
 // Poll cadence; the worker writes its heartbeat on a 5s timer, so matching that
 // keeps the "last seen Xs ago" readout fresh without hammering the endpoint.
@@ -77,19 +77,10 @@ export default function WorkerStatus() {
     <section className="settings-section">
       <Title order={2}>Worker status</Title>
 
-      {error && (
-        <Alert color="red" role="alert" mt="md">
-          {error}
-        </Alert>
-      )}
-
-      {!status && !error ? (
-        <Text c="dimmed" mt="md">
-          Loading…
-        </Text>
-      ) : (
-        <Panel mt="md">
-          <List spacing="xs">
+      <Box mt="md">
+        <AsyncState loading={!status && !error} error={error}>
+          <Panel>
+            <List spacing="xs">
             <List.Item>
               Worker:{" "}
               {age === null ? (
@@ -106,9 +97,10 @@ export default function WorkerStatus() {
             <List.Item>
               Current job: {job ? `${job.type} (${job.status})` : "idle"}
             </List.Item>
-          </List>
-        </Panel>
-      )}
+            </List>
+          </Panel>
+        </AsyncState>
+      </Box>
     </section>
   );
 }

@@ -1,13 +1,5 @@
 import { useEffect, useState } from "react";
-import {
-  Alert,
-  Group,
-  List,
-  Loader,
-  Table,
-  Text,
-  Title,
-} from "@mantine/core";
+import { Box, Group, List, Table, Text, Title } from "@mantine/core";
 import { IconCheck, IconX } from "@tabler/icons-react";
 import {
   ApiError,
@@ -18,7 +10,7 @@ import {
   type StorageEstimatePerStream,
   type StreamHealthEntry,
 } from "../api";
-import { Panel, StatusBadge } from "../ui";
+import { AsyncState, Panel, StatusBadge } from "../ui";
 
 /** Human-readable byte size (1024-based). Copied from StorageEstimate. */
 function formatBytes(bytes: number): string {
@@ -157,20 +149,11 @@ export default function RecordingsHealth() {
     <section className="settings-section">
       <Title order={2}>Recordings &amp; health</Title>
 
-      {error && (
-        <Alert color="red" role="alert" mt="md">
-          {error}
-        </Alert>
-      )}
-
-      {!rows && !error ? (
-        <Group gap="xs" mt="md">
-          <Loader size="sm" />
-          <Text c="dimmed">Loading…</Text>
-        </Group>
-      ) : rows && totals ? (
-        <>
-          <List mt="md">
+      <Box mt="md">
+        <AsyncState loading={!rows && !error} error={error}>
+          {rows && totals ? (
+            <>
+              <List>
             <List.Item>
               Projected total:{" "}
               <Text span fw={700}>
@@ -186,11 +169,12 @@ export default function RecordingsHealth() {
             </List.Item>
           </List>
 
-          <Panel mt="md">
-            {rows.length === 0 ? (
-              <Text c="dimmed">No recordings yet.</Text>
-            ) : (
-              <Table.ScrollContainer minWidth={720} type="native">
+              <Panel mt="md">
+                <AsyncState
+                  empty={rows.length === 0}
+                  emptyMessage="No recordings yet."
+                >
+                  <Table.ScrollContainer minWidth={720} type="native">
                 <Table verticalSpacing="xs" horizontalSpacing="sm">
                   <Table.Thead>
                     <Table.Tr>
@@ -270,11 +254,13 @@ export default function RecordingsHealth() {
                     ))}
                   </Table.Tbody>
                 </Table>
-              </Table.ScrollContainer>
-            )}
-          </Panel>
-        </>
-      ) : null}
+                  </Table.ScrollContainer>
+                </AsyncState>
+              </Panel>
+            </>
+          ) : null}
+        </AsyncState>
+      </Box>
     </section>
   );
 }

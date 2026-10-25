@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Alert,
+  Box,
   Button,
   Group,
   NativeSelect,
@@ -19,7 +20,7 @@ import {
   updateSchedule,
   type ScheduleRecord,
 } from "../api";
-import { Panel } from "../ui";
+import { AsyncState, Panel } from "../ui";
 
 /** Weekday labels for the day-of-week select (0=Sunday..6=Saturday). */
 const WEEKDAYS = [
@@ -163,22 +164,14 @@ export default function SchedulerConfig() {
     <section className="settings-section">
       <Title order={2}>Scheduled jobs</Title>
 
-      {listError && (
-        <Alert color="red" role="alert" mt="md">
-          {listError}
-        </Alert>
-      )}
-
-      {loading ? (
-        <Text c="dimmed" mt="md">
-          Loading…
-        </Text>
-      ) : schedules.length === 0 ? (
-        <Text c="dimmed" mt="md">
-          No scheduled jobs.
-        </Text>
-      ) : (
-        <Stack gap="md" mt="md">
+      <Box mt="md">
+        <AsyncState
+          loading={loading}
+          error={listError}
+          empty={schedules.length === 0}
+          emptyMessage="No scheduled jobs."
+        >
+          <Stack gap="md">
           {schedules.map((s) => (
             <Panel key={s.type}>
               <Stack gap="sm">
@@ -293,8 +286,9 @@ export default function SchedulerConfig() {
               </Stack>
             </Panel>
           ))}
-        </Stack>
-      )}
+          </Stack>
+        </AsyncState>
+      </Box>
     </section>
   );
 }
