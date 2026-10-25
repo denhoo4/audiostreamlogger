@@ -147,23 +147,33 @@ share the styling layer, NOT parallel):
       `/settings`, player stays `lg`), and a stronger dark country-header contrast
       (`#1e2a44`; light scheme unchanged). Build + 103 vitest pass / api 260 pass, all
       0-fail, in `node:26-bookworm`.
-- [ ] Phase 4 — the player (public `/` screen): stream selection, the WaveSurfer
+- [x] Phase 4 — the player (public `/` screen): stream selection, the WaveSurfer
       waveform, playback controls, download/fragment-cut. Most visible screen.
-      USER REQUESTS for the Phase-4 design round (2026-10-23):
-      - Replace the plain date/hour input with a real CALENDAR (Mantine
-        `DatePickerInput`/`DatePicker`, likely needs `@mantine/dates`) where MONDAY is
-        the first day of the week (`firstDayOfWeek={1}`). For the SELECTED stream, only
-        days that actually HAVE recordings are selectable/active — disable/grey out
-        days with none. Data is in `/api/settings2` (browse tree stream → year → month
-        → day → hours[]); extend the existing `player-hours` "existing hours" logic to
-        whole DAYS. Keep the hour selector constrained to existing hours for the chosen
-        day. Consider the same calendar for the gaps date-range in RecordingsAnalysis.
-      - Redesign the player's CONTROL LAYOUT — it is too basic now. Group/arrange the
-        controls (play/pause, stream/day/hour selectors, download, fragment-cut, zoom)
-        into a cleaner, more considered layout. The current layout MAY be changed
-        freely (user approved), as long as all controls/behaviour remain (WaveSurfer
-        incl. scroll-to-zoom, selection export, download). A design decision, not just
-        a reskin of existing positions.
+      DONE on branch `ui-player2` (restyle + rework, behaviour preserved):
+      - Replaced the plain date input with a real CALENDAR: Mantine
+        `DatePickerInput` from the new `@mantine/dates` dep, `firstDayOfWeek={1}`
+        (Monday first). For the SELECTED stream, ONLY days that actually have
+        recordings are selectable — all other days are disabled via `excludeDate`.
+        The enabled-day set comes from a new pure helper `existingDaysFor(tree,
+        displayName)` in `player-hours.ts`, which uses the SAME explicit `Settings2`
+        cast as `existingHoursFor` (so `tsc -b` type-checks against the
+        logs-flattened runtime tree) and guards on `hours.length > 0`. The hour
+        selector stays constrained to `existingHoursFor` for the chosen day.
+        DETERMINISTIC rule: changing the stream clears the selected date + hour, so
+        the UI never shows a highlighted-but-disabled day or an out-of-range hour.
+      - Redesigned the CONTROL LAYOUT into the Mantine AI-Studio house style
+        (`Panel`/`Stack`/`Group`, `@tabler` icons): a transport zone (skip +
+        icon-only play/pause with an `aria-label` "Afspelen"/"Pauzeren"), a
+        selection zone (stream + calendar + hour), and a source/actions zone
+        (download hour, selection tools, fragment download, a scroll-to-zoom hint).
+        Stream + hour use `NativeSelect` (the house pattern; also keeps the native
+        `<select>` test-interaction model). All controls/behaviour preserved —
+        WaveSurfer incl. scroll-to-zoom, selection export, hour download, live-hour
+        auto-refresh. New deps: `@mantine/dates@8.3.18` + `dayjs@1.11.13` (exact).
+      - `App.test.tsx` migrated to the new DOM (date set through the calendar
+        popover, play/pause by aria-label, mandatory non-empty settings2 stubs) and
+        a new `existingDaysFor` unit suite added. Verify green in `node:26-bookworm`:
+        `tsc -b` + `vite build` + 112/112 vitest, `npm ci` reproduces the lockfile.
 - [x] Phase 5 — admin per tab (Streams → Recordings & health → Jobs → System), one
       step per tab, reusing the Phase-3 components. Streams done in Phase 3.6/3.7.
       The remaining three tabs (Recordings & health, Jobs, System) are DONE and merged

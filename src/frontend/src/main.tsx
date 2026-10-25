@@ -9,6 +9,8 @@ import "./App.css";
 // Mantine core styles. Imported AFTER App.css so the app's legacy CSS can still
 // override where it needs to during the phased migration.
 import "@mantine/core/styles.css";
+// Calendar/date-picker styles for the player's DatePickerInput.
+import "@mantine/dates/styles.css";
 import { theme } from "./theme";
 
 // Lightweight view switch without a router dependency (design §2.6): the

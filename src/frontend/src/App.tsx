@@ -1,5 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ActionIcon,
+  Button,
+  Group,
+  NativeSelect,
+  Stack,
+  Text,
+} from "@mantine/core";
+import { DatePickerInput } from "@mantine/dates";
+import {
+  IconDownload,
+  IconPlayerPause,
+  IconPlayerPlay,
+  IconRefresh,
+  IconScissors,
+  IconZoomScan,
+} from "@tabler/icons-react";
+import {
   audioJsonUrl,
   audioUrl,
   currentAmsterdamSlot,
@@ -12,8 +29,13 @@ import {
   type Settings2,
   type Stream,
 } from "./api";
-import { displayNameForFolder, existingHoursFor } from "./player-hours";
+import {
+  displayNameForFolder,
+  existingDaysFor,
+  existingHoursFor,
+} from "./player-hours";
 import { sortStreamsByCountryOrder } from "./settings/country-order";
+import { Panel } from "./ui";
 import { useAppTitle } from "./useAppTitle";
 import { formatTime, useWavesurfer } from "./useWavesurfer";
 
@@ -92,6 +114,9 @@ export default function App() {
   const [countryOrder, setCountryOrder] = useState<string[]>([]);
   const [tree, setTree] = useState<Settings2>({});
   const [selectedFolder, setSelectedFolder] = useState("");
+  // The calendar date as a "YYYY-MM-DD" string (Mantine 8 DatePickerInput uses
+  // the string value format, which maps 1:1 onto the parts parser below). "" is
+  // "no date chosen" and renders the picker's placeholder.
   const [date, setDate] = useState("");
   const [hour, setHour] = useState("");
   const [downloadWaiting, setDownloadWaiting] = useState(false);
@@ -116,16 +141,29 @@ export default function App() {
   const selectedCodec: Codec =
     streams.find((s) => s.folder === selectedFolder)?.codec ?? "mp3";
 
+  // Display name (settings2 tree key) for the selected stream, or null. Shared
+  // by the calendar's day-enablement and the hour selector's existing-hours
+  // constraint.
+  const selectedDisplayName = selectedFolder
+    ? displayNameForFolder(streams, selectedFolder)
+    : null;
+
+  // The set of "YYYY-MM-DD" days that actually have a recording for the selected
+  // stream, so the calendar can enable ONLY those days (every other day is
+  // disabled). Empty for a stream with no recordings -> no selectable days.
+  const existingDays =
+    selectedDisplayName === null
+      ? new Set<string>()
+      : existingDaysFor(tree, selectedDisplayName);
+
   // Hours that actually have a recording for the selected stream + date, derived
   // from the public /api/settings2 tree. Empty until a valid stream + date are
   // chosen (or when that day has no recordings), so the selector then shows only
   // the "Uur" placeholder.
   const availableHours = (() => {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-    if (!selectedFolder || !m) return [];
-    const displayName = displayNameForFolder(streams, selectedFolder);
-    if (displayName === null) return [];
-    return existingHoursFor(tree, displayName, m[1], m[2], m[3]);
+    if (!selectedFolder || !m || selectedDisplayName === null) return [];
+    return existingHoursFor(tree, selectedDisplayName, m[1], m[2], m[3]);
   })();
   // Keep the latest date/hour available to the download handler without
   // re-creating it on every keystroke.
@@ -190,6 +228,19 @@ export default function App() {
   // Set the page title at runtime from the public branding config (shared with
   // the /settings admin route via useAppTitle).
   useAppTitle();
+
+  // DETERMINISTIC rule: whenever the selected STREAM changes, clear the date +
+  // hour. This prevents ever rendering a highlighted-but-disabled calendar day
+  // (a day that exists for the previous stream but not the new one) or an
+  // out-of-range hour value carried over from the previous stream.
+  const prevFolderRef = useRef(selectedFolder);
+  useEffect(() => {
+    if (prevFolderRef.current !== selectedFolder) {
+      prevFolderRef.current = selectedFolder;
+      setDate("");
+      setHour("");
+    }
+  }, [selectedFolder]);
 
   // Spacebar toggles play/pause (document keydown).
   useEffect(() => {
@@ -324,128 +375,185 @@ export default function App() {
     }
   }, [selectedFolder, selectedCodec, ws]);
 
+  const orderedStreams = sortStreamsByCountryOrder(streams, countryOrder);
+
   return (
-    <>
-      <div style={{ textAlign: "center" }}>
-        <span id="time-total">
-          {formatTime(ws.currentTime)} / {formatTime(ws.duration)}
-        </span>
-        <br />
-      </div>
-      <div id="waveform" ref={ws.containerRef}></div>
+    <Panel>
+      <Stack gap="md">
+        {/* Waveform + time readout. */}
+        <Stack gap="xs">
+          <div id="waveform" ref={ws.containerRef}></div>
+          <Group justify="center" gap="xs">
+            <Text id="time-total" size="sm" c="dimmed" ff="monospace">
+              {formatTime(ws.currentTime)} / {formatTime(ws.duration)}
+            </Text>
+            <Text size="xs" c="dimmed">
+              <IconZoomScan
+                size={14}
+                style={{ verticalAlign: "-2px", marginRight: 4 }}
+              />
+              Scroll over de golfvorm om te zoomen
+            </Text>
+          </Group>
+        </Stack>
 
-      <div style={{ textAlign: "center", marginTop: "10px" }}>
-        {SKIP_BUTTONS.slice(0, 3).map((b) => (
-          <button
-            key={b.label}
-            data-value={b.value}
-            className="skip-button"
-            onClick={() => ws.skip(b.value)}
-          >
-            {b.label}
-          </button>
-        ))}
-        <button id="playPauseButton" onClick={() => ws.playPause()}>
-          {ws.isPlaying ? "Pause" : "Play"}
-        </button>
-        {SKIP_BUTTONS.slice(3).map((b) => (
-          <button
-            key={b.label}
-            data-value={b.value}
-            className="skip-button"
-            onClick={() => ws.skip(b.value)}
-          >
-            {b.label}
-          </button>
-        ))}
-      </div>
-
-      <div style={{ textAlign: "center", marginTop: "5px" }}>
-        <a
-          id="downloadbutton"
-          className="button"
-          href={downloadHref}
-          download={downloadName}
-        >
-          Download uur
-        </a>
-        <button id="createStartButton" onClick={() => ws.selectionStart()}>
-          Selection Start
-        </button>
-        <button id="createEndButton" onClick={() => ws.selectionEnd()}>
-          Selection End
-        </button>
-        <button id="deleteRegionButton" onClick={() => ws.deleteRegion()}>
-          Delete Selection
-        </button>
-        <button
-          id="playRegionButton"
-          disabled={!selectionEnabled}
-          onClick={() => ws.playRegion()}
-        >
-          Play Selection
-        </button>
-        <button
-          id="downloadRegionButton"
-          disabled={!selectionEnabled}
-          onClick={handleDownloadSelection}
-        >
-          Download Selection
-        </button>
-      </div>
-
-      <br />
-      <div style={{ textAlign: "center", marginTop: "5px" }}>
-        <select
-          id="stringSelector"
-          value={selectedFolder}
-          onChange={(e) => setSelectedFolder(e.target.value)}
-        >
-          {sortStreamsByCountryOrder(streams, countryOrder).map((s) => (
-            <option key={s.folder} value={s.folder}>
-              {s.name}
-            </option>
+        {/* Transport zone: skip back, play/pause, skip forward. */}
+        <Group justify="center" gap="xs" wrap="wrap">
+          {SKIP_BUTTONS.slice(0, 3).map((b) => (
+            <Button
+              key={b.label}
+              data-value={b.value}
+              className="skip-button"
+              variant="default"
+              size="xs"
+              onClick={() => ws.skip(b.value)}
+            >
+              {b.label}
+            </Button>
           ))}
-        </select>
-        <input
-          type="date"
-          id="dateSelector"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-        />
-        <select
-          id="hourSelector"
-          value={hour}
-          onChange={(e) => setHour(e.target.value)}
-        >
-          <option value="">Uur</option>
-          {availableHours.map((h) => (
-            <option key={h} value={h}>
-              {h}:00
-            </option>
+          <ActionIcon
+            id="playPauseButton"
+            aria-label={ws.isPlaying ? "Pauzeren" : "Afspelen"}
+            variant="filled"
+            size="lg"
+            radius="xl"
+            onClick={() => ws.playPause()}
+          >
+            {ws.isPlaying ? (
+              <IconPlayerPause size={20} />
+            ) : (
+              <IconPlayerPlay size={20} />
+            )}
+          </ActionIcon>
+          {SKIP_BUTTONS.slice(3).map((b) => (
+            <Button
+              key={b.label}
+              data-value={b.value}
+              className="skip-button"
+              variant="default"
+              size="xs"
+              onClick={() => ws.skip(b.value)}
+            >
+              {b.label}
+            </Button>
           ))}
-        </select>
-        <button id="load" onClick={handleLoad}>
-          Inladen!
-        </button>
-        <button
-          id="refresh"
-          disabled={loaded === null}
-          onClick={handleRefresh}
+        </Group>
+
+        {/* Selection zone: stream + calendar + hour + load/refresh. */}
+        <Group align="flex-end" gap="sm" wrap="wrap" justify="center">
+          <NativeSelect
+            id="stringSelector"
+            label="Stream"
+            value={selectedFolder}
+            onChange={(e) => setSelectedFolder(e.currentTarget.value)}
+            data={orderedStreams.map((s) => ({
+              value: s.folder,
+              label: s.name,
+            }))}
+          />
+          <DatePickerInput
+            id="dateSelector"
+            label="Datum"
+            placeholder="Kies een dag"
+            firstDayOfWeek={1}
+            value={date === "" ? null : date}
+            onChange={(value) => setDate(value ?? "")}
+            // Only days with a recording for the selected stream are selectable;
+            // excludeDate returns true to DISABLE a day. A stream with no
+            // recordings yields an empty set, so every day is disabled.
+            excludeDate={(value) => !existingDays.has(value)}
+          />
+          <NativeSelect
+            id="hourSelector"
+            label="Uur"
+            value={hour}
+            onChange={(e) => setHour(e.currentTarget.value)}
+            data={[
+              { value: "", label: "Uur" },
+              ...availableHours.map((h) => ({ value: h, label: `${h}:00` })),
+            ]}
+          />
+          <Button id="load" onClick={handleLoad}>
+            Inladen!
+          </Button>
+          <Button
+            id="refresh"
+            variant="default"
+            leftSection={<IconRefresh size={16} />}
+            disabled={loaded === null}
+            onClick={handleRefresh}
+          >
+            Ververs
+          </Button>
+        </Group>
+
+        {/* Source / actions zone: hour download + selection/fragment tools. */}
+        <Group justify="center" gap="sm" wrap="wrap">
+          <Button
+            id="downloadbutton"
+            component="a"
+            variant="light"
+            leftSection={<IconDownload size={16} />}
+            href={downloadHref}
+            download={downloadName}
+          >
+            Download uur
+          </Button>
+          <Button
+            id="createStartButton"
+            variant="default"
+            size="xs"
+            onClick={() => ws.selectionStart()}
+          >
+            Selectie start
+          </Button>
+          <Button
+            id="createEndButton"
+            variant="default"
+            size="xs"
+            onClick={() => ws.selectionEnd()}
+          >
+            Selectie einde
+          </Button>
+          <Button
+            id="deleteRegionButton"
+            variant="default"
+            size="xs"
+            onClick={() => ws.deleteRegion()}
+          >
+            Selectie wissen
+          </Button>
+          <Button
+            id="playRegionButton"
+            variant="default"
+            size="xs"
+            disabled={!selectionEnabled}
+            onClick={() => ws.playRegion()}
+          >
+            Selectie afspelen
+          </Button>
+          <Button
+            id="downloadRegionButton"
+            variant="light"
+            size="xs"
+            leftSection={<IconScissors size={16} />}
+            disabled={!selectionEnabled}
+            onClick={handleDownloadSelection}
+          >
+            Fragment downloaden
+          </Button>
+        </Group>
+
+        <Text
+          id="downloadWait"
+          c="red"
+          fw={700}
+          ta="center"
+          style={{ display: downloadWaiting ? "block" : "none" }}
         >
-          Ververs
-        </button>
-      </div>
-      <p
-        style={{
-          color: "red",
-          fontSize: "30px",
-          display: downloadWaiting ? "inline" : "none",
-        }}
-        id="downloadWait"
-      >
-        Download aan het voorbereiden, even geduld!
-      </p>
-    </>
+          Download aan het voorbereiden, even geduld!
+        </Text>
+      </Stack>
+    </Panel>
   );
 }

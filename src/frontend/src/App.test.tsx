@@ -1,14 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { renderWithMantine } from "./test/render-with-mantine";
 import App, { pickInitialFolder } from "./App";
-import type { Stream } from "./api";
+import type { Settings2, Stream } from "./api";
 
 // Records every URL the mocked WaveSurfer.load() was called with, so a test can
 // assert the per-codec extension used for the player load.
@@ -56,6 +50,100 @@ vi.mock("wavesurfer.js/dist/plugins/regions.esm.js", () => {
   }
   return { default: FakeRegions };
 });
+
+/**
+ * Drive the player's calendar (Mantine `DatePickerInput`, a popover trigger —
+ * NOT a plain textbox) to the given `YYYY-MM-DD` day. Opens the dropdown with
+ * the pointer-down+click sequence jsdom needs, waits for the calendar grid, then
+ * clicks the day whose aria-label matches (Mantine's day controls carry an
+ * "D MMMM YYYY" aria-label, e.g. "23 October 2026"). The day MUST be enabled —
+ * only days present in the non-empty settings2 stub for the selected stream are
+ * selectable, so the stub must contain the target day.
+ */
+async function pickDate(isoDate: string): Promise<void> {
+  const [y, m, d] = isoDate.split("-");
+  const asUtc = new Date(`${y}-${m}-${d}T00:00:00Z`);
+  const monthName = asUtc.toLocaleString("en-US", {
+    month: "long",
+    timeZone: "UTC",
+  });
+  // Mantine day controls carry a "D MMMM YYYY" aria-label (e.g. "15 July 2026")
+  // and the header level button shows "MMMM YYYY" (e.g. "July 2026").
+  const dayAriaLabel = `${Number(d)} ${monthName} ${y}`;
+  const targetMonthLabel = `${monthName} ${y}`;
+  const usingFakeTimers = vi.isFakeTimers();
+
+  // Flush whichever timer the Popover's open transition runs on (fake timers for
+  // the live-hour suite, real timers elsewhere), so neither path hangs.
+  const flush = async () => {
+    await act(async () => {
+      if (usingFakeTimers) {
+        await vi.advanceTimersByTimeAsync(50);
+      } else {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    });
+  };
+
+  const trigger = screen.getByLabelText("Datum");
+  // The pointer-down + click sequence is what opens the Mantine popover under
+  // jsdom (a bare click does not flip aria-expanded).
+  await act(async () => {
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+  });
+  for (let i = 0; i < 20 && !document.querySelector("table"); i++) {
+    await flush();
+  }
+  if (!document.querySelector("table")) {
+    throw new Error("calendar did not open");
+  }
+
+  // The calendar opens on the current month. Navigate month-by-month until the
+  // header level label matches the target month, so any day (past or present)
+  // is reachable without depending on where "today" lands.
+  const levelLabel = () =>
+    (
+      Array.from(document.querySelectorAll("button")).find(
+        (b) =>
+          !b.hasAttribute("data-direction") &&
+          /^[A-Z][a-z]+ \d{4}$/.test(b.textContent ?? ""),
+      )?.textContent ?? ""
+    ).trim();
+  const clickDirection = async (direction: "previous" | "next") => {
+    const btn = document.querySelector(
+      `button[data-direction="${direction}"]`,
+    ) as HTMLButtonElement | null;
+    if (!btn) throw new Error(`no ${direction} control`);
+    await act(async () => {
+      fireEvent.click(btn);
+    });
+  };
+  const monthIndex = (label: string) => {
+    const [name, year] = label.split(" ");
+    const mi = new Date(`${name} 1, ${year} UTC`).getUTCMonth();
+    return Number(year) * 12 + mi;
+  };
+  const targetIndex = monthIndex(targetMonthLabel);
+  for (let i = 0; i < 360 && levelLabel() !== targetMonthLabel; i++) {
+    const current = levelLabel();
+    if (!current) break;
+    await clickDirection(monthIndex(current) > targetIndex ? "previous" : "next");
+  }
+  if (levelLabel() !== targetMonthLabel) {
+    throw new Error(`could not navigate to ${targetMonthLabel}`);
+  }
+
+  const dayButton = Array.from(
+    document.querySelectorAll("table button"),
+  ).find((b) => b.getAttribute("aria-label") === dayAriaLabel) as
+    | HTMLButtonElement
+    | undefined;
+  if (!dayButton) throw new Error(`day control not found: ${dayAriaLabel}`);
+  await act(async () => {
+    fireEvent.click(dayButton);
+  });
+}
 
 describe("App smoke test", () => {
   let errorSpy: ReturnType<typeof vi.spyOn>;
@@ -106,7 +194,7 @@ describe("App smoke test", () => {
   });
 
   it("renders all controls against empty settings with no console errors", async () => {
-    render(<App />);
+    renderWithMantine(<App />);
 
     // Time display
     expect(document.getElementById("time-total")?.textContent).toBe(
@@ -122,25 +210,29 @@ describe("App smoke test", () => {
         screen.getByRole("button", { name: label }),
       ).toBeInTheDocument();
     }
-    expect(screen.getByRole("button", { name: "Play" })).toBeInTheDocument();
+    // The play/pause button is icon-only; it is found by its aria-label
+    // ("Afspelen" when paused).
+    expect(
+      screen.getByRole("button", { name: "Afspelen" }),
+    ).toBeInTheDocument();
 
     // Selection controls
     expect(document.getElementById("downloadbutton")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Selection Start" }),
+      screen.getByRole("button", { name: "Selectie start" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Selection End" }),
+      screen.getByRole("button", { name: "Selectie einde" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Delete Selection" }),
+      screen.getByRole("button", { name: "Selectie wissen" }),
     ).toBeInTheDocument();
     expect(document.getElementById("playRegionButton")).toBeDisabled();
     expect(document.getElementById("downloadRegionButton")).toBeDisabled();
 
     // Selector row
     expect(document.getElementById("stringSelector")).toBeInTheDocument();
-    expect(document.getElementById("dateSelector")).toBeInTheDocument();
+    expect(screen.getByLabelText("Datum")).toBeInTheDocument();
     expect(document.getElementById("hourSelector")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Inladen!" })).toBeInTheDocument();
 
@@ -227,7 +319,7 @@ describe("App default-stream preselection (full render)", () => {
 
   it("preselects the configured default_stream_folder when it matches a stream", async () => {
     stubFetchWithDefault("radio_two");
-    render(<App />);
+    renderWithMantine(<App />);
     const selector = document.getElementById(
       "stringSelector",
     ) as HTMLSelectElement;
@@ -238,7 +330,7 @@ describe("App default-stream preselection (full render)", () => {
 
   it("falls back to the first stream of the COUNTRY-ORDERED list when the default is empty/unknown", async () => {
     stubFetchWithDefault("does_not_exist");
-    render(<App />);
+    renderWithMantine(<App />);
     const selector = document.getElementById(
       "stringSelector",
     ) as HTMLSelectElement;
@@ -268,10 +360,24 @@ const CODEC_STREAM_ROWS: Stream[] = [
   },
 ];
 
+// Non-empty settings2 stub keyed by the stored station NAME verbatim (station ->
+// year -> month -> day -> hours[]), so the calendar has a selectable day and the
+// hour selector has an option for each per-codec stream. Both streams expose
+// 2026-10-23 at hour 09.
+const CODEC_TREE: Settings2 = {
+  "Opus Radio": {
+    "2026": { "10": { "23": ["09"] } },
+  } as unknown as Settings2[string],
+  "Flac Radio": {
+    "2026": { "10": { "23": ["09"] } },
+  } as unknown as Settings2[string],
+};
+
 /**
  * Stub fetch so /api/settings returns the per-codec streams, /api/settings2
- * returns {}, the public config is empty, and any /audio/*.json peaks request
- * 404s (so handleLoad falls back to ws.load(mediaUrl) without peaks).
+ * returns the NON-EMPTY CODEC_TREE (so the calendar day + hour option exist),
+ * the public config is empty, and any /audio/*.json peaks request 404s (so
+ * handleLoad falls back to ws.load(mediaUrl) without peaks).
  */
 function stubFetchForCodecs() {
   vi.stubGlobal(
@@ -288,7 +394,7 @@ function stubFetchForCodecs() {
       }
       if (url.includes("/api/settings2")) {
         return Promise.resolve(
-          new Response(JSON.stringify({}), {
+          new Response(JSON.stringify(CODEC_TREE), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           }),
@@ -323,7 +429,7 @@ describe("App non-mp3 player load", () => {
     "loads the %s recording via WaveSurfer using the .%s extension",
     async (folder, ext) => {
       stubFetchForCodecs();
-      render(<App />);
+      renderWithMantine(<App />);
 
       const selector = document.getElementById(
         "stringSelector",
@@ -335,23 +441,15 @@ describe("App non-mp3 player load", () => {
         expect(selector.value).toBe("flac_radio");
       });
 
-      // Choose the target stream + a concrete date/hour.
+      // Choose the target stream (changing the stream clears any date/hour),
+      // then pick the day via the calendar and the hour via the native select.
       fireEvent.change(selector, { target: { value: folder } });
-      fireEvent.change(
-        document.getElementById("dateSelector") as HTMLInputElement,
-        { target: { value: "2026-10-23" } },
-      );
-      // The hour selector only lists hours with a recording; set the value
-      // directly via the underlying state by firing a change on the <select>
-      // after injecting the option is unnecessary — handleLoad reads the hour
-      // from component state, so drive it through the select's change event.
+      await pickDate("2026-10-23");
       const hourSelect = document.getElementById(
         "hourSelector",
       ) as HTMLSelectElement;
-      // The option list is empty (settings2 is {}), so add one for the test.
-      const opt = document.createElement("option");
-      opt.value = "09";
-      hourSelect.appendChild(opt);
+      // The hour option list is derived from the non-empty settings2 stub, so
+      // "09" is already present for this stream + day.
       fireEvent.change(hourSelect, { target: { value: "09" } });
 
       fireEvent.click(screen.getByRole("button", { name: "Inladen!" }));
@@ -377,11 +475,22 @@ const LIVE_STREAM_ROWS: Stream[] = [
   },
 ];
 
+// Non-empty settings2 stub for the single live stream. Exposes every day the
+// live-hour suite drives (the live slot 2026-07-15, the past 2020-01-01) so the
+// calendar has those days selectable and the hour selector offers 05/09/10.
+const LIVE_TREE: Settings2 = {
+  "Live Radio": {
+    "2026": { "07": { "15": ["05", "10"] } },
+    "2020": { "01": { "01": ["09"] } },
+  } as unknown as Settings2[string],
+};
+
 /**
- * Stub fetch so /api/settings returns a single mp3 stream, /api/settings2 and
- * the public config are empty, and the peaks JSON responds per `peaksOk`:
- * `true` -> 200 with a tiny peaks payload (ws.load gets peaks), `false` -> 404
- * (graceful decode-from-media fallback).
+ * Stub fetch so /api/settings returns a single mp3 stream, /api/settings2
+ * returns the NON-EMPTY LIVE_TREE (selectable days + hour options), the public
+ * config is empty, and the peaks JSON responds per `peaksOk`: `true` -> 200 with
+ * a tiny peaks payload (ws.load gets peaks), `false` -> 404 (graceful
+ * decode-from-media fallback).
  */
 function stubFetchForLive(peaksOk: boolean) {
   vi.stubGlobal(
@@ -398,7 +507,7 @@ function stubFetchForLive(peaksOk: boolean) {
       }
       if (url.includes("/api/settings2")) {
         return Promise.resolve(
-          new Response(JSON.stringify({}), {
+          new Response(JSON.stringify(LIVE_TREE), {
             status: 200,
             headers: { "Content-Type": "application/json" },
           }),
@@ -428,23 +537,16 @@ function stubFetchForLive(peaksOk: boolean) {
 }
 
 /**
- * Set the given date + inject/select the given hour option, then click
- * "Inladen!". Mirrors the per-codec test's hour-option injection (the option
- * list is empty because settings2 is {}). Assumes the stream is already
- * preselected (the caller settles the settings fetch first — with real timers
- * via waitFor, with fake timers via advanceTimersByTimeAsync).
+ * Pick the given date via the calendar + set the given hour via the native
+ * select, then click "Inladen!". The stream is already preselected (the caller
+ * settles the settings fetch first). The day + hour must exist in LIVE_TREE for
+ * them to be selectable.
  */
-function loadHour(date: string, hour: string) {
-  fireEvent.change(
-    document.getElementById("dateSelector") as HTMLInputElement,
-    { target: { value: date } },
-  );
+async function loadHour(date: string, hour: string) {
+  await pickDate(date);
   const hourSelect = document.getElementById(
     "hourSelector",
   ) as HTMLSelectElement;
-  const opt = document.createElement("option");
-  opt.value = hour;
-  hourSelect.appendChild(opt);
   fireEvent.change(hourSelect, { target: { value: hour } });
   fireEvent.click(screen.getByRole("button", { name: "Inladen!" }));
 }
@@ -464,13 +566,13 @@ describe("App live-hour auto-refresh", () => {
     // is the live slot.
     vi.setSystemTime(new Date("2026-07-15T08:30:00Z"));
     stubFetchForLive(true);
-    render(<App />);
+    renderWithMantine(<App />);
 
     // Settle the settings/preselect promise chain under fake timers.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    loadHour("2026-07-15", "10");
+    await loadHour("2026-07-15", "10");
     // Flush the initial reload's fetch/load microtasks.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
@@ -494,7 +596,7 @@ describe("App live-hour auto-refresh", () => {
 
   it("clicking 'Ververs' triggers an immediate cache-busted reload", async () => {
     stubFetchForLive(true);
-    render(<App />);
+    renderWithMantine(<App />);
 
     const selector = document.getElementById(
       "stringSelector",
@@ -504,7 +606,7 @@ describe("App live-hour auto-refresh", () => {
     });
 
     // A PAST hour is fine here: the manual button reloads regardless of live-ness.
-    loadHour("2020-01-01", "09");
+    await loadHour("2020-01-01", "09");
     await waitFor(() => {
       expect(
         loadedUrls.some((u) =>
@@ -527,13 +629,13 @@ describe("App live-hour auto-refresh", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-15T08:30:00Z"));
     stubFetchForLive(true);
-    render(<App />);
+    renderWithMantine(<App />);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     // Load a clearly past hour (not the current Amsterdam slot).
-    loadHour("2026-07-15", "05");
+    await loadHour("2026-07-15", "05");
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
@@ -553,7 +655,7 @@ describe("App live-hour auto-refresh", () => {
 
   it("falls back to ws.load(mediaUrl) when the peaks fetch fails (graceful missing peak)", async () => {
     stubFetchForLive(false);
-    render(<App />);
+    renderWithMantine(<App />);
 
     const selector = document.getElementById(
       "stringSelector",
@@ -562,7 +664,7 @@ describe("App live-hour auto-refresh", () => {
       expect(selector.value).toBe("live_radio");
     });
 
-    loadHour("2026-07-15", "10");
+    await loadHour("2026-07-15", "10");
     await waitFor(() => {
       // mediaUrl was loaded even though the .json 404'd.
       expect(
