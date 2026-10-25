@@ -17,7 +17,6 @@ import {
   IconDownload,
   IconPlayerPause,
   IconPlayerPlay,
-  IconRefresh,
   IconScissors,
   IconZoomScan,
 } from "@tabler/icons-react";
@@ -61,7 +60,8 @@ function round1(x: number): number {
 }
 
 // How often the player reloads the LIVE (current Amsterdam hour) recording so
-// the mp3 + regenerated peaks keep growing in the UI. Past hours never poll.
+// the still-growing mp3 keeps filling the client-decoded waveform in the UI.
+// Past hours never poll.
 const LIVE_POLL_MS = 30000;
 
 /** The folder + date/hour parts of a loaded recording (for live detection). */
@@ -292,15 +292,29 @@ export default function App() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [ws]);
 
-  // Core load body, shared by the initial load, the live-poll interval and the
-  // manual "Refresh" button. Rebuilds the media + peaks URLs for `sel` (passing
-  // an optional cache-busting `?t=` so a grown current-hour file/json is not
-  // served stale), updates the download anchor, and tries the peaks JSON before
-  // falling back to decoding the audio directly — preserving the graceful
-  // missing/partial-peak behaviour (ws.load(mediaUrl) with no peaks).
+  // Core load body, shared by the initial load and the live-poll interval.
+  // The CURRENT Amsterdam hour is decoded client-side: its mp3 is still growing
+  // and has no stable precomputed peaks, so we always cache-bust the media URL
+  // and let WaveSurfer derive the waveform from the audio (no .json fetch). Past
+  // hours load the backend peaks JSON (honouring the optional cache-busting
+  // `?t=`) and fall back to decoding the audio directly when the .json is
+  // missing — preserving the graceful missing/partial-peak behaviour.
   const reload = useCallback(
     async (sel: LoadedSelection, cacheBust?: number) => {
       const { folder, year, month, day, hour: h, ext } = sel;
+      const live = isLiveHour(currentAmsterdamSlot(), sel);
+
+      if (live) {
+        // Always cache-bust the live hour so pressing Load (or a poll tick)
+        // refetches the grown mp3 instead of a stale cached copy.
+        const mediaUrl = audioUrl(folder, year, month, day, h, ext, Date.now());
+        setDownloadHref(mediaUrl);
+        setDownloadName(`${folder}-${year}-${month}-${day}-${h}.${ext}`);
+        ws.reset();
+        ws.load(mediaUrl);
+        return;
+      }
+
       const mediaUrl = audioUrl(folder, year, month, day, h, ext, cacheBust);
       const jsonUrl = audioJsonUrl(folder, year, month, day, h, cacheBust);
 
@@ -342,22 +356,9 @@ export default function App() {
     await reload(sel);
   }, [date, hour, selectedFolder, selectedCodec, reload]);
 
-  // Keep the latest loaded selection available to the manual refresh button
-  // without re-creating the handler on every state change.
-  const loadedRef = useRef<LoadedSelection | null>(loaded);
-  loadedRef.current = loaded;
-
-  // Manual "Refresh" fallback: reload the currently loaded recording right away
-  // with a fresh cache-busting param. No-op before anything is loaded.
-  const handleRefresh = useCallback(() => {
-    const sel = loadedRef.current;
-    if (!sel) return;
-    void reload(sel, Date.now());
-  }, [reload]);
-
   // Live-hour auto-refresh: only when the loaded selection IS the current
-  // Amsterdam hour-slot, poll every LIVE_POLL_MS and reload with a cache-busting
-  // param so the grown mp3 + regenerated peaks show up. The interval is cleared
+  // Amsterdam hour-slot, poll every LIVE_POLL_MS and reload so the grown mp3 is
+  // re-decoded client-side into a fuller waveform. The interval is cleared
   // when the selection changes, when a past hour is loaded, when the slot rolls
   // past the loaded hour, and on unmount. Nothing is polled before a load.
   useEffect(() => {
@@ -520,9 +521,9 @@ export default function App() {
           ))}
         </Group>
 
-        {/* Selection zone: stream + calendar + hour + load/refresh. On narrow
-            widths the three selectors grow to full width and stack (wrap);
-            on wider screens they sit side-by-side at their natural width. */}
+        {/* Selection zone: stream + calendar + hour + load. On narrow widths
+            the three selectors grow to full width and stack (wrap); on wider
+            screens they sit side-by-side at their natural width. */}
         <Group align="flex-end" gap="sm" wrap="wrap" justify="center">
           <NativeSelect
             id="stringSelector"
@@ -561,15 +562,6 @@ export default function App() {
           />
           <Button id="load" onClick={handleLoad}>
             Load
-          </Button>
-          <Button
-            id="refresh"
-            variant="default"
-            leftSection={<IconRefresh size={16} />}
-            disabled={loaded === null}
-            onClick={handleRefresh}
-          >
-            Refresh
           </Button>
         </Group>
 

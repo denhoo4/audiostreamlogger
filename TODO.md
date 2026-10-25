@@ -326,12 +326,20 @@ share the styling layer, NOT parallel):
       for past hours and fall back to client-side decoding for the current hour.
       (The player's live-hour refresh/reload still works for the growing mp3; it just no
       longer relies on a backend-regenerated peak file.) Touches worker + frontend.
-- [ ] Player: remove the REFRESH button if it's redundant with LOAD (user, 2026-10-23).
-      Refresh (from item 24) was meant for the live current recording hour — it reloads
-      the grown mp3 + regenerated peaks with cache-busting. If the LOAD button already
-      does the same cache-busted reload for the live hour, Refresh adds nothing → remove
-      it. If LOAD does NOT cache-bust the live hour, fold that live-refresh behavior into
-      LOAD, then remove the separate Refresh button. Verify which before removing.
+      IN PROGRESS on branch `peakfile-revert`: the FRONTEND half is DONE (FEAT-002) —
+      `App.tsx` `reload()` now decodes the CURRENT Amsterdam hour client-side (cache-
+      busted mp3, no `.json` fetch) and PAST hours load the `.json` with a graceful
+      client-decode fallback when it is missing. The WORKER half (delete
+      `currenthourpeaks.js` + its timer/import/export + test) is FEAT-001.
+- [x] Player: remove the REFRESH button if it's redundant with LOAD (user, 2026-10-23).
+      DONE on branch `peakfile-revert` (FEAT-002, frontend-only). The live-refresh
+      behaviour was folded into LOAD: `App.tsx` `reload()` now always cache-busts the
+      CURRENT Amsterdam hour (`audioUrl(..., Date.now())`) and decodes it client-side
+      with NO peaks fetch, so pressing Load mid-hour refetches the grown mp3 — the
+      capability the separate Refresh button provided. The `Refresh` button,
+      `handleRefresh`, `loadedRef`, and the `IconRefresh` import were removed; the
+      `loaded` state + the live-poll `useEffect` stay. Build + 133/133 vitest green in
+      `node:26-bookworm`.
 - [x] Phase 6 — polish: responsive/mobile, accessibility (focus states, contrast,
       keyboard), consistent loading/empty/error states, subtle motion. DONE and merged
       to `origin/main` (branch `ui-polish`; frontend-only, no api.ts/endpoint/SSE/schema/

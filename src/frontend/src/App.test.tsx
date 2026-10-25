@@ -619,7 +619,7 @@ describe("App live-hour auto-refresh", () => {
     loadedUrls.length = 0;
   });
 
-  it("re-loads the LIVE hour with a cache-busted URL after the poll interval", async () => {
+  it("loads the LIVE hour client-side with a cache-busted URL and NO peaks fetch, then re-loads on each poll tick", async () => {
     vi.useFakeTimers();
     // 2026-07-15T08:30:00Z -> Amsterdam CEST 10:xx, so hour "10" on 2026-07-15
     // is the live slot.
@@ -636,52 +636,61 @@ describe("App live-hour auto-refresh", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    expect(
-      loadedUrls.some((u) =>
-        u.endsWith("/audio/live_radio/live_radio-2026-07-15-10.mp3"),
-      ),
-    ).toBe(true);
-
-    // Advance one poll tick; a cache-busted (?t=) reload must fire.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(30000);
-    });
+    // The LIVE branch always cache-busts and decodes client-side, so the very
+    // first Load already carries a ?t= and the mp3 is the only thing loaded.
     expect(
       loadedUrls.some((u) =>
         /\/audio\/live_radio\/live_radio-2026-07-15-10\.mp3\?t=\d+/.test(u),
       ),
     ).toBe(true);
+    // The live hour is decoded from the mp3: the .json peaks file is never
+    // fetched.
+    expect(
+      (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.some(
+        ([input]) => String(input).includes(".json"),
+      ),
+    ).toBe(false);
+
+    // Advance one poll tick; another cache-busted (?t=) reload must fire.
+    const countBeforeTick = loadedUrls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000);
+    });
+    expect(loadedUrls.length).toBeGreaterThan(countBeforeTick);
+    expect(
+      loadedUrls.every((u) =>
+        /\/audio\/live_radio\/live_radio-2026-07-15-10\.mp3\?t=\d+/.test(u),
+      ),
+    ).toBe(true);
   });
 
-  it("clicking 'Refresh' triggers an immediate cache-busted reload", async () => {
+  it("fetches the .json peaks for a PAST hour and passes them to WaveSurfer", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T08:30:00Z"));
     stubFetchForLive(true);
     renderWithMantine(<App />);
 
-    const selector = document.getElementById(
-      "stringSelector",
-    ) as HTMLSelectElement;
-    await waitFor(() => {
-      expect(selector.value).toBe("live_radio");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
     });
-
-    // A PAST hour is fine here: the manual button reloads regardless of live-ness.
+    // A clearly PAST hour: the .json peaks are fetched and used.
     await loadHour("2020-01-01", "09");
-    await waitFor(() => {
-      expect(
-        loadedUrls.some((u) =>
-          u.endsWith("/audio/live_radio/live_radio-2020-01-01-09.mp3"),
-        ),
-      ).toBe(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
     });
-
-    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
-    await waitFor(() => {
-      expect(
-        loadedUrls.some((u) =>
-          /\/audio\/live_radio\/live_radio-2020-01-01-09\.mp3\?t=\d+/.test(u),
-        ),
-      ).toBe(true);
-    });
+    expect(
+      loadedUrls.some((u) =>
+        u.endsWith("/audio/live_radio/live_radio-2020-01-01-09.mp3"),
+      ),
+    ).toBe(true);
+    expect(
+      (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.some(
+        ([input]) =>
+          String(input).includes(
+            "/audio/live_radio/live_radio-2020-01-01-09.json",
+          ),
+      ),
+    ).toBe(true);
   });
 
   it("does NOT schedule a reload for a PAST hour", async () => {

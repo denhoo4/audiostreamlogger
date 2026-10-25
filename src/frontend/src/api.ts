@@ -375,10 +375,11 @@ export function audioUrl(
 }
 
 /**
- * URL of the precomputed peaks JSON for a given folder + date/hour. When
- * `cacheBust` is provided a `?t=<cacheBust>` query param is appended (cache-bust
- * the regenerated current-hour peaks); omitting it yields the byte-identical URL
- * existing callers rely on.
+ * URL of the precomputed peaks JSON for a given folder + date/hour. Only PAST
+ * hours have a stable peaks file; the current Amsterdam hour is decoded
+ * client-side from the growing mp3 instead. When `cacheBust` is provided a
+ * `?t=<cacheBust>` query param is appended; omitting it yields the
+ * byte-identical URL existing callers rely on.
  */
 export function audioJsonUrl(
   folder: string,
