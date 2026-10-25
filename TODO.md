@@ -301,9 +301,40 @@ share the styling layer, NOT parallel):
       hierarchy reads at a glance (native `<optgroup>` indents its options automatically;
       a custom grouped list must apply the indent explicitly). Honors the existing
       `country_order` from public config (the player already orders by it). Frontend-only.
+- [ ] Jobs tab: remove the SEPARATE Save button under Cleaner → Hours (log-retention)
+      (user, 2026-10-23). The log-retention Hours field in the cleaner card should NOT
+      have its own Save; it should be saved by the SAME save button as the other two
+      cleaner parameters (enable toggle + schedule/frequency) — one Save persists all
+      three together. Frontend-only (fold the retention value into the cleaner card's
+      shared save handler / app_config write).
+- [ ] FIX peak files + REVERT the live-hour peak regeneration (user diagnosis,
+      2026-10-23). SYMPTOM: the current-hour peak `.json` is for the WHOLE hour's width
+      but looks like a SHORT fragment stretched across the whole hour. ROOT CAUSE (user):
+      this started with item 24's "refresh the waveform" feature — the live-hour peak
+      regeneration generates peaks while the mp3 is only a few minutes long, producing a
+      short peak file that the frontend stretches over the full hour and that isn't
+      correctly replaced. DECISION (user): go BACK to the original model —
+      - Generate ALL waveforms ONCE PER HOUR for the PREVIOUS (completed) hour only
+        (the normal post-hour peakfilegenerator run), and
+      - let the BROWSER compute the waveform for the CURRENT (in-progress) hour itself
+        (WaveSurfer derives peaks client-side from the audio when there's no/incomplete
+        `.json`), instead of the backend regenerating a live peak file.
+      This effectively REVERTS item 24's backend current-hour peak regeneration
+      (`src/worker/handlers/currenthourpeaks.js` + its worker timer) and removes the
+      current-hour `.json` dependency. Keep the normal peakfilegenerator current-hour
+      SKIP so it still only peaks completed hours. The player should load the `.json`
+      for past hours and fall back to client-side decoding for the current hour.
+      (The player's live-hour refresh/reload still works for the growing mp3; it just no
+      longer relies on a backend-regenerated peak file.) Touches worker + frontend.
+- [ ] Player: remove the REFRESH button if it's redundant with LOAD (user, 2026-10-23).
+      Refresh (from item 24) was meant for the live current recording hour — it reloads
+      the grown mp3 + regenerated peaks with cache-busting. If the LOAD button already
+      does the same cache-busted reload for the live hour, Refresh adds nothing → remove
+      it. If LOAD does NOT cache-bust the live hour, fold that live-refresh behavior into
+      LOAD, then remove the separate Refresh button. Verify which before removing.
 - [x] Phase 6 — polish: responsive/mobile, accessibility (focus states, contrast,
-      keyboard), consistent loading/empty/error states, subtle motion. DONE on branch
-      `ui-polish` (NOT yet merged; frontend-only, no api.ts/endpoint/SSE/schema/
+      keyboard), consistent loading/empty/error states, subtle motion. DONE and merged
+      to `origin/main` (branch `ui-polish`; frontend-only, no api.ts/endpoint/SSE/schema/
       docker/nginx change, no new dependency). Review APPROVED. Three FEATs:
       - FEAT-001 (color-scheme fix): after the Phase-5.7 header toggle removal,
         `MantineProvider` still defaulted to `localStorageColorSchemeManager()`, whose
@@ -332,9 +363,8 @@ share the styling layer, NOT parallel):
         aria-label, zero focus-ring suppression, scheme-aware contrast tokens, and
         keyboard operability; added behaviour/role/aria tests only.
       Final gate green in `node:26-bookworm`: `npm ci` + `tsc -b` + `vite build`
-      clean + 133/133 vitest (16 files; 122 baseline + 11 new). Branch left ready for
-      the user to review/merge (not pushed). Verification evidence in
-      `.agents/tasks/task-ui-polish-phase6/`.
+      clean + 133/133 vitest (16 files; 122 baseline + 11 new). MERGED + PUSHED to
+      origin/main. Verification evidence in `.agents/tasks/task-ui-polish-phase6/`.
 Frontend-only (`src/frontend/`). No backend/API/schema change. WaveSurfer behaviour
 (incl. scroll-to-zoom) must be preserved through the player restyle.
 
