@@ -16,6 +16,9 @@ Last updated: 2026-10-23.
 > Branch `admin-content-reworks` (not yet merged): Phase-5.5 admin content reworks
 > (merged Recordings & health table, Jobs tab log-retention + latest-per-type job
 > view + reconcile controls, header brand from app_title). See the Phase-5.5 entry.
+> Branch `ui-polish` (not yet merged): Phase-6 polish — structural color-scheme
+> follow fix + consistent loading/empty/error states + reduced-motion-aware motion +
+> responsive/accessibility pass. Approved, ready for review. See the Phase-6 entry.
 
 ## Current state
 
@@ -298,8 +301,40 @@ share the styling layer, NOT parallel):
       hierarchy reads at a glance (native `<optgroup>` indents its options automatically;
       a custom grouped list must apply the indent explicitly). Honors the existing
       `country_order` from public config (the player already orders by it). Frontend-only.
-- [ ] Phase 6 — polish: responsive/mobile, accessibility (focus states, contrast,
-      keyboard), consistent loading/empty/error states, subtle motion.
+- [x] Phase 6 — polish: responsive/mobile, accessibility (focus states, contrast,
+      keyboard), consistent loading/empty/error states, subtle motion. DONE on branch
+      `ui-polish` (NOT yet merged; frontend-only, no api.ts/endpoint/SSE/schema/
+      docker/nginx change, no new dependency). Review APPROVED. Three FEATs:
+      - FEAT-001 (color-scheme fix): after the Phase-5.7 header toggle removal,
+        `MantineProvider` still defaulted to `localStorageColorSchemeManager()`, whose
+        STALE `mantine-color-scheme-value` key (left from when the toggle existed)
+        overrode `defaultColorScheme="auto"` and stopped the app from following the
+        browser. Fix: a tiny custom `systemColorSchemeManager()` in
+        `src/color-scheme-manager.ts` whose `get()` always returns `'auto'` and whose
+        set/subscribe/unsubscribe/clear are no-ops, passed as
+        `colorSchemeManager` to `MantineProvider`; `ColorSchemeScript` +
+        `defaultColorScheme="auto"` kept (no flash). The provider's own
+        `prefers-color-scheme` matchMedia listener drives live OS switching. A test
+        proves a pre-seeded `'light'` key is ignored (dark system → `dark`, light
+        system → `light`).
+      - FEAT-002 (consistent states + motion): one shared presentational
+        `ui/AsyncState` (error → `<Alert role='alert'>`; loading → `Loader` + dimmed
+        text; empty → dimmed message; else children) routes RecordingsHealth,
+        WorkerStatus, SchedulerConfig, JobViewer and StreamTable through a single
+        state vocabulary WITHOUT changing which endpoints load or when. Added a gentle
+        mount fade on the player panel + admin tab content (Mantine `Transition`,
+        gated by `useReducedMotion`) and a global `@media (prefers-reduced-motion:
+        reduce)` rule in `App.css`; Mantine default hover/active transitions kept.
+      - FEAT-003 (responsive + a11y): responsive wrapping/stacking via Mantine props
+        (selection selectors `w={{ base: '100%', xs: 'auto' }}`, responsive header
+        padding, button `Group wrap='wrap'`) with no horizontal overflow and no
+        layout-intent change; a11y audit confirmed every icon-only ActionIcon has an
+        aria-label, zero focus-ring suppression, scheme-aware contrast tokens, and
+        keyboard operability; added behaviour/role/aria tests only.
+      Final gate green in `node:26-bookworm`: `npm ci` + `tsc -b` + `vite build`
+      clean + 133/133 vitest (16 files; 122 baseline + 11 new). Branch left ready for
+      the user to review/merge (not pushed). Verification evidence in
+      `.agents/tasks/task-ui-polish-phase6/`.
 Frontend-only (`src/frontend/`). No backend/API/schema change. WaveSurfer behaviour
 (incl. scroll-to-zoom) must be preserved through the player restyle.
 
