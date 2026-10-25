@@ -77,9 +77,10 @@ docker compose down
 
 ## What you can do from `/settings`
 
-Add/edit/remove streams (with per-stream codec, ordering, and a default stream),
-set branding, schedule and run jobs, watch a live job feed, review recording
-analysis and stream health, see a storage estimate, and export/import a backup.
+Add/edit/remove streams (with per-stream codec, manual stream and country
+ordering, and a default stream), set branding, schedule and run jobs, watch a
+live job feed, review recording analysis and stream health, see a storage
+estimate, and export/import a backup.
 Full detail lives in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Data on disk

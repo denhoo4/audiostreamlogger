@@ -236,14 +236,17 @@ describe("App default-stream preselection (full render)", () => {
     });
   });
 
-  it("falls back to the first stream when the default is empty/unknown", async () => {
+  it("falls back to the first stream of the COUNTRY-ORDERED list when the default is empty/unknown", async () => {
     stubFetchWithDefault("does_not_exist");
     render(<App />);
     const selector = document.getElementById(
       "stringSelector",
     ) as HTMLSelectElement;
+    // country_order is absent -> alphabetical-by-name fallback puts Belgium
+    // (radio_two) before Netherlands (radio_one), so the first ordered stream
+    // is radio_two.
     await waitFor(() => {
-      expect(selector.value).toBe("radio_one");
+      expect(selector.value).toBe("radio_two");
     });
   });
 });
@@ -326,8 +329,10 @@ describe("App non-mp3 player load", () => {
         "stringSelector",
       ) as HTMLSelectElement;
       await waitFor(() => {
-        // First stream preselected once /api/settings resolves.
-        expect(selector.value).toBe("opus_radio");
+        // First stream of the COUNTRY-ORDERED list preselected once
+        // /api/settings resolves. country_order is absent -> alphabetical by
+        // name, so Belgium (flac_radio) precedes Netherlands (opus_radio).
+        expect(selector.value).toBe("flac_radio");
       });
 
       // Choose the target stream + a concrete date/hour.

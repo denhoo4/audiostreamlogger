@@ -13,6 +13,7 @@ import {
   type Stream,
 } from "./api";
 import { displayNameForFolder, existingHoursFor } from "./player-hours";
+import { sortStreamsByCountryOrder } from "./settings/country-order";
 import { useAppTitle } from "./useAppTitle";
 import { formatTime, useWavesurfer } from "./useWavesurfer";
 
@@ -86,6 +87,9 @@ function parseDateParts(
 export default function App() {
   const ws = useWavesurfer();
   const [streams, setStreams] = useState<Stream[]>([]);
+  // Explicit admin-chosen country order (app_config `country_order`); drives the
+  // stream selector's country grouping. Empty -> pure alphabetical-by-name.
+  const [countryOrder, setCountryOrder] = useState<string[]>([]);
   const [tree, setTree] = useState<Settings2>({});
   const [selectedFolder, setSelectedFolder] = useState("");
   const [date, setDate] = useState("");
@@ -139,16 +143,23 @@ export default function App() {
         setStreams(data);
         if (data.length === 0) return;
         // Preselect the configured default stream when it matches a loaded
-        // stream, else fall back to the first. The public config fetch is
-        // best-effort: on failure we keep the first-stream fallback.
+        // stream, else fall back to the first (of the COUNTRY-ORDERED list).
+        // The public config fetch is best-effort: on failure we keep the
+        // empty country order (alphabetical fallback) and the first-stream
+        // fallback against the then-unsorted list.
         let defaultFolder = "";
+        let order: string[] = [];
         try {
-          defaultFolder = (await getPublicConfig()).default_stream_folder;
+          const config = await getPublicConfig();
+          defaultFolder = config.default_stream_folder;
+          order = config.country_order;
         } catch (err) {
           console.error("Kon standaardstream niet laden:", err);
         }
         if (!cancelled) {
-          setSelectedFolder(pickInitialFolder(data, defaultFolder));
+          setCountryOrder(order);
+          const ordered = sortStreamsByCountryOrder(data, order);
+          setSelectedFolder(pickInitialFolder(ordered, defaultFolder));
         }
       })
       .catch((err) => {
@@ -390,7 +401,7 @@ export default function App() {
           value={selectedFolder}
           onChange={(e) => setSelectedFolder(e.target.value)}
         >
-          {streams.map((s) => (
+          {sortStreamsByCountryOrder(streams, countryOrder).map((s) => (
             <option key={s.folder} value={s.folder}>
               {s.name}
             </option>

@@ -25,7 +25,9 @@ createRoot(document.getElementById("root")!).render(
         light/dark or return to 'auto' (follow device). */}
     <ColorSchemeScript defaultColorScheme="auto" />
     <MantineProvider theme={theme} defaultColorScheme="auto">
-      <AppLayout>{isSettings ? <SettingsPage /> : <App />}</AppLayout>
+      <AppLayout size={isSettings ? "xl" : "lg"}>
+        {isSettings ? <SettingsPage /> : <App />}
+      </AppLayout>
     </MantineProvider>
   </StrictMode>,
 );

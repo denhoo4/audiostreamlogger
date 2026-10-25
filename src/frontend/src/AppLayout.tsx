@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Box, Container, Group, Title } from "@mantine/core";
+import type { MantineSize } from "@mantine/core";
 import { ColorSchemeToggle } from "./ui";
 import classes from "./AppLayout.module.css";
 
@@ -25,9 +26,12 @@ import classes from "./AppLayout.module.css";
 export default function AppLayout({
   children,
   title = "Dé radiologger",
+  size = "lg",
 }: {
   children: ReactNode;
   title?: string;
+  /** Max-width of the centered content Container (default 'lg'; admin uses 'xl'). */
+  size?: MantineSize | (string & {});
 }) {
   return (
     <Box
@@ -47,7 +51,7 @@ export default function AppLayout({
           </Group>
         </Group>
       </Box>
-      <Container size="lg" py="lg">
+      <Container size={size} py="lg">
         {children}
       </Container>
     </Box>

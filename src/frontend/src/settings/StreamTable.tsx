@@ -31,6 +31,7 @@ import {
   getPublicConfig,
   getStreams,
   reorderStreams,
+  setCountryOrder,
   setDefaultStream,
   testStreamUrl,
   updateStream,
@@ -41,6 +42,7 @@ import {
   type StreamTestResult,
 } from "../api";
 import { COUNTRIES_BY_NAME, countryName } from "./countries";
+import { orderCountries } from "./country-order";
 import { deriveFolder } from "./derive-folder";
 import { Panel } from "../ui";
 import classes from "./StreamTable.module.css";
@@ -162,6 +164,9 @@ const COLSPAN = 6;
  */
 export default function StreamTable() {
   const [streams, setStreams] = useState<StreamRecord[]>([]);
+  // Explicit admin-chosen country order (app_config `country_order`, FEAT-001).
+  // Drives the country GROUP ordering; empty -> alphabetical-by-name fallback.
+  const [countryOrder, setCountryOrderState] = useState<string[]>([]);
   const [defaultFolder, setDefaultFolder] = useState("");
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -200,6 +205,7 @@ export default function StreamTable() {
       ]);
       setStreams(rows);
       setDefaultFolder(config.default_stream_folder);
+      setCountryOrderState(config.country_order);
     } catch (err) {
       setListError(
         err instanceof ApiError ? err.message : "Could not load streams",
@@ -227,6 +233,37 @@ export default function StreamTable() {
     } catch (err) {
       setListError(
         err instanceof ApiError ? err.message : "Could not reorder streams",
+      );
+    }
+  }
+
+  /**
+   * Move a WHOLE country one group earlier (▲) or later (▼) among the currently
+   * displayed country groups, persisting the new explicit order via
+   * setCountryOrder. `orderedCodes` is the full list of displayed country codes
+   * in their current on-screen order; we swap the clicked country with its
+   * neighbour and send the complete new order. On failure we surface the error
+   * the same way handleReorder does.
+   */
+  async function handleMoveCountry(
+    orderedCodes: string[],
+    code: string,
+    direction: -1 | 1,
+  ) {
+    const from = orderedCodes.indexOf(code);
+    const to = from + direction;
+    if (from === -1 || to < 0 || to >= orderedCodes.length) return;
+    const next = [...orderedCodes];
+    [next[from], next[to]] = [next[to], next[from]];
+    setListError(null);
+    try {
+      const { country_order } = await setCountryOrder(next);
+      setCountryOrderState(country_order);
+    } catch (err) {
+      setListError(
+        err instanceof ApiError
+          ? err.message
+          : "Could not reorder countries",
       );
     }
   }
@@ -444,6 +481,8 @@ export default function StreamTable() {
     const opt = codecOption(draft.codec);
     return (
       <>
+        {/* No star control while editing (placeholder kept first for alignment). */}
+        <Table.Td />
         <Table.Td className={classes.streamNameCell}>
           <TextInput
             aria-label="Name"
@@ -542,8 +581,6 @@ export default function StreamTable() {
             )}
           </Stack>
         </Table.Td>
-        {/* No star control while editing. */}
-        <Table.Td />
         <Table.Td>
           <Group gap="xs" wrap="nowrap">
             <Tooltip label="Save">
@@ -609,14 +646,14 @@ export default function StreamTable() {
           <Text>No streams yet.</Text>
         ) : (
           <Table.ScrollContainer minWidth={720} type="native">
-            <Table verticalSpacing="sm" horizontalSpacing="md" layout="fixed">
+            <Table verticalSpacing="xs" horizontalSpacing="sm" layout="fixed">
               <Table.Thead>
                 <Table.Tr>
+                  <Table.Th style={{ width: 72 }}>Default</Table.Th>
                   <Table.Th>Name</Table.Th>
                   <Table.Th style={{ width: 160 }}>Country</Table.Th>
                   <Table.Th>URL</Table.Th>
                   <Table.Th style={{ width: 150 }}>Quality</Table.Th>
-                  <Table.Th style={{ width: 72 }}>Default</Table.Th>
                   <Table.Th style={{ width: 120 }}>Actions</Table.Th>
                 </Table.Tr>
               </Table.Thead>
@@ -636,18 +673,81 @@ export default function StreamTable() {
                 </Table.Tbody>
               )}
 
-              {groupByCountry(streams).map((group) => (
-                <Table.Tbody key={group.country}>
-                  <Table.Tr>
-                    <Table.Th
-                      colSpan={COLSPAN}
-                      scope="colgroup"
-                      className={classes.countryHeaderCell}
-                    >
-                      {countryName(group.country)}
-                    </Table.Th>
-                  </Table.Tr>
-                  {group.rows.map((s) => {
+              {(() => {
+                // Country groups in first-appearance order, then re-ordered by
+                // the explicit admin country_order (alphabetical-by-name
+                // fallback for any country not listed).
+                const rawGroups = groupByCountry(streams);
+                const orderedCodes = orderCountries(
+                  countryOrder,
+                  rawGroups.map((g) => g.country),
+                );
+                const byCountry = new Map(
+                  rawGroups.map((g) => [g.country, g]),
+                );
+                const groups = orderedCodes
+                  .map((code) => byCountry.get(code))
+                  .filter(
+                    (g): g is { country: string; rows: StreamRecord[] } =>
+                      g !== undefined,
+                  );
+                return groups.map((group, groupIndex) => (
+                  <Table.Tbody key={group.country}>
+                    <Table.Tr>
+                      <Table.Th
+                        colSpan={COLSPAN}
+                        scope="colgroup"
+                        className={classes.countryHeaderCell}
+                      >
+                        <Group gap="xs" wrap="nowrap" align="center">
+                          <Stack gap={0}>
+                            <Tooltip
+                              label={`Move ${countryName(group.country)} up`}
+                            >
+                              <ActionIcon
+                                variant="default"
+                                size="sm"
+                                aria-label={`Move ${countryName(group.country)} up`}
+                                disabled={groupIndex === 0 || editing !== null}
+                                onClick={() =>
+                                  handleMoveCountry(
+                                    orderedCodes,
+                                    group.country,
+                                    -1,
+                                  )
+                                }
+                              >
+                                <IconChevronUp size={14} />
+                              </ActionIcon>
+                            </Tooltip>
+                            <Tooltip
+                              label={`Move ${countryName(group.country)} down`}
+                            >
+                              <ActionIcon
+                                variant="default"
+                                size="sm"
+                                aria-label={`Move ${countryName(group.country)} down`}
+                                disabled={
+                                  groupIndex === groups.length - 1 ||
+                                  editing !== null
+                                }
+                                onClick={() =>
+                                  handleMoveCountry(
+                                    orderedCodes,
+                                    group.country,
+                                    1,
+                                  )
+                                }
+                              >
+                                <IconChevronDown size={14} />
+                              </ActionIcon>
+                            </Tooltip>
+                          </Stack>
+                          <span>{countryName(group.country)}</span>
+                        </Group>
+                        </Table.Th>
+                      </Table.Tr>
+                      {group.rows.map((s) => {
                     const flatIndex = streams.findIndex((x) => x.id === s.id);
                     const isDefault = s.folder === defaultFolder;
                     const isEditingThis =
@@ -661,20 +761,6 @@ export default function StreamTable() {
                     }
                     return (
                       <Table.Tr key={s.id}>
-                        <Table.Td className={classes.streamNameCell}>
-                          {s.name}
-                        </Table.Td>
-                        <Table.Td>{countryName(s.country)}</Table.Td>
-                        <Table.Td>
-                          <Tooltip label={s.url} multiline maw={520}>
-                            <Text truncate title={s.url}>
-                              {s.url}
-                            </Text>
-                          </Tooltip>
-                        </Table.Td>
-                        <Table.Td>
-                          <Text size="sm">{qualityLabel(s)}</Text>
-                        </Table.Td>
                         <Table.Td>
                           <Tooltip
                             label={isDefault ? "Default stream" : "Set as default"}
@@ -696,6 +782,20 @@ export default function StreamTable() {
                               )}
                             </ActionIcon>
                           </Tooltip>
+                        </Table.Td>
+                        <Table.Td className={classes.streamNameCell}>
+                          {s.name}
+                        </Table.Td>
+                        <Table.Td>{countryName(s.country)}</Table.Td>
+                        <Table.Td>
+                          <Tooltip label={s.url} multiline maw={520}>
+                            <Text truncate title={s.url}>
+                              {s.url}
+                            </Text>
+                          </Tooltip>
+                        </Table.Td>
+                        <Table.Td>
+                          <Text size="sm">{qualityLabel(s)}</Text>
                         </Table.Td>
                         <Table.Td>
                           <Group gap="xs" wrap="nowrap" align="center">
@@ -748,8 +848,9 @@ export default function StreamTable() {
                       </Table.Tr>
                     );
                   })}
-                </Table.Tbody>
-              ))}
+                  </Table.Tbody>
+                ));
+              })()}
             </Table>
           </Table.ScrollContainer>
         )}

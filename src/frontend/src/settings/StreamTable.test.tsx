@@ -27,8 +27,16 @@ const getDeletionImpact = vi.fn();
 const testStreamUrl = vi.fn();
 const reorderStreams = vi.fn();
 const setDefaultStream = vi.fn();
+const setCountryOrder =
+  vi.fn<(codes: string[]) => Promise<{ country_order: string[] }>>();
 const getPublicConfig =
-  vi.fn<() => Promise<{ title: string; default_stream_folder: string }>>();
+  vi.fn<
+    () => Promise<{
+      title: string;
+      default_stream_folder: string;
+      country_order: string[];
+    }>
+  >();
 
 // A minimal ApiError stand-in so the component's `err instanceof ApiError`
 // branch (which surfaces the backend message, e.g. a 409) is exercised.
@@ -55,6 +63,7 @@ vi.mock("../api", () => ({
   testStreamUrl: (url: string) => testStreamUrl(url),
   reorderStreams: (order: number[]) => reorderStreams(order),
   setDefaultStream: (folder: string) => setDefaultStream(folder),
+  setCountryOrder: (codes: string[]) => setCountryOrder(codes),
   getPublicConfig: () => getPublicConfig(),
 }));
 
@@ -98,6 +107,7 @@ describe("StreamTable", () => {
     getPublicConfig.mockResolvedValue({
       title: "",
       default_stream_folder: "",
+      country_order: [],
     });
   });
 
@@ -119,18 +129,70 @@ describe("StreamTable", () => {
     expect(screen.queryByText("radio_two")).not.toBeInTheDocument();
   });
 
-  it("renders a country-group header for each distinct country", async () => {
+  it("renders a country-group header for each distinct country, ordered by country_order (alphabetical-by-name fallback)", async () => {
     getStreams.mockResolvedValue(ROWS);
     renderWithMantine(<StreamTable />);
 
     await screen.findByText("Radio One");
-    const nl = screen.getByRole("columnheader", { name: "Netherlands" });
-    const be = screen.getByRole("columnheader", { name: "Belgium" });
-    expect(nl).toBeInTheDocument();
-    expect(be).toBeInTheDocument();
+    // Each country group header carries a "Move {country} up" control; use those
+    // to locate (and order-check) the two group headers unambiguously.
+    const beHeader = screen.getByRole("button", { name: "Move Belgium up" });
+    const nlHeader = screen.getByRole("button", {
+      name: "Move Netherlands up",
+    });
+    expect(beHeader).toBeInTheDocument();
+    expect(nlHeader).toBeInTheDocument();
+    // With country_order [] the groups fall back to alphabetical by NAME, so
+    // Belgium precedes Netherlands.
     expect(
-      nl.compareDocumentPosition(be) & Node.DOCUMENT_POSITION_FOLLOWING,
+      beHeader.compareDocumentPosition(nlHeader) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  it("disables up on the first country group and down on the last", async () => {
+    getStreams.mockResolvedValue(ROWS);
+    renderWithMantine(<StreamTable />);
+
+    await screen.findByText("Radio One");
+    // Alphabetical fallback order: Belgium (first) then Netherlands (last).
+    expect(
+      screen.getByRole("button", { name: "Move Belgium up" }),
+    ).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Move Netherlands down" }),
+    ).toBeDisabled();
+  });
+
+  it("renders the Default star as the FIRST cell of a data row", async () => {
+    getStreams.mockResolvedValue(ROWS);
+    renderWithMantine(<StreamTable />);
+
+    const nameCell = await screen.findByText("Radio One");
+    // Walk up to the enclosing row and assert its first cell holds the star.
+    const row = nameCell.closest("tr") as HTMLTableRowElement;
+    const firstCell = row.cells[0];
+    const star = within(firstCell).getByRole("button", {
+      name: "Set as default",
+    });
+    expect(star).toBeInTheDocument();
+  });
+
+  it("clicking a country group-header down control calls setCountryOrder with the swapped code order", async () => {
+    getStreams.mockResolvedValue(ROWS);
+    setCountryOrder.mockResolvedValue({ country_order: ["NL", "BE"] });
+    renderWithMantine(<StreamTable />);
+
+    await screen.findByText("Radio One");
+    // With country_order [] the display order is alphabetical by NAME:
+    // Belgium then Netherlands. Moving Belgium down swaps to [NL, BE].
+    fireEvent.click(
+      screen.getByRole("button", { name: "Move Belgium down" }),
+    );
+
+    await waitFor(() => {
+      expect(setCountryOrder).toHaveBeenCalledWith(["NL", "BE"]);
+    });
   });
 
   it("clicking a row's down arrow calls reorderStreams with the swapped id order", async () => {
@@ -165,10 +227,13 @@ describe("StreamTable", () => {
     setDefaultStream.mockResolvedValue({ default_stream_folder: "radio_one" });
     renderWithMantine(<StreamTable />);
 
-    await screen.findByText("Radio One");
-    // Both rows start unfilled ("Set as default").
-    const stars = screen.getAllByRole("button", { name: "Set as default" });
-    fireEvent.click(stars[0]);
+    // Both rows start unfilled ("Set as default"). Target Radio One's row
+    // specifically (display order is country-grouped, not insertion order).
+    const nameCell = await screen.findByText("Radio One");
+    const row = nameCell.closest("tr") as HTMLTableRowElement;
+    fireEvent.click(
+      within(row).getByRole("button", { name: "Set as default" }),
+    );
 
     await waitFor(() => {
       expect(setDefaultStream).toHaveBeenCalledWith("radio_one");
@@ -184,6 +249,7 @@ describe("StreamTable", () => {
     getPublicConfig.mockResolvedValue({
       title: "",
       default_stream_folder: "radio_two",
+      country_order: [],
     });
     renderWithMantine(<StreamTable />);
 
@@ -202,6 +268,7 @@ describe("StreamTable", () => {
     getPublicConfig.mockResolvedValue({
       title: "",
       default_stream_folder: "radio_one",
+      country_order: [],
     });
     setDefaultStream.mockResolvedValue({ default_stream_folder: "" });
     renderWithMantine(<StreamTable />);

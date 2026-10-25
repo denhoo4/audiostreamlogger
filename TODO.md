@@ -8,6 +8,9 @@ and merged to `origin/main`. For the story of what was built and why, see
 
 Last updated: 2026-10-23.
 
+> Branch `country-order-polish` (not yet merged): manual country ordering +
+> Streams-table polish. See the Phase-3.7 entry below.
+
 ## Current state
 
 Everything shipped is merged and on `origin/main`. Working tree clean. Only the
@@ -119,6 +122,25 @@ share the styling layer, NOT parallel):
       `node:26-bookworm` (75 baseline + 12 derive-folder + net new StreamTable inline
       tests). Evidence in
       `.agents/tasks/audiostreamlogger-streams-inline-edit-2026-10-23/verification.md`.
+- [x] Phase 3.7 — manual country ordering + Streams-table polish: DONE on branch
+      `country-order-polish` (NOT yet merged). Adds an explicit admin-chosen country
+      order persisted as an additive `app_config` key `country_order` (JSON array of
+      uppercase ISO alpha-2 codes; no schema migration): new requireAuth
+      `PUT /api/app-config/country-order` + `country_order` exposed on the public
+      `GET /api/app-config/public`, documented in openapi, with node:test coverage
+      (api 248→260 pass). Frontend consumes it via `api.ts` `getPublicConfig().country_order`
+      + `setCountryOrder(codes)`. Shared framework-free helpers in
+      `settings/country-order.ts` (`orderCountries` + `sortStreamsByCountryOrder`;
+      listed countries first in order, the rest alphabetical BY NAME; per-stream
+      `sort_order` within a country untouched). Admin `StreamTable` country GROUP
+      HEADERS gained stacked Up/Down controls that move a whole country and persist
+      via `setCountryOrder`; the player (`App.tsx`) selector orders its options by the
+      same `country_order`. Polish: Default star moved to the far-left first column,
+      tighter cell padding (`verticalSpacing xs`/`horizontalSpacing sm`), admin-only
+      wider container (`AppLayout` gained a `size` prop; `main.tsx` passes `xl` for
+      `/settings`, player stays `lg`), and a stronger dark country-header contrast
+      (`#1e2a44`; light scheme unchanged). Build + 103 vitest pass / api 260 pass, all
+      0-fail, in `node:26-bookworm`.
 - [ ] Phase 4 — the player (public `/` screen): stream selection, the WaveSurfer
       waveform, playback controls, download/fragment-cut. Most visible screen.
 - [ ] Phase 5 — admin per tab (Streams → Recordings & health → Jobs → System), one
