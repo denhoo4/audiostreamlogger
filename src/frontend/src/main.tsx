@@ -12,6 +12,7 @@ import "@mantine/core/styles.css";
 // Calendar/date-picker styles for the player's DatePickerInput.
 import "@mantine/dates/styles.css";
 import { theme } from "./theme";
+import { systemColorSchemeManager } from "./color-scheme-manager";
 
 // Lightweight view switch without a router dependency (design §2.6): the
 // /settings path renders the admin view, everything else renders the existing
@@ -42,7 +43,11 @@ createRoot(document.getElementById("root")!).render(
         There is no manual override control: the scheme always follows the
         browser. */}
     <ColorSchemeScript defaultColorScheme="auto" />
-    <MantineProvider theme={theme} defaultColorScheme="auto">
+    <MantineProvider
+      theme={theme}
+      defaultColorScheme="auto"
+      colorSchemeManager={systemColorSchemeManager()}
+    >
       <Root />
     </MantineProvider>
   </StrictMode>,
