@@ -10,6 +10,9 @@ Last updated: 2026-10-23.
 
 > Branch `country-order-polish` (not yet merged): manual country ordering +
 > Streams-table polish. See the Phase-3.7 entry below.
+> Branch `ui-admin-tabs-restyle` (not yet merged): Phase-5 restyle of the remaining
+> three admin tabs (Recordings & health, Jobs, System) to the Mantine house style.
+> See the Phase-5 entry below.
 
 ## Current state
 
@@ -143,8 +146,29 @@ share the styling layer, NOT parallel):
       0-fail, in `node:26-bookworm`.
 - [ ] Phase 4 — the player (public `/` screen): stream selection, the WaveSurfer
       waveform, playback controls, download/fragment-cut. Most visible screen.
-- [ ] Phase 5 — admin per tab (Streams → Recordings & health → Jobs → System), one
-      step per tab, reusing the Phase-3 components.
+- [~] Phase 5 — admin per tab (Streams → Recordings & health → Jobs → System), one
+      step per tab, reusing the Phase-3 components. Streams done in Phase 3.6/3.7.
+      The remaining three tabs are DONE on branch `ui-admin-tabs-restyle` (NOT yet
+      merged): STYLING/RESKIN ONLY, no api.ts/endpoint/SSE/schema/docker/nginx change.
+      - Recordings & health (`RecordingsAnalysis`, `StreamHealth`, `StorageEstimate`):
+        content wrapped in the shared `Panel`, data in Mantine `Table` inside
+        `Table.ScrollContainer`, gaps form on Mantine inputs; the `recording now`/
+        `not recording` aria-labels and measured/estimated text preserved. Three test
+        suites migrated to `renderWithMantine` (behaviour/role/text assertions, no
+        removed-class selectors).
+      - Jobs (`SchedulerConfig`, `JobViewer`, `WorkerStatus`): shared `Panel` +
+        Mantine components; JobViewer `openJobStream` EventSource lifecycle and
+        `mergeJob` logic and WorkerStatus 5s poll + 1s clock intervals preserved
+        byte-for-byte; `skipped`/`skipped, busy` stays NEUTRAL (not an error colour).
+        `JobViewer.test.tsx` migrated to `renderWithMantine`.
+      - System (`BrandingSettings`, `BackupSettings`, `ChangePasswordForm`): shared
+        `Panel` + Mantine inputs; favicon cache-bust preview, `saveBlob`/`dateStamp`,
+        invalid-JSON inline error, file-input reset and form submit semantics kept
+        (no test suites exist for these three).
+      Every `<h2>` heading kept verbatim so `SettingsPage.test.tsx` tab-switching
+      still resolves each panel by heading role+name. No new dependency (feedback
+      stays inline via `Alert`/status regions, no toasts). Cross-feat verify green:
+      `tsc -b` + `vite build` + 103/103 vitest in `node:26-bookworm`.
 - [ ] Phase 6 — polish: responsive/mobile, accessibility (focus states, contrast,
       keyboard), consistent loading/empty/error states, subtle motion.
 Frontend-only (`src/frontend/`). No backend/API/schema change. WaveSurfer behaviour
