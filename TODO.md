@@ -13,6 +13,9 @@ Last updated: 2026-10-23.
 > Branch `ui-admin-tabs-restyle` (not yet merged): Phase-5 restyle of the remaining
 > three admin tabs (Recordings & health, Jobs, System) to the Mantine house style.
 > See the Phase-5 entry below.
+> Branch `admin-content-reworks` (not yet merged): Phase-5.5 admin content reworks
+> (merged Recordings & health table, Jobs tab log-retention + latest-per-type job
+> view + reconcile controls, header brand from app_title). See the Phase-5.5 entry.
 
 ## Current state
 
@@ -185,7 +188,28 @@ share the styling layer, NOT parallel):
       Every `<h2>` heading kept verbatim so `SettingsPage.test.tsx` tab-switching
       still resolves each panel by heading role+name. No new dependency (feedback
       stays inline via `Alert`/status regions, no toasts).
-- [ ] Phase 5.5 — admin content reworks (user, 2026-10-23), not just styling:
+- [x] Phase 5.5 — admin content reworks (user, 2026-10-23), not just styling: DONE
+      on branch `admin-content-reworks` (NOT yet merged; frontend-only, no
+      api.ts/endpoint/SSE/schema/docker/nginx change — reconcile was already a
+      first-class backend job type). Cross-feat verify green: `tsc -b` + `vite build`
+      + 109/109 vitest in `node:26-bookworm`. Implemented as three FEATs:
+      - Recordings & health: the three panels (RecordingsAnalysis, StreamHealth,
+        StorageEstimate) + their suites were REPLACED by a single `RecordingsHealth`
+        panel — one per-stream table (Stream, Total hours, Storage, Range, Health,
+        Bytes/hour, Projected size) merged client-side by folder from the existing
+        summary/stream-health/storage-estimate endpoints, with the two summary lines
+        ("Projected total: … over Nh retention", "Currently on disk: …") above it.
+        Gaps & coverage UI removed (endpoint left untouched, now unused).
+      - Jobs: the cleaner schedule card now holds the log-retention Hours field
+        between the Enabled toggle and the frequency select (standalone bottom panel
+        removed); JobViewer keeps the SSE lifecycle but shows at most one row per type
+        (latest cleaner/peakfilegenerator/reconcile); reconcile renders as a scheduler
+        peer with Enabled/Save/Run-now (already backed end to end).
+      - System: AppLayout header brand now derives from `getPublicConfig().title` via
+        a new `useBrandTitle()` hook wired through a `Root` wrapper in `main.tsx`, on
+        both `/` and `/settings`, falling back to the shared `DEFAULT_APP_TITLE`
+        ("Dé radiologger") when empty or the fetch fails.
+      ORIGINAL REQUEST (for reference):
       - Recordings & health: MERGE the three tables (analysis summary + stream-health
         + storage-estimate) into ONE per-stream table with columns: Stream, Total
         hours, Storage (current stored bytes), Range (earliest–latest), Health (the
