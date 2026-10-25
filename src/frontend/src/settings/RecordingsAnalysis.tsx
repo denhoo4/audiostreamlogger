@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
+  Alert,
+  Button,
+  Group,
+  List,
+  Loader,
+  NativeSelect,
+  Stack,
+  Table,
+  Text,
+  TextInput,
+  Title,
+} from "@mantine/core";
+import {
   ApiError,
   getAnalysisGaps,
   getAnalysisSummary,
@@ -7,6 +20,7 @@ import {
   type AnalysisStreamSummary,
   type AnalysisSummary,
 } from "../api";
+import { Panel } from "../ui";
 
 /** Human-readable byte size (1024-based) for the storage column. */
 function formatBytes(bytes: number): string {
@@ -39,6 +53,10 @@ function formatDuration(seconds: number | null): string {
  * lets an operator pick a stream + date range and call GET /api/analysis/gaps,
  * showing expected vs present counts, the coverage ratio, and the list of
  * missing hour slots. Loading + ApiError states mirror the other sections.
+ *
+ * Restyled to the Mantine AI-Studio house style (Panel + Mantine Table/forms);
+ * all api.ts calls, human-readable output, the <h2> heading and the behaviour
+ * are preserved verbatim.
  */
 export default function RecordingsAnalysis() {
   const [summary, setSummary] = useState<AnalysisSummary | null>(null);
@@ -104,120 +122,132 @@ export default function RecordingsAnalysis() {
     }
   }
 
+  const streamData =
+    streams.length === 0
+      ? [{ value: "", label: "(none)" }]
+      : streams.map((s) => ({
+          value: s.stream_folder,
+          label: s.stream_folder,
+        }));
+
   return (
     <section className="settings-section">
-      <h2>Recordings analysis</h2>
+      <Title order={2}>Recordings analysis</Title>
 
       {summaryError && (
-        <p className="settings-error" role="alert">
+        <Alert color="red" role="alert" mt="md">
           {summaryError}
-        </p>
+        </Alert>
       )}
 
-      {!summary && !summaryError ? (
-        <p>Loading…</p>
-      ) : streams.length === 0 ? (
-        <p>No recordings yet.</p>
-      ) : (
-        <table className="analysis-table">
-          <thead>
-            <tr>
-              <th>Stream</th>
-              <th>Total hours</th>
-              <th>Storage</th>
-              <th>Recordings</th>
-              <th>Avg duration</th>
-              <th>Range</th>
-            </tr>
-          </thead>
-          <tbody>
-            {streams.map((s) => (
-              <tr key={s.stream_folder}>
-                <td>{s.stream_folder}</td>
-                <td>{s.total_hours}</td>
-                <td>{formatBytes(s.storage_bytes)}</td>
-                <td>{s.recording_count}</td>
-                <td>{formatDuration(s.avg_duration_seconds)}</td>
-                <td>
-                  {formatSlot(s.earliest)} – {formatSlot(s.latest)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <h3>Gaps &amp; coverage</h3>
-      <form className="analysis-gaps-form" onSubmit={handleCheckGaps}>
-        <label>
-          Stream
-          <select
-            value={folder}
-            onChange={(e) => setFolder(e.target.value)}
-          >
-            {streams.length === 0 && <option value="">(none)</option>}
-            {streams.map((s) => (
-              <option key={s.stream_folder} value={s.stream_folder}>
-                {s.stream_folder}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Start
-          <input
-            type="date"
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-          />
-        </label>
-        <label>
-          End
-          <input
-            type="date"
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
-          />
-        </label>
-        <button type="submit" disabled={checking || streams.length === 0}>
-          {checking ? "Checking…" : "Check gaps"}
-        </button>
-      </form>
-
-      {gapsError && (
-        <p className="settings-error" role="alert">
-          {gapsError}
-        </p>
-      )}
-
-      {gaps && (
-        <div className="analysis-gaps-result">
-          <ul>
-            <li>Folder: {gaps.folder}</li>
-            <li>
-              Range: {gaps.start} – {gaps.end}
-            </li>
-            <li>
-              Coverage: {gaps.present_count} / {gaps.expected_count} slots (
-              {Math.round(gaps.coverage_ratio * 100)}%)
-            </li>
-          </ul>
-          {gaps.missing.length === 0 ? (
-            <p>No missing slots in this range.</p>
-          ) : (
-            <>
-              <p>Missing slots ({gaps.missing.length}):</p>
-              <ul className="analysis-missing-list">
-                {gaps.missing.map((m) => (
-                  <li key={`${m.date}-${m.hour}`}>
-                    {m.date} {m.hour}:00
-                  </li>
+      <Panel mt="md">
+        {!summary && !summaryError ? (
+          <Group gap="xs">
+            <Loader size="sm" />
+            <Text c="dimmed">Loading…</Text>
+          </Group>
+        ) : streams.length === 0 ? (
+          <Text c="dimmed">No recordings yet.</Text>
+        ) : (
+          <Table.ScrollContainer minWidth={640} type="native">
+            <Table verticalSpacing="xs" horizontalSpacing="sm">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Stream</Table.Th>
+                  <Table.Th>Total hours</Table.Th>
+                  <Table.Th>Storage</Table.Th>
+                  <Table.Th>Recordings</Table.Th>
+                  <Table.Th>Avg duration</Table.Th>
+                  <Table.Th>Range</Table.Th>
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {streams.map((s) => (
+                  <Table.Tr key={s.stream_folder}>
+                    <Table.Td>{s.stream_folder}</Table.Td>
+                    <Table.Td>{s.total_hours}</Table.Td>
+                    <Table.Td>{formatBytes(s.storage_bytes)}</Table.Td>
+                    <Table.Td>{s.recording_count}</Table.Td>
+                    <Table.Td>{formatDuration(s.avg_duration_seconds)}</Table.Td>
+                    <Table.Td>
+                      {formatSlot(s.earliest)} – {formatSlot(s.latest)}
+                    </Table.Td>
+                  </Table.Tr>
                 ))}
-              </ul>
-            </>
-          )}
-        </div>
-      )}
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
+        )}
+      </Panel>
+
+      <Title order={3} mt="lg">
+        Gaps &amp; coverage
+      </Title>
+      <Panel mt="md">
+        <form onSubmit={handleCheckGaps}>
+          <Group align="flex-end" gap="sm" wrap="wrap">
+            <NativeSelect
+              label="Stream"
+              value={folder}
+              onChange={(e) => setFolder(e.currentTarget.value)}
+              data={streamData}
+            />
+            <TextInput
+              label="Start"
+              type="date"
+              value={start}
+              onChange={(e) => setStart(e.currentTarget.value)}
+            />
+            <TextInput
+              label="End"
+              type="date"
+              value={end}
+              onChange={(e) => setEnd(e.currentTarget.value)}
+            />
+            <Button
+              type="submit"
+              disabled={checking || streams.length === 0}
+            >
+              {checking ? "Checking…" : "Check gaps"}
+            </Button>
+          </Group>
+        </form>
+
+        {gapsError && (
+          <Alert color="red" role="alert" mt="md">
+            {gapsError}
+          </Alert>
+        )}
+
+        {gaps && (
+          <Stack gap="xs" mt="md">
+            <List>
+              <List.Item>Folder: {gaps.folder}</List.Item>
+              <List.Item>
+                Range: {gaps.start} – {gaps.end}
+              </List.Item>
+              <List.Item>
+                Coverage: {gaps.present_count} / {gaps.expected_count} slots (
+                {Math.round(gaps.coverage_ratio * 100)}%)
+              </List.Item>
+            </List>
+            {gaps.missing.length === 0 ? (
+              <Text>No missing slots in this range.</Text>
+            ) : (
+              <>
+                <Text>Missing slots ({gaps.missing.length}):</Text>
+                <List>
+                  {gaps.missing.map((m) => (
+                    <List.Item key={`${m.date}-${m.hour}`}>
+                      {m.date} {m.hour}:00
+                    </List.Item>
+                  ))}
+                </List>
+              </>
+            )}
+          </Stack>
+        )}
+      </Panel>
     </section>
   );
 }

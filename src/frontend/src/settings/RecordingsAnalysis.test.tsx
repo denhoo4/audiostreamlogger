@@ -2,10 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
   fireEvent,
-  render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
+import { renderWithMantine } from "../test/render-with-mantine";
 import RecordingsAnalysis from "./RecordingsAnalysis";
 import type { AnalysisGaps, AnalysisSummary } from "../api";
 
@@ -63,18 +64,21 @@ describe("RecordingsAnalysis", () => {
 
   it("renders a per-stream row for each stream in the summary", async () => {
     getAnalysisSummary.mockResolvedValue(SUMMARY);
-    render(<RecordingsAnalysis />);
+    renderWithMantine(<RecordingsAnalysis />);
 
     // Wait for the summary to resolve (storage cell is table-only).
     expect(await screen.findByText("10 MB")).toBeInTheDocument();
 
-    // The table body has one row per stream.
-    const rows = document.querySelectorAll(".analysis-table tbody tr");
-    expect(rows.length).toBe(2);
+    // The summary table has one data row per stream (plus the header row).
+    const table = screen.getByRole("table");
+    const bodyRows = within(table)
+      .getAllByRole("row")
+      .filter((r) => within(r).queryAllByRole("columnheader").length === 0);
+    expect(bodyRows.length).toBe(2);
 
     // Both folders appear as the first cell of their row.
-    const firstCells = Array.from(rows).map(
-      (r) => r.querySelector("td")?.textContent,
+    const firstCells = bodyRows.map(
+      (r) => within(r).getAllByRole("cell")[0].textContent,
     );
     expect(firstCells).toEqual(["radio_one", "radio_two"]);
 
@@ -97,10 +101,10 @@ describe("RecordingsAnalysis", () => {
       coverage_ratio: 22 / 24,
     });
 
-    render(<RecordingsAnalysis />);
+    renderWithMantine(<RecordingsAnalysis />);
     await screen.findByText("10 MB");
 
-    fireEvent.submit(document.querySelector(".analysis-gaps-form")!);
+    fireEvent.click(screen.getByRole("button", { name: /check gaps/i }));
 
     await waitFor(() => {
       expect(getAnalysisGaps).toHaveBeenCalledTimes(1);
@@ -108,8 +112,6 @@ describe("RecordingsAnalysis", () => {
 
     // The two missing hour slots are listed.
     expect(await screen.findByText("Missing slots (2):")).toBeInTheDocument();
-    const missing = document.querySelectorAll(".analysis-missing-list li");
-    expect(missing.length).toBe(2);
     expect(screen.getByText("2026-10-20 03:00")).toBeInTheDocument();
     expect(screen.getByText("2026-10-20 04:00")).toBeInTheDocument();
   });

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { renderWithMantine } from "../test/render-with-mantine";
 import StreamHealth from "./StreamHealth";
 import type { StreamHealthResponse } from "../api";
 
@@ -93,13 +94,16 @@ describe("StreamHealth", () => {
 
   it("renders the two columns: a Now check and a 24h gap summary", async () => {
     getStreamHealth.mockResolvedValue(MIXED);
-    render(<StreamHealth />);
+    renderWithMantine(<StreamHealth />);
 
     await screen.findByText("2/3 streams recording now (last 24h)");
 
-    // Every stream renders a row with a Now cell.
-    const rows = document.querySelectorAll(".stream-health-row");
-    expect(rows.length).toBe(3);
+    // Every stream renders a data row (header row excluded).
+    const table = screen.getByRole("table");
+    const bodyRows = within(table)
+      .getAllByRole("row")
+      .filter((r) => within(r).queryAllByRole("columnheader").length === 0);
+    expect(bodyRows.length).toBe(3);
 
     // Two streams recording now → two green checks; one not → one red marker.
     expect(screen.getAllByLabelText("recording now").length).toBe(2);
@@ -116,7 +120,7 @@ describe("StreamHealth", () => {
 
   it("shows the no-check marker for a not-recording stream even when its 24h is complete", async () => {
     getStreamHealth.mockResolvedValue(MIXED);
-    render(<StreamHealth />);
+    renderWithMantine(<StreamHealth />);
 
     await screen.findByText("2/3 streams recording now (last 24h)");
 
@@ -134,7 +138,7 @@ describe("StreamHealth", () => {
 
   it("renders an all-recording header summary", async () => {
     getStreamHealth.mockResolvedValue(ALL_RECORDING);
-    render(<StreamHealth />);
+    renderWithMantine(<StreamHealth />);
 
     await screen.findByText("3/3 streams recording now (last 24h)");
     expect(screen.getAllByLabelText("recording now").length).toBe(3);
@@ -144,12 +148,13 @@ describe("StreamHealth", () => {
   it("shows an error alert when the request fails", async () => {
     const { ApiError } = await import("../api");
     getStreamHealth.mockRejectedValue(new ApiError("boom", 500));
-    render(<StreamHealth />);
+    renderWithMantine(<StreamHealth />);
 
     await waitFor(() => {
       const alert = screen.getByRole("alert");
       expect(alert).toBeInTheDocument();
     });
-    expect(document.querySelectorAll(".stream-health-row").length).toBe(0);
+    // No table (and so no data rows) is rendered on error.
+    expect(screen.queryByRole("table")).toBeNull();
   });
 });

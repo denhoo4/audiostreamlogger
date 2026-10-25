@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
+import { renderWithMantine } from "../test/render-with-mantine";
 import StorageEstimate from "./StorageEstimate";
 import type { StorageEstimateResponse } from "../api";
 
@@ -52,7 +53,7 @@ describe("StorageEstimate", () => {
 
   it("renders the projected total, retention window, and actual on-disk usage", async () => {
     getStorageEstimate.mockResolvedValue(RESPONSE);
-    render(<StorageEstimate />);
+    renderWithMantine(<StorageEstimate />);
 
     // Projected total (72 MiB) rendered in human-readable form over 24h.
     await screen.findByText("72 MB");
@@ -65,16 +66,14 @@ describe("StorageEstimate", () => {
 
   it("renders one measured and one estimated row with the right badge", async () => {
     getStorageEstimate.mockResolvedValue(RESPONSE);
-    render(<StorageEstimate />);
+    renderWithMantine(<StorageEstimate />);
 
     await screen.findByText("NL Measured");
     expect(screen.getByText("NL Estimated")).toBeInTheDocument();
 
-    // The measured/estimated source badges both render.
-    const measuredBadge = screen.getByText("measured");
-    const estimatedBadge = screen.getByText("estimated");
-    expect(measuredBadge).toHaveClass("storage-estimate-badge-measured");
-    expect(estimatedBadge).toHaveClass("storage-estimate-badge-estimated");
+    // The measured/estimated source badges both render (by visible text).
+    expect(screen.getByText("measured")).toBeInTheDocument();
+    expect(screen.getByText("estimated")).toBeInTheDocument();
 
     // Per-stream projected sizes render.
     expect(screen.getByText("24 MB")).toBeInTheDocument();
@@ -84,12 +83,14 @@ describe("StorageEstimate", () => {
   it("shows an error alert when the request fails", async () => {
     const { ApiError } = await import("../api");
     getStorageEstimate.mockRejectedValue(new ApiError("boom", 500));
-    render(<StorageEstimate />);
+    renderWithMantine(<StorageEstimate />);
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeInTheDocument();
     });
-    // No table rendered on error.
-    expect(document.querySelector(".analysis-table")).toBeNull();
+    // No table and no badge texts are rendered on error.
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.queryByText("measured")).toBeNull();
+    expect(screen.queryByText("estimated")).toBeNull();
   });
 });

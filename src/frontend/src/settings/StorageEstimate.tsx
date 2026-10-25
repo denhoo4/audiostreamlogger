@@ -1,9 +1,19 @@
 import { useEffect, useState } from "react";
 import {
+  Alert,
+  Group,
+  List,
+  Loader,
+  Table,
+  Text,
+  Title,
+} from "@mantine/core";
+import {
   ApiError,
   getStorageEstimate,
   type StorageEstimateResponse,
 } from "../api";
+import { Panel, StatusBadge } from "../ui";
 
 /** Human-readable byte size (1024-based), mirroring RecordingsAnalysis. */
 function formatBytes(bytes: number): string {
@@ -24,6 +34,11 @@ function formatBytes(bytes: number): string {
  * total over the configured retention window, the current actual on-disk total,
  * and a per-stream table (stream, bytes/hour, a measured/estimated badge, and
  * the projected size). Loading + ApiError states mirror RecordingsAnalysis.
+ *
+ * Restyled to the Mantine AI-Studio house style (Panel + Mantine Table + a
+ * StatusBadge for the measured/estimated source); the api.ts call, all
+ * human-readable output (bytes, 'measured'/'estimated' text) and the <h2>
+ * heading are preserved verbatim.
  */
 export default function StorageEstimate() {
   const [data, setData] = useState<StorageEstimateResponse | null>(null);
@@ -56,56 +71,69 @@ export default function StorageEstimate() {
 
   return (
     <section className="settings-section">
-      <h2>Storage estimate</h2>
+      <Title order={2}>Storage estimate</Title>
 
       {error && (
-        <p className="settings-error" role="alert">
+        <Alert color="red" role="alert" mt="md">
           {error}
-        </p>
+        </Alert>
       )}
 
       {!data && !error ? (
-        <p>Loading…</p>
+        <Group gap="xs" mt="md">
+          <Loader size="sm" />
+          <Text c="dimmed">Loading…</Text>
+        </Group>
       ) : data ? (
         <>
-          <ul className="storage-estimate-summary">
-            <li>
+          <List mt="md">
+            <List.Item>
               Projected total:{" "}
-              <strong>{formatBytes(data.projection.totalProjectedBytes)}</strong>{" "}
+              <Text span fw={700}>
+                {formatBytes(data.projection.totalProjectedBytes)}
+              </Text>{" "}
               over {data.retention_hours}h retention
-            </li>
-            <li>Currently on disk: {formatBytes(data.actual_bytes)}</li>
-          </ul>
+            </List.Item>
+            <List.Item>
+              Currently on disk: {formatBytes(data.actual_bytes)}
+            </List.Item>
+          </List>
 
           {data.projection.perStream.length === 0 ? (
-            <p>No streams configured.</p>
+            <Text c="dimmed" mt="md">
+              No streams configured.
+            </Text>
           ) : (
-            <table className="analysis-table">
-              <thead>
-                <tr>
-                  <th>Stream</th>
-                  <th>Bytes/hour</th>
-                  <th>Source</th>
-                  <th>Projected size</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.projection.perStream.map((s) => (
-                  <tr key={s.folder}>
-                    <td>{s.name}</td>
-                    <td>{formatBytes(s.bytesPerHour)}/h</td>
-                    <td>
-                      <span
-                        className={`storage-estimate-badge storage-estimate-badge-${s.source}`}
-                      >
-                        {s.source}
-                      </span>
-                    </td>
-                    <td>{formatBytes(s.projectedBytes)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <Panel mt="md">
+              <Table.ScrollContainer minWidth={480} type="native">
+                <Table verticalSpacing="xs" horizontalSpacing="sm">
+                  <Table.Thead>
+                    <Table.Tr>
+                      <Table.Th>Stream</Table.Th>
+                      <Table.Th>Bytes/hour</Table.Th>
+                      <Table.Th>Source</Table.Th>
+                      <Table.Th>Projected size</Table.Th>
+                    </Table.Tr>
+                  </Table.Thead>
+                  <Table.Tbody>
+                    {data.projection.perStream.map((s) => (
+                      <Table.Tr key={s.folder}>
+                        <Table.Td>{s.name}</Table.Td>
+                        <Table.Td>{formatBytes(s.bytesPerHour)}/h</Table.Td>
+                        <Table.Td>
+                          <StatusBadge
+                            status={s.source === "measured" ? "ok" : "never"}
+                          >
+                            {s.source}
+                          </StatusBadge>
+                        </Table.Td>
+                        <Table.Td>{formatBytes(s.projectedBytes)}</Table.Td>
+                      </Table.Tr>
+                    ))}
+                  </Table.Tbody>
+                </Table>
+              </Table.ScrollContainer>
+            </Panel>
           )}
         </>
       ) : null}

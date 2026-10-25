@@ -1,10 +1,20 @@
 import { useEffect, useState } from "react";
 import {
+  Alert,
+  Group,
+  Loader,
+  Table,
+  Text,
+  Title,
+} from "@mantine/core";
+import { IconCheck, IconX } from "@tabler/icons-react";
+import {
   ApiError,
   getStreamHealth,
   type StreamHealthEntry,
   type StreamHealthResponse,
 } from "../api";
+import { Panel } from "../ui";
 
 /**
  * Short, informational "Last 24h" gap summary for a stream: "complete" when
@@ -30,6 +40,11 @@ function formatLast24h(last24h: StreamHealthEntry["last24h"]): string {
  *   - "Last 24h": a short gap summary ("complete" or "N gaps: HH:00, …").
  * Streams that are NOT recording now sort to the top so problems are visible.
  * Loading + ApiError states mirror WorkerStatus.tsx / RecordingsAnalysis.tsx.
+ *
+ * Restyled to the Mantine AI-Studio house style (Panel + Mantine Table); the
+ * api.ts call, the not-recording-first sort, the header summary string, the
+ * 'recording now'/'not recording' accessible names and the <h2> heading are
+ * preserved verbatim.
  */
 export default function StreamHealth() {
   const [data, setData] = useState<StreamHealthResponse | null>(null);
@@ -68,67 +83,70 @@ export default function StreamHealth() {
 
   return (
     <section className="settings-section">
-      <h2>Stream health</h2>
+      <Title order={2}>Stream health</Title>
 
       {error && (
-        <p className="settings-error" role="alert">
+        <Alert color="red" role="alert" mt="md">
           {error}
-        </p>
+        </Alert>
       )}
 
       {!data && !error ? (
-        <p>Loading…</p>
+        <Group gap="xs" mt="md">
+          <Loader size="sm" />
+          <Text c="dimmed">Loading…</Text>
+        </Group>
       ) : data ? (
         <>
-          <p>
+          <Text mt="md">
             {`${data.counts.recordingNow}/${data.counts.total} stream${
               data.counts.total === 1 ? "" : "s"
             } recording now (last ${data.window_hours}h)`}
-          </p>
+          </Text>
 
-          <table className="settings-table stream-health-table">
-            <thead>
-              <tr>
-                <th>Stream</th>
-                <th>Now</th>
-                <th>Last 24h</th>
-              </tr>
-            </thead>
-            <tbody>
-              {streams.map((s) => (
-                <tr key={s.folder} className="stream-health-row">
-                  <td className="stream-health-name">
-                    {s.name}{" "}
-                    <span className="stream-health-folder">({s.folder})</span>
-                  </td>
-                  <td className="stream-health-now">
-                    {s.recordingNow ? (
-                      <span
-                        className="stream-health-check"
-                        role="img"
-                        aria-label="recording now"
-                        title="recording now"
-                      >
-                        ✓
-                      </span>
-                    ) : (
-                      <span
-                        className="stream-health-nocheck"
-                        role="img"
-                        aria-label="not recording"
-                        title="not recording"
-                      >
-                        ✗
-                      </span>
-                    )}
-                  </td>
-                  <td className="stream-health-last24h">
-                    {formatLast24h(s.last24h)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <Panel mt="md">
+            <Table.ScrollContainer minWidth={420} type="native">
+              <Table verticalSpacing="xs" horizontalSpacing="sm">
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Stream</Table.Th>
+                    <Table.Th>Now</Table.Th>
+                    <Table.Th>Last 24h</Table.Th>
+                  </Table.Tr>
+                </Table.Thead>
+                <Table.Tbody>
+                  {streams.map((s) => (
+                    <Table.Tr key={s.folder}>
+                      <Table.Td>
+                        {s.name}{" "}
+                        <Text span c="dimmed">
+                          ({s.folder})
+                        </Text>
+                      </Table.Td>
+                      <Table.Td>
+                        {s.recordingNow ? (
+                          <IconCheck
+                            size={18}
+                            color="var(--mantine-color-green-6)"
+                            role="img"
+                            aria-label="recording now"
+                          />
+                        ) : (
+                          <IconX
+                            size={18}
+                            color="var(--mantine-color-red-6)"
+                            role="img"
+                            aria-label="not recording"
+                          />
+                        )}
+                      </Table.Td>
+                      <Table.Td>{formatLast24h(s.last24h)}</Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          </Panel>
         </>
       ) : null}
     </section>
