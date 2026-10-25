@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { ColorSchemeScript, MantineProvider } from "@mantine/core";
 import App from "./App";
 import SettingsPage from "./settings/SettingsPage";
+import AppLayout from "./AppLayout";
 import "./App.css";
 // Mantine core styles. Imported AFTER App.css so the app's legacy CSS can still
 // override where it needs to during the phased migration.
@@ -20,7 +21,7 @@ createRoot(document.getElementById("root")!).render(
     {/* Writes data-mantine-color-scheme before first paint → no light flash. */}
     <ColorSchemeScript defaultColorScheme="dark" />
     <MantineProvider theme={theme} defaultColorScheme="dark">
-      {isSettings ? <SettingsPage /> : <App />}
+      <AppLayout>{isSettings ? <SettingsPage /> : <App />}</AppLayout>
     </MantineProvider>
   </StrictMode>,
 );

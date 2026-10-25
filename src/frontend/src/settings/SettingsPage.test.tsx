@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
   fireEvent,
-  render,
+  renderWithMantine,
   screen,
   waitFor,
-} from "@testing-library/react";
+} from "../test/render-with-mantine";
 import SettingsPage from "./SettingsPage";
 
 /**
@@ -102,7 +102,7 @@ describe("SettingsPage auth gate", () => {
 
   it("renders the login form when /auth/me says anonymous", async () => {
     stubFetch({ authenticated: false });
-    render(<SettingsPage />);
+    renderWithMantine(<SettingsPage />);
 
     // The LoginForm sign-in button appears once the auth check resolves.
     expect(
@@ -120,7 +120,7 @@ describe("SettingsPage auth gate", () => {
 
   it("renders the management UI when /auth/me says authenticated", async () => {
     stubFetch({ authenticated: true, username: "admin" });
-    render(<SettingsPage />);
+    renderWithMantine(<SettingsPage />);
 
     // "Signed in as admin" + a Log out button mark the authenticated view.
     expect(await screen.findByText("Signed in as admin")).toBeInTheDocument();
@@ -137,7 +137,7 @@ describe("SettingsPage auth gate", () => {
 
   it("does not render the tab bar while anonymous", async () => {
     stubFetch({ authenticated: false });
-    render(<SettingsPage />);
+    renderWithMantine(<SettingsPage />);
 
     expect(
       await screen.findByRole("button", { name: "Sign in" }),
@@ -149,7 +149,7 @@ describe("SettingsPage auth gate", () => {
 
   it("renders the four tabs with Streams active by default", async () => {
     stubFetch({ authenticated: true, username: "admin" });
-    render(<SettingsPage />);
+    renderWithMantine(<SettingsPage />);
 
     await screen.findByText("Signed in as admin");
 
@@ -173,7 +173,7 @@ describe("SettingsPage auth gate", () => {
 
   it("switches tabs: clicking a tab shows its panels and hides the others", async () => {
     stubFetch({ authenticated: true, username: "admin" });
-    render(<SettingsPage />);
+    renderWithMantine(<SettingsPage />);
 
     await screen.findByText("Signed in as admin");
 

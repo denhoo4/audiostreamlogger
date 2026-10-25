@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Tabs } from "@mantine/core";
 import { getAuthMe, postLogout } from "../api";
 import LoginForm from "./LoginForm";
 import StreamTable from "./StreamTable";
@@ -102,72 +103,41 @@ export default function SettingsPage() {
           </button>
         </div>
       </div>
-      <div className="settings-tabs" role="tablist" aria-label="Settings sections">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            role="tab"
-            id={`settings-tab-${tab.id}`}
-            aria-controls={`settings-tabpanel-${tab.id}`}
-            aria-selected={activeTab === tab.id}
-            className={
-              activeTab === tab.id
-                ? "settings-tab settings-tab-active"
-                : "settings-tab"
-            }
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        value={activeTab}
+        onChange={(value) => setActiveTab(value as TabId)}
+        keepMounted={false}
+      >
+        <Tabs.List aria-label="Settings sections">
+          {TABS.map((tab) => (
+            <Tabs.Tab key={tab.id} value={tab.id}>
+              {tab.label}
+            </Tabs.Tab>
+          ))}
+        </Tabs.List>
 
-      {activeTab === "streams" && (
-        <div
-          role="tabpanel"
-          id="settings-tabpanel-streams"
-          aria-labelledby="settings-tab-streams"
-        >
+        <Tabs.Panel value="streams">
           <StreamTable />
-        </div>
-      )}
+        </Tabs.Panel>
 
-      {activeTab === "recordings" && (
-        <div
-          role="tabpanel"
-          id="settings-tabpanel-recordings"
-          aria-labelledby="settings-tab-recordings"
-        >
+        <Tabs.Panel value="recordings">
           <RecordingsAnalysis />
           <StreamHealth />
           <StorageEstimate />
-        </div>
-      )}
+        </Tabs.Panel>
 
-      {activeTab === "jobs" && (
-        <div
-          role="tabpanel"
-          id="settings-tabpanel-jobs"
-          aria-labelledby="settings-tab-jobs"
-        >
+        <Tabs.Panel value="jobs">
           <SchedulerConfig />
           <JobViewer />
           <WorkerStatus />
-        </div>
-      )}
+        </Tabs.Panel>
 
-      {activeTab === "system" && (
-        <div
-          role="tabpanel"
-          id="settings-tabpanel-system"
-          aria-labelledby="settings-tab-system"
-        >
+        <Tabs.Panel value="system">
           <BrandingSettings />
           <BackupSettings />
           <ChangePasswordForm />
-        </div>
-      )}
+        </Tabs.Panel>
+      </Tabs>
     </main>
   );
 }
