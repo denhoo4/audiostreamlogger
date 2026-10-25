@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Box, Container, Group, Title } from "@mantine/core";
 import type { MantineSize } from "@mantine/core";
 import { ColorSchemeToggle } from "./ui";
+import { DEFAULT_APP_TITLE } from "./useAppTitle";
 import classes from "./AppLayout.module.css";
 
 /**
@@ -25,7 +26,7 @@ import classes from "./AppLayout.module.css";
  */
 export default function AppLayout({
   children,
-  title = "Dé radiologger",
+  title = DEFAULT_APP_TITLE,
   size = "lg",
 }: {
   children: ReactNode;
