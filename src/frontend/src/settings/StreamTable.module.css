@@ -1,0 +1,27 @@
+/*
+ * Scheme-aware styling that makes the country GROUP HEADER row clearly stand
+ * out from the stream data rows, in both light and dark. Must live in a CSS
+ * Module so postcss-preset-mantine resolves `light-dark()`.
+ *
+ * The header cell gets a subtle tinted background plus heavier/larger type; the
+ * stream rows' leading cell is indented so each stream visibly nests under its
+ * country. Dark reuses the AI-Studio dark tokens (so dark mode is unchanged);
+ * light uses a faint grey tint with a readable left accent border.
+ */
+.countryHeaderCell {
+  background-color: light-dark(
+    var(--mantine-color-gray-1),
+    var(--mantine-color-dark-5)
+  );
+  border-top: 1px solid var(--mantine-color-default-border);
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  border-left: 3px solid var(--mantine-color-aiBlue-6);
+  font-weight: 700;
+  font-size: var(--mantine-font-size-md);
+  letter-spacing: 0.01em;
+}
+
+/* Indent the stream name cell so streams nest under their country header. */
+.streamNameCell {
+  padding-left: var(--mantine-spacing-lg);
+}

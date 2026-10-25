@@ -1,25 +1,28 @@
 import { Card, type CardProps } from "@mantine/core";
+import classes from "./Panel.module.css";
 
 /**
  * The house "surface": a themed Mantine `Card` that gives every admin screen the
- * same AI-Studio dark panel look — a slightly-lighter-than-body surface
- * (`dark-6`), a subtle 1px border, rounded corners and generous padding. Later
- * screens wrap their content in a `Panel` instead of repeating these defaults.
+ * same AI-Studio panel look — a surface distinct from the body, a subtle 1px
+ * border, rounded corners and generous padding. Later screens wrap their content
+ * in a `Panel` instead of repeating these defaults.
+ *
+ * The surface colour is SCHEME-AWARE via `Panel.module.css` (`light-dark()`):
+ * white in light mode, the slightly-lighter-than-body `dark-6` in dark mode
+ * (dark unchanged). The `withBorder` border uses Mantine's default border,
+ * which also flips per scheme, so the card reads in both. A caller-supplied
+ * `style`/`className` still passes through.
  *
  * It is intentionally thin: all Card props pass through, so callers can still
- * tweak padding/radius when a specific screen needs it. Colours come only from
- * the theme tokens (`--mantine-color-dark-6`), mirroring AppLayout — no new hex.
+ * tweak padding/radius when a specific screen needs it.
  */
-export function Panel({ children, style, ...rest }: CardProps) {
+export function Panel({ children, className, ...rest }: CardProps) {
   return (
     <Card
       withBorder
       radius="md"
       padding="lg"
-      style={{
-        backgroundColor: "var(--mantine-color-dark-6)",
-        ...style,
-      }}
+      className={className ? `${classes.panel} ${className}` : classes.panel}
       {...rest}
     >
       {children}

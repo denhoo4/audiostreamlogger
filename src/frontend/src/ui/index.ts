@@ -2,4 +2,5 @@
 // from here (e.g. `import { Panel, StatusBadge } from "../ui"`).
 export { Panel } from "./Panel";
 export { StatusBadge } from "./StatusBadge";
+export { ColorSchemeToggle } from "./ColorSchemeToggle";
 export type { StatusBadgeProps, StatusKind } from "./StatusBadge";

@@ -26,8 +26,9 @@ DECIDED (user, 2026-10-23):
 - Visual direction: **Google AI Studio, dark theme** — deep near-black/dark-grey
   background, panels a shade lighter with soft borders (subtle borders over heavy
   shadows), one clear accent colour (AI-Studio-ish blue) for primary actions/active
-  state, clean restrained typography, generous spacing, rounded corners. Dark is the
-  default (and only) theme for now.
+  state, clean restrained typography, generous spacing, rounded corners. As of
+  Phase 3.5 the UI follows the device light/dark setting (`auto`) with a header
+  toggle and a matching AI-Studio light theme; dark remains the design anchor.
 Phased order (foundation → screens → polish; done as sequential workflows since they
 share the styling layer, NOT parallel):
 - [x] Phase 1 — Mantine foundation + theme tokens: DONE and merged to
@@ -75,6 +76,28 @@ share the styling layer, NOT parallel):
         keeps the full value in a `Tooltip` + `title`, and the table is wrapped in
         `Table.ScrollContainer type="native"` (minWidth 720) as a narrow-viewport
         fallback. No behaviour/api change; build + 73 tests still green.
+- [x] Phase 3.5 — auto light/dark + light theme + header toggle, plus two
+      Streams-tab refinements: DONE on branch `ui-auto-colorscheme` (styling/theme
+      only; no backend/API/schema/compose/nginx change). The app now follows the
+      device's `prefers-color-scheme` on first paint via Mantine `auto`
+      (`<ColorSchemeScript defaultColorScheme="auto" />` + `MantineProvider
+      defaultColorScheme="auto"`) and switches live; a compact header
+      `ColorSchemeToggle` (System/Light/Dark `SegmentedControl`, accessible labels +
+      tooltips) lets the user override or return to following the device, persisted by
+      Mantine. A proper LIGHT theme was added in the AI-Studio spirit (clean
+      near-white body, white panels, subtle light borders, same blue accent, readable
+      dark text) while DARK stays visually unchanged: the custom dark-only surfaces
+      were made scheme-aware via `light-dark()` in CSS Modules — `AppLayout` header
+      (`dark-6`/`dark-4` → `light-dark(gray-0, dark-6)` + `--mantine-color-default-border`),
+      `Panel` card (`dark-6` → `light-dark(white, dark-6)`). `StatusBadge` kept its
+      scheme-aware named colours. Streams tab: the country group header now clearly
+      stands out (tinted scheme-aware background, dividers + blue left accent, heavier/
+      larger type) with indented stream rows, and the Edit/Delete text buttons became
+      icon `ActionIcon`s (`IconPencil` / red `IconX`) with accessible aria-labels and
+      tooltips — the typed-confirm delete flow is unchanged. New dependency:
+      `@tabler/icons-react@^3.49.0` (only new dep; lockfile regenerated, `npm ci`
+      reproduces it). Build + 75 tests green in `node:26-bookworm` (73 baseline + 2
+      ColorSchemeToggle). Evidence in `src/frontend/.plan/verification.md`.
 - [ ] Phase 4 — the player (public `/` screen): stream selection, the WaveSurfer
       waveform, playback controls, download/fragment-cut. Most visible screen.
 - [ ] Phase 5 — admin per tab (Streams → Recordings & health → Jobs → System), one

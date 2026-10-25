@@ -388,7 +388,7 @@ describe("StreamTable", () => {
     await screen.findByText("Radio One");
 
     // Click the first row's Delete button.
-    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Radio One" }));
 
     await waitFor(() => {
       expect(getDeletionImpact).toHaveBeenCalledWith(1);
@@ -410,7 +410,7 @@ describe("StreamTable", () => {
     renderWithMantine(<StreamTable />);
     await screen.findByText("Radio One");
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Radio One" }));
 
     // The typed-confirm lives in a Modal dialog, and Confirm starts disabled.
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -430,7 +430,7 @@ describe("StreamTable", () => {
     renderWithMantine(<StreamTable />);
     await screen.findByText("Radio One");
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Radio One" }));
     await screen.findByText(/1 file\(s\)/);
 
     const confirmBtn = screen.getByRole("button", { name: "Confirm delete" });
@@ -464,7 +464,7 @@ describe("StreamTable", () => {
     renderWithMantine(<StreamTable />);
     await screen.findByText("Radio One");
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Radio One" }));
     await screen.findByText(/1 file\(s\)/);
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
@@ -490,7 +490,7 @@ describe("StreamTable", () => {
     renderWithMantine(<StreamTable />);
     await screen.findByText("Radio One");
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Delete" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Delete Radio One" }));
     await screen.findByText(/1 file\(s\)/);
     fireEvent.change(
       screen.getByRole("textbox", {
@@ -518,7 +518,7 @@ describe("StreamTable", () => {
     ).not.toBeInTheDocument();
 
     // Enter edit mode for the first row.
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit Radio One" }));
     expect(
       screen.getByText(/Changing the folder MOVES the existing recordings/),
     ).toBeInTheDocument();
@@ -532,7 +532,7 @@ describe("StreamTable", () => {
     renderWithMantine(<StreamTable />);
     await screen.findByText("Radio One");
 
-    fireEvent.click(screen.getAllByRole("button", { name: "Edit" })[0]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit Radio One" }));
 
     // Change the folder, then save.
     const folderInput = screen.getAllByRole("textbox")[1]; // Name, Folder, URL

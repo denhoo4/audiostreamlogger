@@ -1,21 +1,29 @@
 import { createTheme, type MantineColorsTuple } from "@mantine/core";
 
 /**
- * Phase-1 design language — Google-AI-Studio-inspired DARK theme.
+ * Design language — Google-AI-Studio-inspired theme, now scheme-aware.
  *
- * This file is the single source of design tokens that phases 2–6 consume when
- * the actual screens get converted to Mantine. Phase 1 only wires it into the
- * MantineProvider; no component is restyled yet. Favour clarity over cleverness:
- * every token below is documented with what it maps to.
+ * This file is the single source of design tokens the screens consume. Favour
+ * clarity over cleverness: every token below is documented with what it maps to.
  *
- * Visual target (AI-Studio dark):
+ * Visual target (AI-Studio DARK — unchanged):
  *   - deep, near-black app background
  *   - panels/surfaces one shade lighter than the background
  *   - subtle 1px borders instead of heavy shadows
  *   - ONE clear blue accent
  *   - restrained, readable system typography
  *
- * Dark is the default AND only scheme this phase (no light-mode toggle).
+ * Visual target (AI-Studio LIGHT — added in phase 3.5):
+ *   - clean light-grey / near-white app background
+ *   - white-ish panels with a subtle light border
+ *   - the SAME blue accent, readable dark text
+ *
+ * Both schemes now matter: the app follows the device (`auto`) and offers a
+ * header toggle. The accent (aiBlue), radius, typography and spacing are SHARED
+ * across schemes (set once below); only the canvas (surface bg/border/text)
+ * flips per scheme. Those per-surface flips live in the CSS Modules of the
+ * custom surfaces (AppLayout, Panel, StreamTable) via Mantine's `light-dark()`,
+ * and in Mantine's own scheme-flipping CSS variables.
  */
 
 /**
@@ -71,7 +79,8 @@ export const theme = createTheme({
     dark,
   },
   primaryColor: "aiBlue",
-  // Use shade 6 for the primary colour in dark scheme (the AI-Studio blue).
+  // The AI-Studio blue at shade 6 (#1a6cf0) reads well on both the dark body
+  // and on white in light mode, so a single primary shade serves both schemes.
   primaryShade: 6,
 
   // Rounded corners everywhere by default — soft, modern AI-Studio surfaces.

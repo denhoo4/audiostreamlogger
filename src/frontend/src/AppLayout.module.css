@@ -1,0 +1,17 @@
+/*
+ * Scheme-aware surface styles for the AppLayout header. These MUST live in a
+ * CSS Module (not a React inline `style`) because the `light-dark()` function
+ * is resolved by postcss-preset-mantine at build time and only applies to CSS
+ * processed through PostCSS — inline style objects bypass it.
+ *
+ * Dark values reuse the existing AI-Studio tokens (dark-6 surface, dark-4
+ * border) so dark mode is visually UNCHANGED. Light values give the header a
+ * clean near-white surface with a subtle light border.
+ */
+.header {
+  /* Light: a faint light-grey header that lifts off the near-white body.
+     Dark: the original slightly-lighter-than-body surface (dark-6). */
+  background-color: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6));
+  /* default-border flips per scheme (light grey in light, dark-4 in dark). */
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}

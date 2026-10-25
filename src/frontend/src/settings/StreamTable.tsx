@@ -13,6 +13,7 @@ import {
   Title,
   Tooltip,
 } from "@mantine/core";
+import { IconPencil, IconX } from "@tabler/icons-react";
 import {
   ApiError,
   createStream,
@@ -32,6 +33,7 @@ import {
 } from "../api";
 import { COUNTRIES_BY_NAME, countryName } from "./countries";
 import { Panel, StatusBadge } from "../ui";
+import classes from "./StreamTable.module.css";
 
 /**
  * Valid recording-quality combinations per codec, mirroring the api allowlist
@@ -388,7 +390,11 @@ export default function StreamTable() {
             {groupByCountry(streams).map((group) => (
               <Table.Tbody key={group.country}>
                 <Table.Tr>
-                  <Table.Th colSpan={6} scope="colgroup">
+                  <Table.Th
+                    colSpan={6}
+                    scope="colgroup"
+                    className={classes.countryHeaderCell}
+                  >
                     {countryName(group.country)}
                   </Table.Th>
                 </Table.Tr>
@@ -397,7 +403,9 @@ export default function StreamTable() {
                   const isDefault = s.folder === defaultFolder;
                   return (
                     <Table.Tr key={s.id}>
-                      <Table.Td>{s.name}</Table.Td>
+                      <Table.Td className={classes.streamNameCell}>
+                        {s.name}
+                      </Table.Td>
                       <Table.Td>{s.folder}</Table.Td>
                       <Table.Td>
                         <Tooltip label={s.url} multiline maw={520}>
@@ -441,21 +449,25 @@ export default function StreamTable() {
                       </Table.Td>
                       <Table.Td>
                         <Group gap="xs" wrap="nowrap">
-                          <Button
-                            variant="default"
-                            size="xs"
-                            onClick={() => startEdit(s)}
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            color="red"
-                            variant="light"
-                            size="xs"
-                            onClick={() => openDeleteConfirm(s)}
-                          >
-                            Delete
-                          </Button>
+                          <Tooltip label={`Edit ${s.name}`}>
+                            <ActionIcon
+                              variant="default"
+                              aria-label={`Edit ${s.name}`}
+                              onClick={() => startEdit(s)}
+                            >
+                              <IconPencil size={16} />
+                            </ActionIcon>
+                          </Tooltip>
+                          <Tooltip label={`Delete ${s.name}`}>
+                            <ActionIcon
+                              color="red"
+                              variant="light"
+                              aria-label={`Delete ${s.name}`}
+                              onClick={() => openDeleteConfirm(s)}
+                            >
+                              <IconX size={16} />
+                            </ActionIcon>
+                          </Tooltip>
                         </Group>
                       </Table.Td>
                     </Table.Tr>

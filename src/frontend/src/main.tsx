@@ -18,9 +18,13 @@ const isSettings = window.location.pathname.startsWith("/settings");
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {/* Writes data-mantine-color-scheme before first paint → no light flash. */}
-    <ColorSchemeScript defaultColorScheme="dark" />
-    <MantineProvider theme={theme} defaultColorScheme="dark">
+    {/* Writes data-mantine-color-scheme before first paint from the device's
+        prefers-color-scheme → the UI follows the OS light/dark setting on first
+        paint with no flash, and switches live when the device setting changes.
+        A header toggle (ColorSchemeToggle) lets the user override to
+        light/dark or return to 'auto' (follow device). */}
+    <ColorSchemeScript defaultColorScheme="auto" />
+    <MantineProvider theme={theme} defaultColorScheme="auto">
       <AppLayout>{isSettings ? <SettingsPage /> : <App />}</AppLayout>
     </MantineProvider>
   </StrictMode>,

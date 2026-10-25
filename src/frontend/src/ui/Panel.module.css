@@ -1,0 +1,11 @@
+/*
+ * Scheme-aware surface for the house Panel card. Must live in a CSS Module (not
+ * an inline React `style`) so postcss-preset-mantine resolves `light-dark()`.
+ *
+ * Dark reuses the existing dark-6 surface so dark mode is visually UNCHANGED;
+ * light gives a clean white panel that reads against the near-white body, with
+ * the card's own `withBorder` supplying the subtle scheme-aware border.
+ */
+.panel {
+  background-color: light-dark(var(--mantine-color-white), var(--mantine-color-dark-6));
+}
