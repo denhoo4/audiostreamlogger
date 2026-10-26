@@ -22,6 +22,7 @@ COPY src/recorder/backoff-helpers.js ./
 COPY src/recorder/catchup-helpers.js ./
 COPY src/recorder/recordings-db.js ./
 COPY src/recorder/encoding.js ./
+COPY src/recorder/detect-source.js ./
 COPY src/recorder/folder-utils.js ./
 
 # Ensure the audio directory exists

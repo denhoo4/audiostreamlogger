@@ -3,7 +3,7 @@
 // beyond what the backend already sets. The backend is NOT modified by this app.
 
 /** Audio codec of a stream's recordings; the on-disk file extension equals the codec. */
-export type Codec = "mp3" | "opus" | "flac";
+export type Codec = "mp3" | "opus" | "aac" | "flac";
 
 /** A single stream as returned by GET /api/settings (public player selector). */
 export interface Stream {
@@ -778,15 +778,38 @@ export async function deleteStream(id: number): Promise<void> {
 }
 
 /**
+ * The auto-detect suggestion returned alongside a reachability probe: the
+ * recording quality to pre-fill the stream editor with, derived from the
+ * detected source codec/bitrate (or the mp3/192 fallback when nothing could be
+ * detected). Mirrors the FEAT-001 OpenAPI StreamTestResult.suggested schema
+ * (= src/api/lib/codec-detect.js suggestRecording).
+ */
+export interface StreamTestSuggestion {
+  codec: Codec;
+  bitrate_kbps: number | null;
+  bit_depth: number | null;
+}
+
+/**
  * Result of the advisory reachability probe (POST /api/streams/test-url).
  * `reachable` is the headline; `detail` is a short human reason shown inline.
  * `status`/`contentType` are present when the probe got a response.
+ *
+ * The optional source-detection fields (added in FEAT-001) carry what ffprobe
+ * saw on a reachable terminal 2xx: `detectedCodec`/`detectedBitrateKbps`/
+ * `formatName` are the raw observations, and `suggested` is the quality the
+ * editor pre-fills on a successful Test (always the mp3/192 fallback when
+ * nothing was detected). All optional so a pre-feature server is unaffected.
  */
 export interface StreamTestResult {
   reachable: boolean;
   status?: number;
   contentType?: string;
   detail: string;
+  detectedCodec?: string | null;
+  detectedBitrateKbps?: number | null;
+  formatName?: string | null;
+  suggested?: StreamTestSuggestion;
 }
 
 /**

@@ -6,7 +6,7 @@ what was built and why, see [HISTORY.md](HISTORY.md); for how the system fits
 together see [ARCHITECTURE.md](ARCHITECTURE.md); for working style and preferences
 see [HANDOVER.md](HANDOVER.md).
 
-Last updated: 2026-10-23.
+Last updated: 2026-10-26.
 
 ## Current state
 
@@ -17,22 +17,28 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
 
 ## Open items
 
-These three are in flight from the latest batch and are being worked separately:
-
-- [ ] **AAC stream support + Test auto-detect.** Add AAC as a recordable codec in
-      its own container (alongside mp3/opus/flac). When adding a stream and pressing
-      Test, pre-fill the codec/bitrate fields from the stream's detected native
-      format (e.g. AAC 192 kbps), while leaving the user free to override. Fall back
-      to MP3 192 kbps when the detected format is unsupported. AAC is only worth
-      shipping if the peak-file generator works for it too, so it matches the other
-      codecs' experience. IN PROGRESS on `aac-copy-support`: the API foundation has
-      landed — `aac` is now a first-class validating codec, a pure
-      `lib/codec-detect.js` owns the copy-eligibility / bitrate-snap / suggestion
-      rules, and the Test probe (`lib/probe-stream-url.js`) runs an injectable
-      `ffprobe` seam on a terminal 2xx to surface `detectedCodec` /
-      `detectedBitrateKbps` / `formatName` / `suggested` (mp3/192 fallback). Still
-      open on later slices: the recorder copy/transcode wiring, the worker
-      peak-file pipeline for `.aac` (decode-to-WAV), and the frontend Test pre-fill.
+- [x] **AAC stream support + Test auto-detect (done on `aac-copy-support`).** AAC
+      is now a first-class recordable codec alongside mp3/opus/flac (raw ADTS
+      `.aac`, lossy bitrate set `[96,128,160,192,256,320]`). Full stack:
+      - **API** — `aac` validates like any lossy codec; a pure `lib/codec-detect.js`
+        owns copy-eligibility / bitrate-snap / suggestion, and the Test probe
+        (`lib/probe-stream-url.js`) runs an injectable `ffprobe` seam on a terminal
+        2xx to return `detectedCodec` / `detectedBitrateKbps` / `formatName` /
+        `suggested` (mp3/192 fallback).
+      - **Recorder** — records in the configured codec and **copies** the source
+        bytes (`-c:a copy`, no resample, configured bitrate ignored) only when the
+        detected source codec equals the configured codec and the container is
+        copy-eligible (mp3/`mp3`, aac/`aac`|`adts`); otherwise it transcodes. The
+        ffprobe detect is bounded and SIGTERM-safe.
+      - **Worker** — `.aac` is recognized everywhere audio extensions are
+        enumerated and peaked via a decode-to-WAV pipe (audiowaveform 1.10.2 can't
+        read raw ADTS directly); mp3/opus/flac keep the direct path.
+      - **Frontend** — `aac` is a `Codec` + `CODEC_OPTIONS` entry; a successful Test
+        pre-fills the editor codec/bitrate from `suggested` (snapped to the codec's
+        set, mp3/192 fallback for an unknown codec), leaving the user free to
+        override; the probe still never saves.
+      All four suites pass with the new cases, and the real-image AAC
+      encode/copy/peak-pipe/transcode smokes are green.
 - [x] **Mobile player button layout.** On a mobile device the player controls wrap
       unattractively. Lay them out more symmetrically and keep the play/pause button
       in a stable centre position. Done: the transport zone is now three centred

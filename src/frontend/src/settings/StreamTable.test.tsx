@@ -602,6 +602,143 @@ describe("StreamTable", () => {
     expect(createStream).not.toHaveBeenCalled();
   });
 
+  // --- AAC codec + Test auto-detect pre-fill ------------------------------
+
+  it("offers aac as a codec and shows a bitrate (not bit-depth) select for it", async () => {
+    getStreams.mockResolvedValue([]);
+    renderWithMantine(<StreamTable />);
+    await screen.findByText("No streams yet.");
+    openNewRow();
+
+    const codecSelect = screen.getByRole("combobox", { name: "Codec" });
+    expect(
+      within(codecSelect).getByRole("option", { name: "aac" }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(codecSelect, { target: { value: "aac" } });
+
+    // aac is lossy -> a Bitrate select appears, Bit depth does not.
+    const bitrate = screen.getByRole("combobox", { name: "Bitrate (kbps)" });
+    expect(bitrate).toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "Bit depth" }),
+    ).not.toBeInTheDocument();
+    // The aac bitrate set is offered (320 is aac-specific vs opus).
+    expect(
+      within(bitrate).getByRole("option", { name: "320" }),
+    ).toBeInTheDocument();
+  });
+
+  it("a successful Test with suggested aac/192 pre-fills the draft codec+bitrate (saved via createStream)", async () => {
+    getStreams.mockResolvedValue([]);
+    createStream.mockResolvedValue(ROWS[0]);
+    testStreamUrl.mockResolvedValue({
+      reachable: true,
+      status: 200,
+      contentType: "audio/aac",
+      detail: "reachable audio stream",
+      detectedCodec: "aac",
+      detectedBitrateKbps: 192,
+      formatName: "aac",
+      suggested: { codec: "aac", bitrate_kbps: 192, bit_depth: null },
+    });
+    renderWithMantine(<StreamTable />);
+    await screen.findByText("No streams yet.");
+    openNewRow();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
+      target: { value: "Jazz AAC" },
+    });
+    fireEvent.change(screen.getByRole("textbox", { name: "URL" }), {
+      target: { value: "https://example.com/aac" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+
+    // The codec + bitrate selects reflect the pre-filled suggestion.
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Codec" })).toHaveValue(
+        "aac",
+      );
+    });
+    expect(
+      screen.getByRole("combobox", { name: "Bitrate (kbps)" }),
+    ).toHaveValue("192");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save new stream" }));
+    await waitFor(() => {
+      expect(createStream).toHaveBeenCalledTimes(1);
+    });
+    expect(createStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        codec: "aac",
+        bitrate_kbps: 192,
+        bit_depth: null,
+      }),
+    );
+  });
+
+  it("snaps an off-set suggested bitrate to the codec's nearest allowed value", async () => {
+    getStreams.mockResolvedValue([]);
+    testStreamUrl.mockResolvedValue({
+      reachable: true,
+      status: 200,
+      detail: "reachable audio stream",
+      detectedCodec: "aac",
+      detectedBitrateKbps: 200,
+      formatName: "aac",
+      // 200 is not in the aac set; nearest is 192.
+      suggested: { codec: "aac", bitrate_kbps: 200, bit_depth: null },
+    });
+    renderWithMantine(<StreamTable />);
+    await screen.findByText("No streams yet.");
+    openNewRow();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "URL" }), {
+      target: { value: "https://example.com/aac" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Codec" })).toHaveValue(
+        "aac",
+      );
+    });
+    expect(
+      screen.getByRole("combobox", { name: "Bitrate (kbps)" }),
+    ).toHaveValue("192");
+  });
+
+  it("falls back to mp3/192 when the suggested codec is unknown to the editor", async () => {
+    getStreams.mockResolvedValue([]);
+    testStreamUrl.mockResolvedValue({
+      reachable: true,
+      status: 200,
+      detail: "reachable audio stream",
+      detectedCodec: "vorbis",
+      detectedBitrateKbps: 128,
+      formatName: "ogg",
+      // A codec not in CODEC_OPTIONS -> fall back to mp3/192.
+      suggested: { codec: "vorbis" as never, bitrate_kbps: 128, bit_depth: null },
+    });
+    renderWithMantine(<StreamTable />);
+    await screen.findByText("No streams yet.");
+    openNewRow();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "URL" }), {
+      target: { value: "https://example.com/ogg" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Test" }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Codec" })).toHaveValue(
+        "mp3",
+      );
+    });
+    expect(
+      screen.getByRole("combobox", { name: "Bitrate (kbps)" }),
+    ).toHaveValue("192");
+  });
+
   // --- DELETE: typed-folder confirmation (unchanged behaviour) ------------
 
   it("Delete opens a typed-confirm panel showing the advisory file/byte count", async () => {

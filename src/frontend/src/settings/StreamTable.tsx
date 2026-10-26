@@ -72,12 +72,32 @@ const CODEC_OPTIONS: {
     bitrates: [64, 96, 128, 160, 192],
     bitDepths: [],
   },
+  {
+    codec: "aac",
+    kind: "lossy",
+    bitrates: [96, 128, 160, 192, 256, 320],
+    bitDepths: [],
+  },
   { codec: "flac", kind: "lossless", bitrates: [], bitDepths: [16, 24] },
 ];
 
 /** Look up a codec's option descriptor (defaults to mp3 for an unknown codec). */
 function codecOption(codec: Codec) {
   return CODEC_OPTIONS.find((c) => c.codec === codec) ?? CODEC_OPTIONS[0];
+}
+
+/**
+ * Snap a Test-suggested quality value to the nearest member of a codec's
+ * allowed set (lower wins on a tie), so a pre-filled draft never holds an
+ * off-set bitrate/bit-depth. Falls back to the first option when the value is
+ * null/not a finite number, and returns null for an empty set.
+ */
+function snapToSet(value: number | null, options: number[]): number | null {
+  if (options.length === 0) return null;
+  if (value == null || !Number.isFinite(value)) return options[0];
+  return options.reduce((best, cur) =>
+    Math.abs(cur - value) < Math.abs(best - value) ? cur : best,
+  );
 }
 
 /** Compact read-view label for a row's codec + quality, e.g. 'mp3 @ 160' / 'flac 24-bit'. */
@@ -349,6 +369,43 @@ export default function StreamTable() {
   }
 
   /**
+   * Pre-fill the draft quality from a successful Test's auto-detect
+   * `suggested` (the detected source codec/bitrate, or the mp3/192 fallback).
+   * A suggested codec unknown to CODEC_OPTIONS falls back to mp3/192. For a
+   * lossy suggestion the bitrate is snapped to the codec's allowed set (nearest
+   * value, lower wins on a tie) so the editor never holds an off-set value; for
+   * lossless (flac) the suggested bit-depth is clamped to the allowed set. This
+   * only seeds the form — the user can still override before saving, and the
+   * probe itself never persists anything.
+   */
+  function prefillFromSuggestion(suggested: {
+    codec: Codec;
+    bitrate_kbps: number | null;
+    bit_depth: number | null;
+  }) {
+    const known = CODEC_OPTIONS.some((c) => c.codec === suggested.codec);
+    if (!known) {
+      handleCodecChange("mp3");
+      patchDraft({ bitrate_kbps: 192, bit_depth: null });
+      return;
+    }
+    const opt = codecOption(suggested.codec);
+    if (opt.kind === "lossy") {
+      patchDraft({
+        codec: suggested.codec,
+        bitrate_kbps: snapToSet(suggested.bitrate_kbps, opt.bitrates),
+        bit_depth: null,
+      });
+    } else {
+      patchDraft({
+        codec: suggested.codec,
+        bitrate_kbps: null,
+        bit_depth: snapToSet(suggested.bit_depth, opt.bitDepths),
+      });
+    }
+  }
+
+  /**
    * Run the advisory reachability probe for the draft's url. NON-BLOCKING:
    * this never saves and never blocks Save; it only shows an inline reachable /
    * not-reachable result. Guards against an empty url.
@@ -359,7 +416,9 @@ export default function StreamTable() {
     setTesting(true);
     clearTest();
     try {
-      setTestResult(await testStreamUrl(url));
+      const result = await testStreamUrl(url);
+      setTestResult(result);
+      if (result.suggested) prefillFromSuggestion(result.suggested);
     } catch (err) {
       setTestError(
         err instanceof ApiError ? err.message : "Could not test the URL",

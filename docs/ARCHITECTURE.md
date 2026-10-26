@@ -23,6 +23,18 @@ recording immediately. It reads its run minute from the database and writes a
 `recordings` row per captured hour-slot (status `recording` → `complete`/`partial`
 plus size). It shuts down cleanly on SIGTERM/SIGINT.
 
+**Codec & copy-vs-transcode.** Each stream records in its configured codec
+(`mp3`/`opus`/`aac`/`flac`; the on-disk extension equals the codec, and `aac` is
+raw ADTS written with an explicit `-f adts` muxer). Before each hour the recorder
+runs a bounded ffprobe source-detect (which resolves `null` on any failure and
+never blocks startup): when the detected source codec equals the configured codec
+**and** the container is copy-eligible (`mp3` in an `mp3` format, `aac` in an
+`aac`/`adts` format), it records with `-c:a copy` — storing the source bytes
+verbatim with no resample and **ignoring** the configured bitrate. Otherwise it
+transcodes to the configured codec/bitrate (`opus`/`flac` always transcode). The
+async probe window is SIGTERM-safe: a shutdown signal arriving mid-probe aborts the
+stream without crashing the graceful-shutdown loop.
+
 ### worker (`src/worker/`)
 
 A generic job runner. It polls the `jobs` table and executes **one job at a time**
@@ -49,6 +61,13 @@ current hour's peak file live on a worker timer was **reverted**: it produced a 
 peak file stretched across the full hour. The `currenthourpeaks` handler and its
 timer no longer exist.
 
+`mp3`/`opus`/`flac` hours are peaked by running `audiowaveform` directly on the
+recording. `aac` hours use a **decode-to-WAV pipe** instead
+(`ffmpeg -i <file> -f wav - | audiowaveform --input-format wav -i - -o <json>`,
+with the spawn buffer sized for the ~635 MB/hour decoded WAV), because
+`audiowaveform` 1.10.2 cannot read a raw ADTS `.aac` file directly. The resulting
+`.json` is shape-identical across every codec, so the player is codec-agnostic.
+
 ### api (`src/api/`)
 
 The Express service and **owner of the database**. It:
@@ -58,6 +77,12 @@ The Express service and **owner of the database**. It:
   revocable SQLite-backed session store;
 - serves the public stream list (`GET /api/settings`) and the recordings browse
   tree (`GET /api/settings2`), plus stream CRUD behind `requireAuth`;
+- runs the advisory **Test** probe (`POST /api/streams/test-url`): besides
+  reachability it ffprobes a confirmed terminal 2xx for the source codec/bitrate
+  and returns a `suggested` quality the admin Streams editor pre-fills (the
+  detected codec snapped to its allowed bitrate, or an `mp3`/192 fallback when the
+  codec is unknown/undetected) — the user can still override and the probe never
+  persists anything;
 - exposes the recordings analysis endpoints (`GET /api/analysis/summary` and
   `/api/analysis/gaps`, both `requireAuth`);
 - exposes backup export/import (`/api/backup/*`, `requireAuth`);
@@ -126,7 +151,7 @@ and `recordings` rows.
 in the SQLite database at `./data/app.db`:
 
 - `streams` — the stream list (`country`, `name`, `folder`, `url`), each with a
-  per-stream codec (`mp3`/`opus`/`flac`) + bitrate/bit-depth, a `sort_order`, and a
+  per-stream codec (`mp3`/`opus`/`aac`/`flac`) + bitrate/bit-depth, a `sort_order`, and a
   `default_stream_folder` the player preselects.
 - `schedules` — per job type (`cleaner`, `peakfilegenerator`, `reconcile`) enable
   toggle + hourly/daily/weekly schedule.
@@ -149,7 +174,7 @@ insecure dev fallback is used with a warning if unset), and `COOKIE_SECURE`.
 
 - `./audio` — recordings under `audio/<folder>/<folder>-YYYY-MM-DD-HH.<ext>`
   (timezone `Europe/Amsterdam`), where `<ext>` is the stream's codec
-  (`mp3`/`opus`/`flac`). Completed hours carry a `.json` peak file for the waveform;
+  (`mp3`/`opus`/`aac`/`flac`). Completed hours carry a `.json` peak file for the waveform;
   the current in-progress hour is decoded client-side.
 - `./data/app.db` — the single SQLite database described above.
 
