@@ -9,12 +9,12 @@ function extractFileDateTime(filename) {
 }
 
 // `<folder>-YYYY-MM-DD-HH` then either `.<ext>` or `.part<N>.<ext>` where ext is
-// one of the allowlisted codecs (mp3/opus/flac — FEAT-002). The folder segment
+// one of the allowlisted codecs (mp3/opus/flac/aac — FEAT-002/FEAT-003). The folder segment
 // is non-greedy up to the trailing date so folders may contain hyphens. Mirrors
 // src/api/lib/recording-name.js and the recorder's segmentOutputName source of
 // truth (.part2 == attempt 1).
 const RECORDING_PARTS_RE =
-    /-(\d{4}-\d{2}-\d{2}-\d{2})(?:\.part(\d+))?\.(mp3|opus|flac)$/;
+    /-(\d{4}-\d{2}-\d{2}-\d{2})(?:\.part(\d+))?\.(mp3|opus|flac|aac)$/;
 
 // Parse the hour stamp + segment part + extension from a recording filename.
 // Returns { stamp: 'YYYY-MM-DD-HH', part, ext } where part is 1 for the primary
@@ -34,7 +34,7 @@ function parseRecordingParts(name, { allowMissingExt = false } = {}) {
 
     let candidate = name;
     let bareKey = false;
-    if (allowMissingExt && !/\.(mp3|opus|flac)$/.test(name)) {
+    if (allowMissingExt && !/\.(mp3|opus|flac|aac)$/.test(name)) {
         // Normalise a stamp-only key to a parseable form; ext is reported null.
         candidate = `${name}.mp3`;
         bareKey = true;

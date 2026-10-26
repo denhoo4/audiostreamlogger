@@ -34,4 +34,40 @@ function ffprobeDurationArgs(inPath) {
     ];
 }
 
-module.exports = { audiowaveformArgs, ffprobeDurationArgs };
+/**
+ * argv for `ffmpeg -i <in> -f wav -` (FEAT-003). audiowaveform 1.10.2 cannot
+ * read a raw ADTS .aac directly, so for .aac ONLY we decode to a WAV stream on
+ * stdout and pipe it into audiowaveform (see audiowaveformStdinArgs). The path
+ * is a literal argv element; the WAV is written to stdout (`-`).
+ */
+function ffmpegDecodeToWavArgs(inPath) {
+    return ['-i', inPath, '-f', 'wav', '-'];
+}
+
+/**
+ * argv for `audiowaveform --input-format wav -i - -o <out> --pixels-per-second
+ * 20 --bits 8` (FEAT-003). Same flags/values as audiowaveformArgs but reads the
+ * decoded WAV from stdin (`-i -`) with an explicit `--input-format wav`, since
+ * the input no longer has a filename extension to infer the format from.
+ */
+function audiowaveformStdinArgs(outPath) {
+    return [
+        '--input-format',
+        'wav',
+        '-i',
+        '-',
+        '-o',
+        outPath,
+        '--pixels-per-second',
+        '20',
+        '--bits',
+        '8',
+    ];
+}
+
+module.exports = {
+    audiowaveformArgs,
+    ffprobeDurationArgs,
+    ffmpegDecodeToWavArgs,
+    audiowaveformStdinArgs,
+};

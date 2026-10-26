@@ -63,11 +63,16 @@ test('parseRecordingParts parses a .partN segment as part N for any ext', () => 
     });
 });
 
-test('parseRecordingParts requires a known extension for the real-filename callers', () => {
+test('parseRecordingParts recognizes .aac and still rejects bare/unknown extensions', () => {
     // A bare basename (no extension) is NOT a real filename -> null by default.
     assert.strictEqual(parseRecordingParts('radio1-2026-10-23-14'), null);
-    // An unknown/unsupported extension is not a recording we manage.
-    assert.strictEqual(parseRecordingParts('radio1-2026-10-23-14.aac'), null);
+    // .aac is an allowlisted recording extension (FEAT-003) -> recognized parse.
+    assert.deepStrictEqual(parseRecordingParts('radio1-2026-10-23-14.aac'), {
+        stamp: '2026-10-23-14',
+        part: 1,
+        ext: 'aac',
+    });
+    // A sidecar/unknown extension is not a recording we manage.
     assert.strictEqual(parseRecordingParts('radio1-2026-10-23-14.json'), null);
 });
 

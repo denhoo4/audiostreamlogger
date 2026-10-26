@@ -32,7 +32,7 @@ const { AUDIO_DIR } = require('./paths');
 // Allowlisted recording extensions the scan picks up (FEAT-002). Same set as
 // the peakfilegenerator; the scanned entry's file_path carries the true name so
 // parseRecordingParts returns its ext and the planner is extension-agnostic.
-const AUDIO_EXTS = new Set(['.mp3', '.opus', '.flac']);
+const AUDIO_EXTS = new Set(['.mp3', '.opus', '.flac', '.aac']);
 
 /**
  * Current date-time in local 'YYYY-MM-DD-HH' format, matching the recorder's

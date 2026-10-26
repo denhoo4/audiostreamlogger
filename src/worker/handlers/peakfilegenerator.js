@@ -19,16 +19,27 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
-const { audiowaveformArgs, ffprobeDurationArgs } = require('./exec-args');
+const { execFileSync, spawnSync } = require('child_process');
+const {
+    audiowaveformArgs,
+    ffprobeDurationArgs,
+    ffmpegDecodeToWavArgs,
+    audiowaveformStdinArgs,
+} = require('./exec-args');
 const { extractFileDateTime, parseRecordingParts } = require('../filename-utils');
 const { upsertRecordingMeta } = require('../recordings-db');
 const { AUDIO_DIR } = require('./paths');
 
-// Allowlisted recording extensions the two-level walk picks up (FEAT-002).
+// Allowlisted recording extensions the two-level walk picks up (FEAT-002/FEAT-003).
 // audiowaveform/ffprobe infer the format from the extension and the §4 probe
-// confirmed each is both encodable and peak-readable.
-const AUDIO_EXTS = new Set(['.mp3', '.opus', '.flac']);
+// confirmed each is both encodable and peak-readable. .aac cannot be read by
+// audiowaveform 1.10.2 directly, so it takes the decode-to-WAV pipe below.
+const AUDIO_EXTS = new Set(['.mp3', '.opus', '.flac', '.aac']);
+
+// Max stdout/stdin buffer for the .aac decode-to-WAV pipe. A decoded one-hour
+// WAV is ~635 MB (stereo 44.1 kHz 16-bit); 700 MiB gives headroom so the
+// spawnSync buffer never truncates the stream.
+const WAV_PIPE_MAX_BUFFER = 700 * 1024 * 1024;
 
 /**
  * Current date-time in "YYYY-MM-DD-HH" local format, matching the audio filename
@@ -56,6 +67,43 @@ function probeDurationSeconds(mp3FilePath) {
         throw new Error(`ffprobe returned a non-numeric duration: ${String(out).trim()}`);
     }
     return seconds;
+}
+
+/**
+ * Generate a peak file for an .aac recording via the decode-to-WAV pipe
+ * (FEAT-003). audiowaveform 1.10.2 cannot read a raw ADTS .aac directly, so we
+ * decode it to a WAV stream with ffmpeg (`ffmpeg -i f -f wav -`) and feed that
+ * WAV to audiowaveform on stdin (`audiowaveform --input-format wav -i - -o
+ * out.json ...`). Both child_process calls use ARRAY args (no shell) and a
+ * maxBuffer sized for the ~635 MB/hour decoded WAV. Throws on any failure so the
+ * caller logs + counts the per-file error exactly like the direct path; this is
+ * an overridable export so tests can stub the pipe.
+ */
+function generateAacPeak(inPath, outPath) {
+    const decode = spawnSync('ffmpeg', ffmpegDecodeToWavArgs(inPath), {
+        maxBuffer: WAV_PIPE_MAX_BUFFER,
+    });
+    if (decode.error) {
+        throw decode.error;
+    }
+    if (decode.status !== 0) {
+        throw new Error(
+            `ffmpeg decode-to-wav exited ${decode.status}: ${String(decode.stderr).trim()}`
+        );
+    }
+
+    const peaks = spawnSync('audiowaveform', audiowaveformStdinArgs(outPath), {
+        input: decode.stdout,
+        maxBuffer: WAV_PIPE_MAX_BUFFER,
+    });
+    if (peaks.error) {
+        throw peaks.error;
+    }
+    if (peaks.status !== 0) {
+        throw new Error(
+            `audiowaveform (wav stdin) exited ${peaks.status}: ${String(peaks.stderr).trim()}`
+        );
+    }
 }
 
 /**
@@ -111,7 +159,17 @@ function runPeakfileGenerator(db) {
 
                     if (!fs.existsSync(jsonFilePath)) {
                         try {
-                            execFileSync('audiowaveform', audiowaveformArgs(mp3FilePath, jsonFilePath));
+                            // .aac cannot be read by audiowaveform directly, so
+                            // it takes the decode-to-WAV pipe; the other codecs
+                            // keep the direct audiowaveform path.
+                            if (fileExt === '.aac') {
+                                module.exports.generateAacPeak(mp3FilePath, jsonFilePath);
+                            } else {
+                                execFileSync(
+                                    'audiowaveform',
+                                    audiowaveformArgs(mp3FilePath, jsonFilePath)
+                                );
+                            }
                             log.push(`Generated peak file: ${jsonFilePath}`);
                             counters.generated += 1;
                         } catch (error) {
@@ -157,4 +215,9 @@ function runPeakfileGenerator(db) {
     return log.join('\n');
 }
 
-module.exports = { runPeakfileGenerator, probeDurationSeconds, currentHourStamp };
+module.exports = {
+    runPeakfileGenerator,
+    probeDurationSeconds,
+    generateAacPeak,
+    currentHourStamp,
+};

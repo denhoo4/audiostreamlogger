@@ -63,6 +63,11 @@ beforeEach(() => {
     db.exec(RECORDINGS_DDL);
     // Reset the probe stub to a known-good default.
     peak.probeDurationSeconds = () => 3600;
+    // Reset the aac peak-pipe stub: by default it writes the <base>.json so no
+    // real ffmpeg/audiowaveform is invoked during the test.
+    peak.generateAacPeak = (inPath, outPath) => {
+        fs.writeFileSync(outPath, '{}');
+    };
     // Clear any mp3/json artifacts from a prior test.
     for (const f of fs.readdirSync(path.join(audioDir, 'radio1'))) {
         fs.rmSync(path.join(audioDir, 'radio1', f));
@@ -144,6 +149,50 @@ test('peakfilegenerator folds a .partN segment into a partial row', () => {
     assert.ok(row);
     assert.strictEqual(row.status, 'partial');
     assert.strictEqual(row.segment_count, 2);
+});
+
+test('an .aac file without a peak uses the decode-to-WAV pipe (generateAacPeak), not direct audiowaveform', () => {
+    // .aac file, NO pre-created json -> the handler must generate it. Stub the
+    // aac pipe to record it was chosen and write the json the handler expects.
+    const aac = path.join(audioDir, 'radio1', `radio1-${PAST_STAMP}.aac`);
+    fs.writeFileSync(aac, 'fake-aac-bytes');
+    let aacPeakCalls = 0;
+    peak.generateAacPeak = (inPath, outPath) => {
+        aacPeakCalls += 1;
+        assert.strictEqual(inPath, aac);
+        assert.ok(outPath.endsWith(`radio1-${PAST_STAMP}.json`));
+        fs.writeFileSync(outPath, '{}');
+    };
+    peak.probeDurationSeconds = () => 3600;
+
+    const summary = peak.runPeakfileGenerator(db);
+
+    assert.strictEqual(aacPeakCalls, 1, 'generateAacPeak was chosen for the .aac file');
+    const row = getRow('00');
+    assert.ok(row, 'an aac recording row was created');
+    assert.strictEqual(row.file_path, 'radio1/radio1-2020-01-01-00.aac');
+    assert.strictEqual(row.size_bytes, fs.statSync(aac).size);
+    assert.match(summary, /1 generated/);
+});
+
+test('mp3/opus/flac without a peak never touch the aac decode pipe', () => {
+    // No pre-created json for the mp3; stub execFileSync is not available, so
+    // make the aac pipe explode — it must NOT be called for a non-aac file.
+    const mp3 = path.join(audioDir, 'radio1', `radio1-${PAST_STAMP}.mp3`);
+    fs.writeFileSync(mp3, 'fake-mp3-bytes');
+    peak.generateAacPeak = () => {
+        throw new Error('generateAacPeak must not be called for non-aac files');
+    };
+    peak.probeDurationSeconds = () => 3600;
+
+    // The direct audiowaveform path will fail (no real binary / fake bytes) but
+    // that is logged + counted, never fatal, and the aac pipe stub must not run.
+    let summary;
+    assert.doesNotThrow(() => {
+        summary = peak.runPeakfileGenerator(db);
+    });
+    // The error, if any, is the direct audiowaveform failure — not our aac stub.
+    assert.doesNotMatch(summary, /must not be called/);
 });
 
 test('a per-file ffprobe failure is logged + counted and never fails the job', () => {
