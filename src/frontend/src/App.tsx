@@ -29,6 +29,7 @@ import {
   getSettings,
   getSettings2,
   isLiveHour,
+  liveHourElapsedSeconds,
   type Codec,
   type Settings2,
   type Stream,
@@ -339,10 +340,19 @@ export default function App() {
         // Always cache-bust the live hour so pressing Load (or a poll tick)
         // refetches the grown mp3 instead of a stale cached copy.
         const mediaUrl = audioUrl(folder, year, month, day, h, ext, Date.now());
+        // The current hour's headerless, still-growing mp3 has no reliable
+        // media duration (Infinity/unknown on mobile), so skip/seek are dropped
+        // there. Supply an EXPLICIT client-derived duration — seconds elapsed
+        // since the top of this Amsterdam hour — so WaveSurfer has a finite
+        // timeline (getDuration/seekTo/skip work). No peaks: WaveSurfer still
+        // fetches + decodes the mp3 client-side to draw the real waveform.
+        // Recomputed on every (re)load so it tracks the grown file over the
+        // hour.
+        const liveDuration = liveHourElapsedSeconds();
         setDownloadHref(mediaUrl);
         setDownloadName(`${folder}-${year}-${month}-${day}-${h}.${ext}`);
         ws.reset();
-        ws.load(mediaUrl);
+        ws.load(mediaUrl, undefined, liveDuration);
         return;
       }
 

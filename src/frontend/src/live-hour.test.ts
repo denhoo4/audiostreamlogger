@@ -4,6 +4,7 @@ import {
   audioUrl,
   currentAmsterdamSlot,
   isLiveHour,
+  liveHourElapsedSeconds,
 } from "./api";
 
 describe("currentAmsterdamSlot", () => {
@@ -88,6 +89,33 @@ describe("isLiveHour", () => {
         hour: "14",
       }),
     ).toBe(false);
+  });
+});
+
+describe("liveHourElapsedSeconds", () => {
+  it("is ~0 at the top of the Amsterdam hour", () => {
+    // 2026-07-15T08:00:00Z -> Amsterdam CEST 10:00:00 (top of the hour).
+    expect(liveHourElapsedSeconds(new Date("2026-07-15T08:00:00Z"))).toBe(0);
+  });
+
+  it("is ~1200 twenty minutes into the Amsterdam hour", () => {
+    // 2026-07-15T08:20:00Z -> Amsterdam CEST 10:20:00 -> 20 min = 1200 s.
+    expect(liveHourElapsedSeconds(new Date("2026-07-15T08:20:00Z"))).toBe(1200);
+  });
+
+  it("counts the seconds within the minute too", () => {
+    // 10:20:35 local -> 20*60 + 35 = 1235 s.
+    expect(liveHourElapsedSeconds(new Date("2026-07-15T08:20:35Z"))).toBe(1235);
+  });
+
+  it("clamps to at most one full hour (3600)", () => {
+    // 10:59:59 local -> 59*60 + 59 = 3599 (just under the cap).
+    expect(liveHourElapsedSeconds(new Date("2026-07-15T08:59:59Z"))).toBe(3599);
+  });
+
+  it("is DST-correct via the Amsterdam formatter (winter CET)", () => {
+    // 2026-01-15T08:45:00Z -> Amsterdam CET 09:45:00 -> 45 min = 2700 s.
+    expect(liveHourElapsedSeconds(new Date("2026-01-15T08:45:00Z"))).toBe(2700);
   });
 });
 

@@ -336,6 +336,41 @@ export function currentAmsterdamSlot(now: Date = new Date()): AmsterdamSlot {
   };
 }
 
+/** One hour in seconds — the full length of a completed recording slot. */
+export const SECONDS_PER_HOUR = 3600;
+
+/**
+ * Expected length (seconds) of the CURRENT, still-growing recording for a
+ * loaded Amsterdam hour-slot, derived purely from the wall clock: the recorder
+ * starts at the top of the hour, so the in-progress file is ~"seconds elapsed
+ * since the top of that Amsterdam hour" long. This client-derived duration is
+ * handed to WaveSurfer for the live hour so getDuration()/seekTo()/skip() have
+ * a finite timeline to work against even though the headerless growing mp3's
+ * own media duration is Infinity/unknown on mobile.
+ *
+ * Pure + unit-testable: the instant is injected (defaults to now). The result
+ * is clamped to [0, 3600] — top-of-hour -> ~0, 20 min in -> ~1200, and never
+ * beyond a full hour (a slot that has rolled past its hour is capped at 3600).
+ * Minutes/seconds come from the SAME Amsterdam-local formatter used for slot
+ * detection, so DST never skews the elapsed figure.
+ */
+export function liveHourElapsedSeconds(now: Date = new Date()): number {
+  const parts = AMS_SLOT_MINUTE_SECOND_FORMATTER.formatToParts(now);
+  const get = (type: string) =>
+    Number(parts.find((p) => p.type === type)?.value ?? "0");
+  const elapsed = get("minute") * 60 + get("second");
+  return Math.max(0, Math.min(SECONDS_PER_HOUR, elapsed));
+}
+
+// Amsterdam-local minute/second formatter, mirroring AMS_SLOT_FORMATTER's
+// timeZone so the elapsed-in-hour figure is DST-correct and TZ-independent.
+const AMS_SLOT_MINUTE_SECOND_FORMATTER = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Europe/Amsterdam",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
 /**
  * True when the loaded selection's slot exactly matches the current Amsterdam
  * slot on all four fields (year, month, day, hour) — i.e. the selection IS the

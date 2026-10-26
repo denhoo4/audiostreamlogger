@@ -53,7 +53,15 @@ export interface UseWavesurfer {
   isLoading: boolean;
   /** True when the last load() failed (WaveSurfer 'error'); cleared on the next load(). */
   loadError: boolean;
-  load: (audioUrl: string, peaks?: number[][]) => void;
+  /**
+   * Load a recording. `peaks` supplies precomputed waveform data (past hours).
+   * `duration` supplies an EXPLICIT track length in seconds — used for the
+   * live/current hour, whose growing headerless mp3 has no reliable media
+   * duration; passing it gives WaveSurfer a finite timeline so
+   * getDuration()/seekTo()/skip() work. When `duration` is given WITHOUT peaks
+   * WaveSurfer still fetches + decodes the audio to draw the real waveform.
+   */
+  load: (audioUrl: string, peaks?: number[][], duration?: number) => void;
   playPause: () => void;
   skip: (seconds: number) => void;
   seekTo: (progress: number) => void;
@@ -208,19 +216,31 @@ export function useWavesurfer(): UseWavesurfer {
     };
   }, []);
 
-  const load = useCallback((audioUrl: string, peaks?: number[][]) => {
-    const ws = wsRef.current;
-    if (!ws) return;
-    // Enter the loading state AFTER any preceding reset()/clear so the overlay
-    // shows until 'ready' (or 'error') fires for this load.
-    setIsLoading(true);
-    setLoadError(false);
-    if (peaks) {
-      ws.load(audioUrl, peaks);
-    } else {
-      ws.load(audioUrl);
-    }
-  }, []);
+  const load = useCallback(
+    (audioUrl: string, peaks?: number[][], duration?: number) => {
+      const ws = wsRef.current;
+      if (!ws) return;
+      // Enter the loading state AFTER any preceding reset()/clear so the overlay
+      // shows until 'ready' (or 'error') fires for this load.
+      setIsLoading(true);
+      setLoadError(false);
+      // WaveSurfer v7's load() signature is load(url, peaks?, duration?). Pass
+      // only the arguments we have so the live hour (explicit duration, no
+      // peaks: url + undefined + duration) still fetches + decodes the growing
+      // mp3 for the waveform while getting a finite timeline, past hours keep
+      // their precomputed peaks, and the no-extra-info fallback stays load(url).
+      if (peaks && duration !== undefined) {
+        ws.load(audioUrl, peaks, duration);
+      } else if (peaks) {
+        ws.load(audioUrl, peaks);
+      } else if (duration !== undefined) {
+        ws.load(audioUrl, undefined, duration);
+      } else {
+        ws.load(audioUrl);
+      }
+    },
+    [],
+  );
 
   const playPause = useCallback(() => {
     // A manual transport cancels any pending play-selection auto-pause.

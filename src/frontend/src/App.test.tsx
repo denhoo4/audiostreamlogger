@@ -2,11 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderWithMantine } from "./test/render-with-mantine";
 import App, { pickInitialFolder } from "./App";
-import type { Settings2, Stream } from "./api";
+import { liveHourElapsedSeconds, type Settings2, type Stream } from "./api";
 
 // Records every URL the mocked WaveSurfer.load() was called with, so a test can
 // assert the per-codec extension used for the player load.
 const loadedUrls: string[] = [];
+
+// Records the FULL argument tuple of every mocked WaveSurfer.load() call
+// (url, peaks, duration), so a test can assert that the live hour is loaded
+// with an explicit client-derived duration and no peaks, while a past hour is
+// loaded with peaks. Reset alongside loadedUrls in each suite's afterEach.
+const loadCalls: {
+  url: string;
+  peaks?: number[][];
+  duration?: number;
+}[] = [];
 
 // Handle to the single live fake WaveSurfer instance so tests can fire its
 // captured lifecycle handlers ('ready'/'error') and transport spies. Reset in
@@ -17,6 +27,10 @@ interface FakeWsHandle {
   setTimeCalls: number[];
   playCalls: number;
   pauseCalls: number;
+  /** The last explicit duration load() was given (undefined if none). */
+  loadedDuration: number | undefined;
+  /** The current playhead the fake tracks (driven by setTime/skip). */
+  currentTime: number;
 }
 let fakeWs: FakeWsHandle | null = null;
 
@@ -33,6 +47,12 @@ vi.mock("wavesurfer.js", () => {
     setTimeCalls: number[] = [];
     playCalls = 0;
     pauseCalls = 0;
+    // Tracks the explicit load() duration + a seekable playhead so the
+    // mobile-seek suite can assert that skip() on the live hour actually lands
+    // (skip -> setTime(getCurrentTime()+delta), clamped to [0, duration]) —
+    // exactly WaveSurfer v7's own skip/setTime math.
+    loadedDuration: number | undefined = undefined;
+    currentTime = 0;
     static create() {
       const inst = new FakeWaveSurfer();
       fakeWs = {
@@ -47,6 +67,12 @@ vi.mock("wavesurfer.js", () => {
         get pauseCalls() {
           return inst.pauseCalls;
         },
+        get loadedDuration() {
+          return inst.loadedDuration;
+        },
+        get currentTime() {
+          return inst.currentTime;
+        },
       } as FakeWsHandle;
       return inst;
     }
@@ -56,26 +82,38 @@ vi.mock("wavesurfer.js", () => {
     on(event: string, handler: (arg?: unknown) => void) {
       (this.handlers[event] ??= []).push(handler);
     }
-    load(url: string) {
+    load(url: string, peaks?: number[][], duration?: number) {
       loadedUrls.push(url);
+      loadCalls.push({ url, peaks, duration });
+      this.loadedDuration = duration;
+      this.currentTime = 0;
     }
     playPause() {}
     play() {
       this.playCalls += 1;
     }
-    skip() {}
-    seekTo() {}
+    // Mirror WaveSurfer v7: skip(delta) == setTime(currentTime + delta).
+    skip(seconds: number) {
+      this.setTime(this.getCurrentTime() + seconds);
+    }
+    seekTo(progress: number) {
+      this.setTime(this.getDuration() * progress);
+    }
     setTime(t: number) {
+      // Clamp to [0, duration] like the real setTime; an unknown duration
+      // (0) would pin everything to 0 — supplying an explicit duration is
+      // what lets the seek land.
+      this.currentTime = Math.max(0, Math.min(t, this.getDuration()));
       this.setTimeCalls.push(t);
     }
     pause() {
       this.pauseCalls += 1;
     }
     getCurrentTime() {
-      return 0;
+      return this.currentTime;
     }
     getDuration() {
-      return 0;
+      return this.loadedDuration ?? 0;
     }
     destroy() {}
   }
@@ -741,6 +779,133 @@ describe("App live-hour auto-refresh", () => {
         ),
       ).toBe(true);
     });
+  });
+});
+
+describe("App live-hour explicit-duration seek (mobile seek fix)", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    loadedUrls.length = 0;
+    loadCalls.length = 0;
+    resetFakeWs();
+    fakeRegion = null;
+  });
+
+  it("loads the CURRENT hour with an explicit client-derived duration and NO peaks so skip() actually seeks", async () => {
+    vi.useFakeTimers();
+    // 2026-07-15T08:20:00Z -> Amsterdam CEST 10:20:00, so the live slot is
+    // hour "10" and the expected live duration is 20 min = 1200 s.
+    vi.setSystemTime(new Date("2026-07-15T08:20:00Z"));
+    stubFetchForLive(true);
+    renderWithMantine(<App />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    // Navigate the calendar + set the hour first (this advances the fake
+    // clock), THEN pin the instant right before Load so the duration computed
+    // in reload() is deterministic (10:20:00 local -> 1200 s).
+    await pickDate("2026-07-15");
+    const hourSelect = document.getElementById(
+      "hourSelector",
+    ) as HTMLSelectElement;
+    fireEvent.change(hourSelect, { target: { value: "10" } });
+    const pinnedInstant = new Date("2026-07-15T08:20:00Z");
+    vi.setSystemTime(pinnedInstant);
+    fireEvent.click(screen.getByRole("button", { name: "Load" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // The live hour was loaded WITHOUT peaks but WITH the explicit, clamped,
+    // client-derived duration (seconds elapsed since the top of the hour).
+    const liveMatches = loadCalls.filter((c) =>
+      /live_radio-2026-07-15-10\.mp3\?t=\d+/.test(c.url),
+    );
+    const liveCall = liveMatches[liveMatches.length - 1];
+    expect(liveCall).toBeDefined();
+    expect(liveCall!.peaks).toBeUndefined();
+    // Deterministic for the pinned instant: 10:20:00 Amsterdam -> 1200 s.
+    expect(liveHourElapsedSeconds(pinnedInstant)).toBe(1200);
+    expect(liveCall!.duration).toBe(1200);
+
+    // Fire 'ready' so the player reflects the loaded state, then skip forward:
+    // with a finite duration the seek lands instead of being dropped.
+    await act(async () => {
+      fakeWs?.emit("ready", 1200);
+    });
+    const beforeSkips = fakeWs!.setTimeCalls.length;
+    fireEvent.click(screen.getByRole("button", { name: "+1m" }));
+    expect(fakeWs!.setTimeCalls.length).toBe(beforeSkips + 1);
+    // skip(+60) from 0 lands at 60 s (within the finite 1200 s timeline).
+    expect(fakeWs!.currentTime).toBe(60);
+    // A -10s skip from 60 lands at 50 s.
+    fireEvent.click(screen.getByRole("button", { name: "-10s" }));
+    expect(fakeWs!.currentTime).toBe(50);
+  });
+
+  it("recomputes the live duration on each poll tick so it tracks the grown file", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T08:20:00Z"));
+    stubFetchForLive(true);
+    renderWithMantine(<App />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    // Pin the instant right before Load so the first computed duration is
+    // deterministic (10:20:00 local -> 1200 s).
+    await pickDate("2026-07-15");
+    const hourSelect = document.getElementById(
+      "hourSelector",
+    ) as HTMLSelectElement;
+    fireEvent.change(hourSelect, { target: { value: "10" } });
+    vi.setSystemTime(new Date("2026-07-15T08:20:00Z"));
+    fireEvent.click(screen.getByRole("button", { name: "Load" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const first = loadCalls.find((c) =>
+      /live_radio-2026-07-15-10\.mp3/.test(c.url),
+    );
+    expect(first!.duration).toBe(1200);
+
+    // Advance the poll interval (30 s); the next reload must recompute a LARGER
+    // expected duration — exactly 30 s more (now 10:20:30 local -> 1230 s).
+    const before = loadCalls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30000);
+    });
+    expect(loadCalls.length).toBeGreaterThan(before);
+    const latest = loadCalls[loadCalls.length - 1];
+    expect(latest.duration).toBe(1230);
+  });
+
+  it("loads a PAST hour with .json peaks and NO explicit duration (unchanged path)", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-15T08:20:00Z"));
+    stubFetchForLive(true);
+    renderWithMantine(<App />);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await loadHour("2020-01-01", "09");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    const pastCall = loadCalls.find((c) =>
+      c.url.endsWith("/audio/live_radio/live_radio-2020-01-01-09.mp3"),
+    );
+    expect(pastCall).toBeDefined();
+    // Past hour keeps precomputed peaks and does NOT force an explicit
+    // duration (the finalized file + decoded peaks give a real one).
+    expect(pastCall!.peaks).toEqual([[0, 0]]);
+    expect(pastCall!.duration).toBeUndefined();
   });
 });
 

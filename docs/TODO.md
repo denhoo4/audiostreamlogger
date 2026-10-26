@@ -32,10 +32,22 @@ These three are in flight from the latest batch and are being worked separately:
       zones (rewind skips | play/pause | forward skips), each skip zone an
       equal-flex group that wraps internally so the negative and positive skips
       stay balanced around the always-centred play/pause at narrow widths.
-- [ ] **Mobile current-hour seek bug.** On a mobile device the current (in-progress)
-      hour can only be played from the start and the skip buttons do nothing; older
-      completed files work fine. Likely tied to the current-hour peak/decoding path.
-      Note it does not reproduce in a desktop browser scaled to phone dimensions.
+- [x] **Mobile current-hour seek bug (primary fix on `mobile-seek-fix`).** On a
+      mobile device the current (in-progress) hour could only be played from the
+      start and the skip buttons did nothing; completed files worked. Root cause:
+      the live hour is a growing, header-less MP3 whose media duration is
+      Infinity/unknown on mobile, so WaveSurfer's `media.currentTime` seeks were
+      dropped. Fix (frontend only): a pure `liveHourElapsedSeconds()` helper
+      derives the current hour's length from the Amsterdam wall clock and is passed
+      to WaveSurfer as an explicit `load(url, undefined, duration)` for the live
+      hour (recomputed each reload/poll), giving getDuration/seekTo/skip a finite
+      timeline; past hours keep their precomputed-peaks path unchanged. Verified
+      green in the vitest suite. RESIDUAL FOLLOW-UP: an explicit duration fixes
+      WaveSurfer's math but the mobile `<audio>` element may still refuse to
+      physically seek a growing header-less file — needs an on-device check; if it
+      still won't seek, escalate to serving a header-stamped/finalized live-hour
+      snapshot (backend, not done here). See
+      `.agents/tasks/mobile-seek-verification.md`.
 
 ## Remaining tech debt (lower priority)
 
