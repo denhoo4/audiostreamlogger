@@ -146,6 +146,31 @@ test('authenticated + not-reachable probe → 200 with reachable:false + detail'
     assert.match(res.body.detail, /HTTP 404/);
 });
 
+test('the detection fields pass through the route verbatim (FEAT-001)', async () => {
+    probeImpl = async () => ({
+        reachable: true,
+        status: 200,
+        contentType: 'audio/aac',
+        detail: 'reachable audio stream',
+        detectedCodec: 'aac',
+        detectedBitrateKbps: 192,
+        formatName: 'aac',
+        suggested: { codec: 'aac', bitrate_kbps: 192, bit_depth: null },
+    });
+    const res = await reqJson('POST', '/api/streams/test-url', {
+        url: 'https://example.com/stream',
+    });
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(res.body.detectedCodec, 'aac');
+    assert.strictEqual(res.body.detectedBitrateKbps, 192);
+    assert.strictEqual(res.body.formatName, 'aac');
+    assert.deepStrictEqual(res.body.suggested, {
+        codec: 'aac',
+        bitrate_kbps: 192,
+        bit_depth: null,
+    });
+});
+
 test('authenticated + malformed url (ProbeInputError) → 400 {field:url}', async () => {
     probeImpl = async () => {
         throw new ProbeInputError('invalid url');

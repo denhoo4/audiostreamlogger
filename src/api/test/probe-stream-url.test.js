@@ -58,11 +58,20 @@ function makeFakeRequest(planByUrl) {
 
 const URL1 = 'https://radio.example.com/stream';
 
+// Hermetic ffprobe stub: the existing reachability tests must never spawn the
+// real `ffprobe` on a terminal 2xx. The detector's own branches are covered by
+// the dedicated runFfprobe tests further below.
+const NOOP_FFPROBE = async () => ({
+    detectedCodec: null,
+    detectedBitrateKbps: null,
+    formatName: null,
+});
+
 test('2xx + audio/mpeg → reachable with status + contentType', async () => {
     const request = makeFakeRequest({
         [URL1]: { kind: 'response', status: 200, headers: { 'content-type': 'audio/mpeg' } },
     });
-    const r = await probeStreamUrl(URL1, { request });
+    const r = await probeStreamUrl(URL1, { request, runFfprobe: NOOP_FFPROBE });
     assert.strictEqual(r.reachable, true);
     assert.strictEqual(r.status, 200);
     assert.strictEqual(r.contentType, 'audio/mpeg');
@@ -76,7 +85,7 @@ test('2xx + ICY header (shoutcast) → reachable even without an audio content-t
             headers: { 'content-type': 'text/html', 'icy-name': 'My Radio' },
         },
     });
-    const r = await probeStreamUrl(URL1, { request });
+    const r = await probeStreamUrl(URL1, { request, runFfprobe: NOOP_FFPROBE });
     assert.strictEqual(r.reachable, true);
     assert.strictEqual(r.status, 200);
 });
@@ -89,7 +98,7 @@ test('2xx + HLS playlist (application/vnd.apple.mpegurl) → reachable', async (
             headers: { 'content-type': 'application/vnd.apple.mpegurl' },
         },
     });
-    const r = await probeStreamUrl(URL1, { request });
+    const r = await probeStreamUrl(URL1, { request, runFfprobe: NOOP_FFPROBE });
     assert.strictEqual(r.reachable, true);
 });
 
@@ -139,7 +148,7 @@ test('redirect chain within the hop cap resolving to an audio 2xx → reachable'
         [hop1]: { kind: 'response', status: 302, headers: { location: hop2 } },
         [hop2]: { kind: 'response', status: 200, headers: { 'content-type': 'audio/aac' } },
     });
-    const r = await probeStreamUrl(hop1, { request });
+    const r = await probeStreamUrl(hop1, { request, runFfprobe: NOOP_FFPROBE });
     assert.strictEqual(r.reachable, true);
     assert.strictEqual(r.contentType, 'audio/aac');
 });
@@ -186,6 +195,145 @@ test('non-http(s) scheme (file:) → throws ProbeInputError, never probed', asyn
         ProbeInputError
     );
     assert.strictEqual(called, false, 'transport must not be called for a non-http(s) scheme');
+});
+
+// --- source-codec detection via the injected runFfprobe seam (FEAT-001) ----
+
+test('detected aac + bitrate on a 2xx audio response → suggested aac snapped', async () => {
+    const request = makeFakeRequest({
+        [URL1]: { kind: 'response', status: 200, headers: { 'content-type': 'audio/aac' } },
+    });
+    const runFfprobe = async () => ({
+        detectedCodec: 'aac',
+        detectedBitrateKbps: 190,
+        formatName: 'aac',
+    });
+    const r = await probeStreamUrl(URL1, { request, runFfprobe });
+    assert.strictEqual(r.reachable, true);
+    assert.strictEqual(r.detectedCodec, 'aac');
+    assert.strictEqual(r.detectedBitrateKbps, 190);
+    assert.strictEqual(r.formatName, 'aac');
+    assert.deepStrictEqual(r.suggested, {
+        codec: 'aac',
+        bitrate_kbps: 192,
+        bit_depth: null,
+    });
+});
+
+test('unknown detected codec → suggested mp3/192 fallback', async () => {
+    const request = makeFakeRequest({
+        [URL1]: { kind: 'response', status: 200, headers: { 'content-type': 'audio/mpeg' } },
+    });
+    const runFfprobe = async () => ({
+        detectedCodec: 'vorbis',
+        detectedBitrateKbps: 128,
+        formatName: 'ogg',
+    });
+    const r = await probeStreamUrl(URL1, { request, runFfprobe });
+    assert.strictEqual(r.reachable, true);
+    assert.strictEqual(r.detectedCodec, 'vorbis');
+    assert.deepStrictEqual(r.suggested, {
+        codec: 'mp3',
+        bitrate_kbps: 192,
+        bit_depth: null,
+    });
+});
+
+test('ffprobe failure (all-null) → detected* null + mp3/192 fallback, still reachable', async () => {
+    const request = makeFakeRequest({
+        [URL1]: { kind: 'response', status: 200, headers: { 'content-type': 'audio/mpeg' } },
+    });
+    const runFfprobe = async () => ({
+        detectedCodec: null,
+        detectedBitrateKbps: null,
+        formatName: null,
+    });
+    const r = await probeStreamUrl(URL1, { request, runFfprobe });
+    assert.strictEqual(r.reachable, true);
+    assert.strictEqual(r.detectedCodec, null);
+    assert.strictEqual(r.detectedBitrateKbps, null);
+    assert.strictEqual(r.formatName, null);
+    assert.deepStrictEqual(r.suggested, {
+        codec: 'mp3',
+        bitrate_kbps: 192,
+        bit_depth: null,
+    });
+});
+
+test('a thrown/rejected ffprobe seam never breaks the probe (null detection)', async () => {
+    const request = makeFakeRequest({
+        [URL1]: { kind: 'response', status: 200, headers: { 'content-type': 'audio/mpeg' } },
+    });
+    const runFfprobe = async () => {
+        throw new Error('ffprobe boom');
+    };
+    const r = await probeStreamUrl(URL1, { request, runFfprobe });
+    assert.strictEqual(r.reachable, true);
+    assert.strictEqual(r.detectedCodec, null);
+    assert.deepStrictEqual(r.suggested, {
+        codec: 'mp3',
+        bitrate_kbps: 192,
+        bit_depth: null,
+    });
+});
+
+test('ICY/content-type verdict is read FIRST; ffprobe only runs on a terminal 2xx', async () => {
+    // A 404 must NOT invoke ffprobe (headers-first precedence) and still yields
+    // the stable detection contract with null detection + mp3/192 fallback.
+    let probed = false;
+    const request = makeFakeRequest({
+        [URL1]: { kind: 'response', status: 404, headers: {} },
+    });
+    const runFfprobe = async () => {
+        probed = true;
+        return { detectedCodec: 'aac', detectedBitrateKbps: 192, formatName: 'aac' };
+    };
+    const r = await probeStreamUrl(URL1, { request, runFfprobe });
+    assert.strictEqual(probed, false, 'ffprobe must not run on a non-2xx response');
+    assert.strictEqual(r.reachable, false);
+    assert.strictEqual(r.status, 404);
+    assert.strictEqual(r.detectedCodec, null);
+    assert.deepStrictEqual(r.suggested, {
+        codec: 'mp3',
+        bitrate_kbps: 192,
+        bit_depth: null,
+    });
+});
+
+test('non-reachable branches (connect error) still carry the detection contract', async () => {
+    const request = makeFakeRequest({
+        [URL1]: { kind: 'error', err: { code: 'ENOTFOUND' } },
+    });
+    const r = await probeStreamUrl(URL1, { request, runFfprobe: async () => ({}) });
+    assert.strictEqual(r.reachable, false);
+    assert.strictEqual(r.detectedCodec, null);
+    assert.deepStrictEqual(r.suggested, {
+        codec: 'mp3',
+        bitrate_kbps: 192,
+        bit_depth: null,
+    });
+});
+
+test('ffprobe runs on the FINAL resolved URL after a redirect chain', async () => {
+    const hop1 = 'https://radio.example.com/stream';
+    const hop2 = 'https://cdn.example.com/live';
+    const request = makeFakeRequest({
+        [hop1]: { kind: 'response', status: 302, headers: { location: hop2 } },
+        [hop2]: { kind: 'response', status: 200, headers: { 'content-type': 'audio/aac' } },
+    });
+    let probedUrl = null;
+    const runFfprobe = async (url) => {
+        probedUrl = url;
+        return { detectedCodec: 'aac', detectedBitrateKbps: 256, formatName: 'adts' };
+    };
+    const r = await probeStreamUrl(hop1, { request, runFfprobe });
+    assert.strictEqual(probedUrl, hop2, 'ffprobe uses the final resolved URL');
+    assert.strictEqual(r.reachable, true);
+    assert.deepStrictEqual(r.suggested, {
+        codec: 'aac',
+        bitrate_kbps: 256,
+        bit_depth: null,
+    });
 });
 
 test('classifyResponse is a pure, independently testable helper', () => {

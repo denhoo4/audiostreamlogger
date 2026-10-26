@@ -196,3 +196,37 @@ test('validateStream surfaces a quality failure after the url check', () => {
         error: 'invalid codec',
     });
 });
+
+// --- aac codec (FEAT-001) --------------------------------------------------
+
+test('validateQuality accepts a valid aac bitrate', () => {
+    assert.strictEqual(validateQuality({ codec: 'aac', bitrate_kbps: 192 }), null);
+    assert.strictEqual(validateQuality({ codec: 'aac', bitrate_kbps: 96 }), null);
+    assert.strictEqual(validateQuality({ codec: 'aac', bitrate_kbps: 320 }), null);
+});
+
+test('validateQuality rejects an out-of-set aac bitrate', () => {
+    assert.deepStrictEqual(validateQuality({ codec: 'aac', bitrate_kbps: 111 }), {
+        field: 'bitrate_kbps',
+        error: 'invalid bitrate',
+    });
+    // opus-only bitrate 64 is NOT in the aac set.
+    assert.deepStrictEqual(validateQuality({ codec: 'aac', bitrate_kbps: 64 }), {
+        field: 'bitrate_kbps',
+        error: 'invalid bitrate',
+    });
+});
+
+test('validateQuality rejects bit_depth for aac (lossy)', () => {
+    assert.deepStrictEqual(
+        validateQuality({ codec: 'aac', bitrate_kbps: 192, bit_depth: 16 }),
+        { field: 'bit_depth', error: 'bit_depth not allowed for a lossy codec' }
+    );
+});
+
+test('validateStream accepts a full aac payload', () => {
+    assert.strictEqual(
+        validateStream({ ...BASE, codec: 'aac', bitrate_kbps: 256 }),
+        null
+    );
+});

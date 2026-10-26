@@ -101,7 +101,7 @@ The longer-form docs live in [`docs/`](docs/):
 
 - `./audio/<folder>/<folder>-YYYY-MM-DD-HH.<ext>` — recordings (timezone
   `Europe/Amsterdam`), each with a `.json` peak file. `<ext>` is the stream's codec
-  (`mp3`/`opus`/`flac`).
+  (`mp3`/`opus`/`aac`/`flac`).
 - `./data/app.db` — the one SQLite database. Bind-mounted, so it survives rebuilds.
   Only `data/.gitkeep` is tracked in git.
 

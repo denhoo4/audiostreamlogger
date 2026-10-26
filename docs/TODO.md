@@ -25,7 +25,14 @@ These three are in flight from the latest batch and are being worked separately:
       format (e.g. AAC 192 kbps), while leaving the user free to override. Fall back
       to MP3 192 kbps when the detected format is unsupported. AAC is only worth
       shipping if the peak-file generator works for it too, so it matches the other
-      codecs' experience.
+      codecs' experience. IN PROGRESS on `aac-copy-support`: the API foundation has
+      landed — `aac` is now a first-class validating codec, a pure
+      `lib/codec-detect.js` owns the copy-eligibility / bitrate-snap / suggestion
+      rules, and the Test probe (`lib/probe-stream-url.js`) runs an injectable
+      `ffprobe` seam on a terminal 2xx to surface `detectedCodec` /
+      `detectedBitrateKbps` / `formatName` / `suggested` (mp3/192 fallback). Still
+      open on later slices: the recorder copy/transcode wiring, the worker
+      peak-file pipeline for `.aac` (decode-to-WAV), and the frontend Test pre-fill.
 - [x] **Mobile player button layout.** On a mobile device the player controls wrap
       unattractively. Lay them out more symmetrically and keep the play/pause button
       in a stable centre position. Done: the transport zone is now three centred

@@ -206,7 +206,7 @@ test('parseRecordingFilename handles primary, .partN, and non-matches and return
     assert.strictEqual(parseRecordingFilename(null), null);
 });
 
-test('parseRecordingFilename handles opus/flac extensions (FEAT-002)', () => {
+test('parseRecordingFilename handles opus/aac/flac extensions', () => {
     assert.deepStrictEqual(parseRecordingFilename('radio1-2026-10-23-09.opus'), {
         folder: 'radio1',
         date: '2026-10-23',
@@ -221,7 +221,14 @@ test('parseRecordingFilename handles opus/flac extensions (FEAT-002)', () => {
         part: 2,
         ext: 'flac',
     });
-    // An unknown/unsupported extension is not a recording we manage.
-    assert.strictEqual(parseRecordingFilename('radio1-2026-10-23-09.aac'), null);
+    // aac is now a first-class recording codec (FEAT-001).
+    assert.deepStrictEqual(parseRecordingFilename('radio1-2026-10-23-09.aac'), {
+        folder: 'radio1',
+        date: '2026-10-23',
+        hour: '09',
+        part: 1,
+        ext: 'aac',
+    });
+    // A still-unsupported extension is not a recording we manage.
     assert.strictEqual(parseRecordingFilename('radio1-2026-10-23-09.wav'), null);
 });

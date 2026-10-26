@@ -1,7 +1,7 @@
 /**
- * Coverage for POST /util/selection-export (FEAT-002): the optional `ext` body
- * field. A bad ext is a 400 before any ffmpeg work; a valid non-mp3 ext builds
- * the source path with that extension (so a missing .opus/.flac file is a 404,
+ * Coverage for POST /util/selection-export: the optional `ext` body field. A
+ * bad ext is a 400 before any ffmpeg work; a valid non-mp3 ext builds the
+ * source path with that extension (so a missing .opus/.aac/.flac file is a 404,
  * proving the extension flows into the path). Follows the node:http + fetch
  * integration pattern (no supertest). No ffmpeg is invoked on these paths.
  */
@@ -55,7 +55,7 @@ const BASE = {
 };
 
 test('a bad ext is rejected 400 before any processing', async () => {
-    const res = await post({ ...BASE, ext: 'aac' });
+    const res = await post({ ...BASE, ext: 'wav' });
     assert.strictEqual(res.status, 400);
 });
 
@@ -66,9 +66,11 @@ test('an omitted ext defaults to mp3 (source path 404 when no file exists)', asy
     assert.strictEqual(res.status, 404);
 });
 
-test('a valid opus/flac ext passes validation and builds the source path', async () => {
+test('a valid opus/aac/flac ext passes validation and builds the source path', async () => {
     const opus = await post({ ...BASE, ext: 'opus' });
     assert.strictEqual(opus.status, 404, 'opus request validated, file missing -> 404');
+    const aac = await post({ ...BASE, ext: 'aac' });
+    assert.strictEqual(aac.status, 404, 'aac request validated, file missing -> 404');
     const flac = await post({ ...BASE, ext: 'flac' });
     assert.strictEqual(flac.status, 404, 'flac request validated, file missing -> 404');
 });

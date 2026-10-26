@@ -5,7 +5,7 @@
  * src/recorder/backoff-helpers.js::segmentOutputName:
  *   primary (attempt 0):      `<folder>-YYYY-MM-DD-HH.<ext>`
  *   mid-hour restart (>=1):   `<folder>-YYYY-MM-DD-HH.part<n+1>.<ext>`  (.part2 == attempt 1)
- * where `<ext>` is one of the allowlisted codecs (mp3/opus/flac — FEAT-002).
+ * where `<ext>` is one of the allowlisted codecs (mp3/opus/aac/flac).
  *
  * parseRecordingFilename(name) returns
  *   { folder, date ('YYYY-MM-DD'), hour ('HH'), part, ext } | null
@@ -17,7 +17,7 @@
 // `<folder>-YYYY-MM-DD-HH` then either `.<ext>` or `.part<N>.<ext>`. The folder
 // segment is non-greedy up to the trailing date so folders may contain hyphens.
 const RECORDING_NAME_RE =
-    /^(.+)-(\d{4}-\d{2}-\d{2})-(\d{2})(?:\.part(\d+))?\.(mp3|opus|flac)$/;
+    /^(.+)-(\d{4}-\d{2}-\d{2})-(\d{2})(?:\.part(\d+))?\.(mp3|opus|aac|flac)$/;
 
 function parseRecordingFilename(name) {
     if (typeof name !== 'string') {

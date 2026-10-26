@@ -28,7 +28,9 @@
  */
 const http = require('node:http');
 const https = require('node:https');
+const { execFile } = require('node:child_process');
 const { validateUrl } = require('./validate-stream');
+const { suggestRecording } = require('./codec-detect');
 
 /** Hard overall timeout for the whole probe (connection + headers). */
 const PROBE_TIMEOUT_MS = 6000;
@@ -139,6 +141,105 @@ function defaultRequest(urlStr, onResponse) {
 }
 
 /**
+ * Parse an ffprobe `-of json` document into the detection fields we surface.
+ * Pure and tolerant: any shape we do not recognise yields all-null. Reads the
+ * FIRST audio stream's codec_name + bit_rate (ffprobe reports bit_rate in
+ * bits/s; we convert to kbps) and the container's format.format_name.
+ *
+ * @param {object} doc  parsed ffprobe JSON
+ * @returns {{detectedCodec:string|null, detectedBitrateKbps:number|null, formatName:string|null}}
+ */
+function parseFfprobeJson(doc) {
+    const empty = {
+        detectedCodec: null,
+        detectedBitrateKbps: null,
+        formatName: null,
+    };
+    if (!doc || typeof doc !== 'object') {
+        return empty;
+    }
+    const streams = Array.isArray(doc.streams) ? doc.streams : [];
+    const audio = streams.find((s) => s && s.codec_type === 'audio');
+
+    const detectedCodec =
+        audio && typeof audio.codec_name === 'string' ? audio.codec_name : null;
+
+    // bit_rate may live on the audio stream or (for raw containers) only on
+    // format; both are strings of bits/s. Prefer the stream value.
+    let bitsPerSec = null;
+    if (audio && audio.bit_rate != null) {
+        bitsPerSec = Number(audio.bit_rate);
+    } else if (doc.format && doc.format.bit_rate != null) {
+        bitsPerSec = Number(doc.format.bit_rate);
+    }
+    const detectedBitrateKbps =
+        typeof bitsPerSec === 'number' && Number.isFinite(bitsPerSec) && bitsPerSec > 0
+            ? Math.round(bitsPerSec / 1000)
+            : null;
+
+    const formatName =
+        doc.format && typeof doc.format.format_name === 'string'
+            ? doc.format.format_name
+            : null;
+
+    return { detectedCodec, detectedBitrateKbps, formatName };
+}
+
+/**
+ * Default ffprobe seam: run `ffprobe -v error -show_streams -show_format -of
+ * json <url>` on an already-validated http(s) URL and return the parsed
+ * detection fields. ARRAY argv (never a shell string); bounded by whatever is
+ * left of the shared probe deadline; NEVER throws — any failure (spawn error,
+ * non-zero exit, timeout, unparseable JSON) resolves to all-null so the caller
+ * transcodes.
+ *
+ * @param {string} urlStr  an already-validated http(s) URL
+ * @param {number} deadline  epoch-ms deadline shared with the HTTP probe
+ * @returns {Promise<{detectedCodec:string|null, detectedBitrateKbps:number|null, formatName:string|null}>}
+ */
+function defaultRunFfprobe(urlStr, deadline) {
+    const nullResult = {
+        detectedCodec: null,
+        detectedBitrateKbps: null,
+        formatName: null,
+    };
+    return new Promise((resolve) => {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+            resolve(nullResult);
+            return;
+        }
+        execFile(
+            'ffprobe',
+            [
+                '-v',
+                'error',
+                '-show_streams',
+                '-show_format',
+                '-of',
+                'json',
+                urlStr,
+            ],
+            { timeout: Math.max(1, remaining), maxBuffer: 4 * 1024 * 1024 },
+            (err, stdout) => {
+                if (err) {
+                    resolve(nullResult);
+                    return;
+                }
+                let doc;
+                try {
+                    doc = JSON.parse(stdout);
+                } catch {
+                    resolve(nullResult);
+                    return;
+                }
+                resolve(parseFfprobeJson(doc));
+            }
+        );
+    });
+}
+
+/**
  * Probe a single URL for reachability, following up to MAX_REDIRECTS http(s)
  * redirects within one shared timeout budget. Resolves (never rejects) with a
  * classified result; input validation failures are thrown as ProbeInputError
@@ -148,7 +249,7 @@ function defaultRequest(urlStr, onResponse) {
  * stubbed { statusCode, headers, destroy() } (optionally an EventEmitter body)
  * or emits 'error' / 'timeout' — no real network, no child process.
  */
-function probeOnce(urlStr, request, deadline, redirectsLeft) {
+function probeOnce(urlStr, request, runFfprobe, deadline, redirectsLeft) {
     return new Promise((resolve) => {
         let settled = false;
         const finish = (result) => {
@@ -221,14 +322,19 @@ function probeOnce(urlStr, request, deadline, redirectsLeft) {
                     }
                     if (typeof req.destroy === 'function') req.destroy();
                     settled = true; // hand off to the next hop
-                    probeOnce(nextUrl, request, deadline, redirectsLeft - 1).then(
-                        resolve
-                    );
+                    probeOnce(
+                        nextUrl,
+                        request,
+                        runFfprobe,
+                        deadline,
+                        redirectsLeft - 1
+                    ).then(resolve);
                     return;
                 }
 
-                // Terminal response: classify from status + headers, then stop
-                // reading the body (we never download the audio).
+                // Terminal response. Read ICY + content-type headers FIRST via
+                // the pure classifier, then stop reading the body (we never
+                // download the audio).
                 const result = classifyResponse({ status, headers });
                 if (typeof res.destroy === 'function') {
                     res.destroy();
@@ -236,7 +342,24 @@ function probeOnce(urlStr, request, deadline, redirectsLeft) {
                 if (typeof req.destroy === 'function') {
                     req.destroy();
                 }
-                finish(result);
+
+                // Source-codec detection: only probe a CONFIRMED terminal 2xx,
+                // using the final resolved URL + shared deadline in scope. The
+                // seam never throws; a failure yields all-null detection so the
+                // recorder transcodes. The reachability verdict is unchanged;
+                // probeStreamUrl backfills `suggested` + nulls for every branch.
+                const is2xx =
+                    typeof status === 'number' && status >= 200 && status < 300;
+                if (!is2xx) {
+                    finish(result);
+                    return;
+                }
+                Promise.resolve()
+                    .then(() => runFfprobe(urlStr, deadline))
+                    .then(
+                        (detection) => finish({ ...result, ...detection }),
+                        () => finish(result)
+                    );
             });
         } catch {
             finish({ reachable: false, detail: 'could not connect' });
@@ -266,25 +389,57 @@ function probeOnce(urlStr, request, deadline, redirectsLeft) {
 }
 
 /**
- * Probe whether `url` is a reachable audio stream.
+ * Probe whether `url` is a reachable audio stream and, on a terminal 2xx,
+ * detect the source codec/bitrate/container via the injected ffprobe seam.
+ *
+ * The result ALWAYS carries the four detection fields so clients have a stable
+ * shape: `detectedCodec`/`detectedBitrateKbps`/`formatName` are null on any
+ * branch that did not (or could not) detect, and `suggested` is the recording-
+ * quality pre-fill derived from the detection (mp3/192 fallback when nothing
+ * was detected). Reachability itself is unchanged by detection, and the probe
+ * still never throws to the client (except ProbeInputError for bad input).
  *
  * @param {string} url  the user-entered stream URL (untrusted admin input)
- * @param {{request?:function, now?:function}} [deps]  injectable seam for tests
- * @returns {Promise<{reachable:boolean, status?:number, contentType?:string, detail:string}>}
+ * @param {{request?:function, now?:function, runFfprobe?:function}} [deps]
+ *        injectable seams for tests (no real network / child process)
+ * @returns {Promise<{reachable:boolean, status?:number, contentType?:string, detail:string, detectedCodec:string|null, detectedBitrateKbps:number|null, formatName:string|null, suggested:object}>}
  * @throws {ProbeInputError} if the url is malformed or not http(s)
  */
-async function probeStreamUrl(url, { request = defaultRequest, now = Date.now } = {}) {
+async function probeStreamUrl(
+    url,
+    { request = defaultRequest, now = Date.now, runFfprobe = defaultRunFfprobe } = {}
+) {
     const invalid = validateUrl(url);
     if (invalid) {
         throw new ProbeInputError(invalid.error);
     }
     const deadline = now() + PROBE_TIMEOUT_MS;
-    return probeOnce(url, request, deadline, MAX_REDIRECTS);
+    const result = await probeOnce(url, request, runFfprobe, deadline, MAX_REDIRECTS);
+
+    // Backfill the detection contract on EVERY branch so the shape is stable.
+    const detectedCodec =
+        typeof result.detectedCodec === 'string' ? result.detectedCodec : null;
+    const detectedBitrateKbps =
+        typeof result.detectedBitrateKbps === 'number'
+            ? result.detectedBitrateKbps
+            : null;
+    const formatName =
+        typeof result.formatName === 'string' ? result.formatName : null;
+
+    return {
+        ...result,
+        detectedCodec,
+        detectedBitrateKbps,
+        formatName,
+        suggested: suggestRecording(detectedCodec, detectedBitrateKbps),
+    };
 }
 
 module.exports = {
     probeStreamUrl,
     classifyResponse,
+    parseFfprobeJson,
+    defaultRunFfprobe,
     ProbeInputError,
     PROBE_TIMEOUT_MS,
     MAX_REDIRECTS,

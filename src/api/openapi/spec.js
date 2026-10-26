@@ -47,14 +47,14 @@ const StreamInput = z
         folder: z.string().openapi({ example: 'test_stream' }),
         url: z.string().url().openapi({ example: 'https://example.com/stream' }),
         codec: z
-            .enum(['mp3', 'opus', 'flac'])
+            .enum(['mp3', 'opus', 'aac', 'flac'])
             .optional()
             .openapi({
                 example: 'mp3',
                 description:
                     'Recording codec. Defaults to mp3 when omitted. Lossy ' +
-                    'codecs (mp3/opus) take bitrate_kbps; the lossless codec ' +
-                    '(flac) takes bit_depth.',
+                    'codecs (mp3/opus/aac) take bitrate_kbps; the lossless ' +
+                    'codec (flac) takes bit_depth.',
             }),
         bitrate_kbps: z
             .number()
@@ -93,6 +93,45 @@ const StreamTestResult = z
         status: z.number().int().optional(),
         contentType: z.string().optional(),
         detail: z.string().openapi({ example: 'reachable audio stream' }),
+        detectedCodec: z
+            .string()
+            .optional()
+            .openapi({
+                example: 'aac',
+                description:
+                    'ffprobe-detected source codec on a terminal 2xx (null ' +
+                    'when not detected).',
+            }),
+        detectedBitrateKbps: z
+            .number()
+            .int()
+            .optional()
+            .openapi({
+                example: 192,
+                description:
+                    'ffprobe-detected source bitrate in kbps (null when not ' +
+                    'detected).',
+            }),
+        formatName: z
+            .string()
+            .optional()
+            .openapi({
+                example: 'aac',
+                description:
+                    "ffprobe container format_name (null when not detected).",
+            }),
+        suggested: z
+            .object({
+                codec: z.enum(['mp3', 'opus', 'aac', 'flac']),
+                bitrate_kbps: z.number().int().nullable(),
+                bit_depth: z.number().int().nullable(),
+            })
+            .optional()
+            .openapi({
+                description:
+                    'Recording-quality pre-fill derived from the detected ' +
+                    'source; mp3/192 fallback when nothing was detected.',
+            }),
     })
     .openapi('StreamTestResult');
 
@@ -109,11 +148,11 @@ const SettingsEntry = z
         name: z.string(),
         folder: z.string(),
         url: z.string(),
-        codec: z.enum(['mp3', 'opus', 'flac']).openapi({
+        codec: z.enum(['mp3', 'opus', 'aac', 'flac']).openapi({
             example: 'mp3',
             description:
                 'Recording codec; the player derives the file extension from ' +
-                'it (codec === extension for mp3/opus/flac).',
+                'it (codec === extension for mp3/opus/aac/flac).',
         }),
     })
     .openapi('SettingsEntry');
@@ -951,7 +990,7 @@ function buildOpenApiDocument() {
                         startTime: z.union([z.string(), z.number()]),
                         endTime: z.union([z.string(), z.number()]),
                         ext: z
-                            .enum(['mp3', 'opus', 'flac'])
+                            .enum(['mp3', 'opus', 'aac', 'flac'])
                             .optional()
                             .openapi({
                                 example: 'mp3',

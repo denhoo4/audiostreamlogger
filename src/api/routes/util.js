@@ -41,9 +41,11 @@ router.post('/selection-export', (req, res) => {
     // pre-feature caller that omits it keeps today's behaviour; a supplied value
     // must be in the allowlist (its own strict regex, separate from the
     // path-traversal allowlist above). fluent-ffmpeg infers the output muxer
-    // from this extension (.opus->ogg/libopus, .flac->flac).
+    // from this extension (.opus->ogg/libopus, .flac->flac). The .aac container
+    // is raw ADTS, whose muxer fluent-ffmpeg does NOT infer from the extension
+    // alone, so an explicit '-f adts' is pinned below (mirrors the recorder).
     const ext = data.ext === undefined ? 'mp3' : data.ext;
-    if (typeof ext !== 'string' || !/^(mp3|opus|flac)$/.test(ext)) {
+    if (typeof ext !== 'string' || !/^(mp3|opus|aac|flac)$/.test(ext)) {
         return res.status(400).send('Invalid extension');
     }
 
@@ -74,10 +76,16 @@ router.post('/selection-export', (req, res) => {
     // Write the ffmpeg output to a unique temp file outside the public audio dir.
     const pathToOutput = path.join(os.tmpdir(), `export-${Date.now()}-${process.pid}.${ext}`);
 
-    // Use FFmpeg to extract the part of the MP3
-    ffmpeg(pathToFile)
+    // Use FFmpeg to extract the part of the recording. For a raw-ADTS .aac
+    // output, pin the muxer explicitly so the exported clip is valid ADTS
+    // (fluent-ffmpeg cannot infer the 'adts' muxer from the .aac extension).
+    const command = ffmpeg(pathToFile)
         .setStartTime(start)
-        .setDuration(end - start)
+        .setDuration(end - start);
+    if (ext === 'aac') {
+        command.outputOptions(['-f', 'adts']);
+    }
+    command
         .output(pathToOutput)
         .on('end', function () {
             // Send the file when processing is finished, then always clean up.

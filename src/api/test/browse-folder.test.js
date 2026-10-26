@@ -1,7 +1,7 @@
 /**
- * Coverage for browse.folderContent (FEAT-002): the per-folder audio scan that
- * feeds the /settings2 browse tree now lists .mp3/.opus/.flac hours (not only
- * .mp3). Pure-ish fs scan over a temp dir — no DB, no server.
+ * Coverage for browse.folderContent: the per-folder audio scan that feeds the
+ * /settings2 browse tree lists .mp3/.opus/.aac/.flac hours (not only .mp3).
+ * Pure-ish fs scan over a temp dir — no DB, no server.
  */
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
@@ -52,19 +52,21 @@ test('folderContent returns {} for a folder that does not exist yet', async () =
     assert.deepStrictEqual(await folderContent(missing), {});
 });
 
-test('folderContent lists mp3, opus, and flac recorded hours', async () => {
+test('folderContent lists mp3, opus, aac, and flac recorded hours', async () => {
     fs.writeFileSync(path.join(folderPath, 'radio1-2026-10-23-09.mp3'), 'x');
     fs.writeFileSync(path.join(folderPath, 'radio1-2026-10-23-10.opus'), 'x');
     fs.writeFileSync(path.join(folderPath, 'radio1-2026-10-23-11.flac'), 'x');
-    // Non-audio sidecars and unsupported extensions are ignored.
-    fs.writeFileSync(path.join(folderPath, 'radio1-2026-10-23-09.json'), '{}');
     fs.writeFileSync(path.join(folderPath, 'radio1-2026-10-23-12.aac'), 'x');
+    // Non-audio sidecars and still-unsupported extensions are ignored.
+    fs.writeFileSync(path.join(folderPath, 'radio1-2026-10-23-09.json'), '{}');
+    fs.writeFileSync(path.join(folderPath, 'radio1-2026-10-23-13.wav'), 'x');
 
     const tree = await folderContent(folderPath);
     const hours = tree['2026']['10']['23'];
     assert.ok(hours.includes('09'), 'mp3 hour listed');
     assert.ok(hours.includes('10'), 'opus hour listed');
     assert.ok(hours.includes('11'), 'flac hour listed');
-    assert.ok(!hours.includes('12'), 'aac hour NOT listed (not allowlisted)');
-    assert.strictEqual(hours.length, 3);
+    assert.ok(hours.includes('12'), 'aac hour listed (FEAT-001)');
+    assert.ok(!hours.includes('13'), 'wav hour NOT listed (not allowlisted)');
+    assert.strictEqual(hours.length, 4);
 });

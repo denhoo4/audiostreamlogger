@@ -78,6 +78,7 @@ function validateCountry(country) {
 const CODECS = {
     mp3: { kind: 'lossy', bitrates: [96, 128, 160, 192, 256, 320] },
     opus: { kind: 'lossy', bitrates: [64, 96, 128, 160, 192] },
+    aac: { kind: 'lossy', bitrates: [96, 128, 160, 192, 256, 320] },
     flac: { kind: 'lossless', bitDepths: [16, 24] },
 };
 
