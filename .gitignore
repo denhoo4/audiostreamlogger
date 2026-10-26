@@ -27,6 +27,9 @@ data/branding
 .agents/
 .worktrees/
 
+# Portable, uncommitted notes meant to be copied into other projects (never committed here)
+PORTABLE-*.md
+
 # Logs
 *.log
 npm-debug.log*
