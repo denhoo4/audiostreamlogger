@@ -213,5 +213,97 @@ interdependent frontend-toolchain bumps, so they were bundled into a single
 coordinated upgrade — React 19, Vite 8, Vitest 5, `@vitejs/plugin-react` 6 — with
 the two real breaking changes fixed (React 19's ref typing widened
 `containerRef` to `RefObject<HTMLDivElement | null>`; `@testing-library/jest-dom`
-v6 needed its `/vitest` entrypoint for the Vitest-5 assertion augmentation). See
-[TODO.md](TODO.md) for the current state of that triage.
+v6 needed its `/vitest` entrypoint for the Vitest-5 assertion augmentation). That
+toolchain upgrade is done and merged; the UI overhaul below built on top of it.
+
+## The frontend UI/UX overhaul
+
+With the foundation solid, the whole frontend got a deliberate, phased redesign.
+The styling was kept intentionally minimal until this point; the overhaul turned it
+into a coherent house style. It ran as a sequence of workflows (not parallel, since
+they all share the styling layer), and it is now complete and on `main`.
+
+**Design direction.** The chosen component library is **Mantine** (`@mantine/core`
++ `@mantine/hooks`, pinned at `8.3.18` for its looser React-19 peer range), with a
+visual language inspired by Google AI Studio: a deep near-black background, panels a
+shade lighter with soft 1px borders over heavy shadows, one blue accent for primary
+actions, restrained typography, generous spacing, and rounded corners. Dark remained
+the design anchor, but a matching light theme was added too.
+
+**Foundation and shell.** Phase 1 wired in the `MantineProvider` + a `theme.ts`
+token set. Phase 2 added a shared `AppLayout` shell (the dark header bar, a centered
+max-width `Container`) wrapped around both routes, and converted the admin tab nav
+from a hand-rolled tablist to Mantine `Tabs`. Phase 3 introduced a thin shared
+`src/ui/` layer — `Panel` (the AI-Studio card surface), `StatusBadge` (the single
+state→colour map), and later `AsyncState` (one shared loading/empty/error vocabulary)
+— and proved the style out on the Streams tab first.
+
+**Auto light/dark.** Phase 3.5 made the app follow the device `prefers-color-scheme`
+on first paint and switch live, adding the light theme via CSS `light-dark()` on the
+custom surfaces. A header toggle was added at this point and then **removed again in
+Phase 5.7** — the app now always follows the browser with no manual override. That
+removal left a subtle bug (see below) that Phase 6 fixed structurally.
+
+**Streams tab.** Beyond the reskin, the Streams tab gained real functional polish:
+inline row editing (clicking the pencil turns that row into inputs in place, no
+separate form), a derived folder for new streams only (existing streams keep their
+stored folder so recordings never move), stacked reorder controls, and a compact
+star toggle for the default stream. Country group headers were added, indented over
+their stream rows.
+
+**Manual country ordering.** An admin-chosen country order is persisted as an
+additive `app_config` key `country_order` (a JSON array of ISO alpha-2 codes, no
+schema migration), exposed on the public config endpoint and set via a new
+`requireAuth` endpoint. Shared framework-free helpers order the countries (listed
+ones first in the chosen order, the rest alphabetically by name) and both the admin
+Streams table and the player honour it.
+
+**Admin tabs restyle and content reworks.** The remaining three admin tabs
+(Recordings & health, Jobs, System) were restyled to the house style, then reworked
+in content:
+
+- **Recordings & health** merged its three separate panels (analysis summary,
+  stream-health, storage-estimate) into a single per-stream table built client-side
+  from the existing endpoints, with two summary lines above it. The old gaps &
+  coverage panel was removed (its endpoint left intact, now unused).
+- **Jobs** folded the cleaner log-retention field into the cleaner card (and later
+  onto the card's single shared Save, removing the standalone Save button), switched
+  the job feed to show only the latest job per type, and exposed reconcile as a
+  first-class scheduler peer with enable/save/run-now.
+- **System** wired the configured `app_title` into the `AppLayout` header brand on
+  both routes, falling back to a shared default when empty.
+
+**The player.** The public `/` screen was restyled and reworked while preserving
+behaviour: the plain date input became a real Mantine calendar (`@mantine/dates`,
+Monday-first) that only enables days with recordings for the selected stream; the
+controls were laid out into transport / selection / source zones with `NativeSelect`
+pickers; and the stream picker gained non-selectable country group headers via
+`<optgroup>`, with the stations indented one step beneath each country.
+
+A batch of player fixes followed (Phase 5.7): every remaining Dutch UI string was
+translated to English; the fragment-download filename became
+`<streamname>_<start>_<end>.<ext>` with absolute wall-clock stamps; switching stream
+now keeps the current date + hour when both still exist for the new stream;
+waveform loading got explicit loading/error feedback; and "play selection" now plays
+only the selected region and auto-pauses at its end.
+
+**The peak-file model revert.** Item 24 had added live current-hour peak
+regeneration — a worker timer that rebuilt the growing hour's peak file every ~30s.
+In practice it produced a short peak file (the mp3 was only a few minutes long) that
+the frontend stretched across the full hour, so the current-hour waveform looked
+wrong. The decision was to go back to the original model: the worker peaks **only
+completed hours** (the normal post-hour run, current-hour skip kept), and the
+**browser decodes the current in-progress hour client-side** from the audio. This
+reverted the worker's `currenthourpeaks` handler and its timer, and folded the
+player's live reload into Load (which cache-busts and client-decodes the current
+hour). The now-redundant player **Refresh button was removed** — Load does the same
+thing.
+
+**Polish.** Phase 6 closed it out: a structural color-scheme fix (a custom
+`systemColorSchemeManager` so a stale `localStorage` key left by the removed toggle
+no longer overrides "follow the browser"), the shared `AsyncState` vocabulary across
+the admin, reduced-motion-aware mount fades, and a responsive/accessibility pass
+(no horizontal overflow, aria-labels on every icon-only control, no focus-ring
+suppression).
+
+See [TODO.md](TODO.md) for what remains open after all of this.

@@ -9,8 +9,8 @@ four-service Docker Compose stack, so your laptop fan does the worrying, not you
   recordings past your retention window, and shows it all in a browser.
 - **What runs it:** four services under `src/` — see the table below.
 
-For the why and how see [ARCHITECTURE.md](ARCHITECTURE.md); for running the tests
-see [docs/TESTING.md](docs/TESTING.md).
+For the why and how see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); for running
+the tests see [docs/TESTING.md](docs/TESTING.md).
 
 ## The services
 
@@ -81,7 +81,21 @@ Add/edit/remove streams (with per-stream codec, manual stream and country
 ordering, and a default stream), set branding, schedule and run jobs, watch a
 live job feed, review recording analysis and stream health, see a storage
 estimate, and export/import a backup.
-Full detail lives in [ARCHITECTURE.md](ARCHITECTURE.md).
+Full detail lives in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Documentation
+
+The longer-form docs live in [`docs/`](docs/):
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — how the four services fit
+  together, where configuration lives, and how to run it.
+- [docs/HISTORY.md](docs/HISTORY.md) — the story of what was built and why the
+  big decisions went the way they did.
+- [docs/TODO.md](docs/TODO.md) — what is still open right now.
+- [docs/HANDOVER.md](docs/HANDOVER.md) — working style, preferences, and
+  environment gotchas for the next developer.
+- [docs/TESTING.md](docs/TESTING.md) — the testing strategy and the exact
+  commands CI runs.
 
 ## Data on disk
 

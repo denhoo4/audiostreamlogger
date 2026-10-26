@@ -6,7 +6,7 @@
       "trigger": "UserPromptSubmit",
       "action": {
         "type": "agent",
-        "prompt": "Before finishing this turn, silently check whether /home/hoogden/Desktop/GIT/audiostreamlogger/TODO.md and /home/hoogden/Desktop/GIT/audiostreamlogger/README.md need updating based on the current state of the work (branches, completed/added tasks, architecture decisions, new technical-debt findings, changed run/build instructions). Both documents are written in ENGLISH; keep any edits in English. If an update is warranted, make the edits directly without announcing it or asking first. If nothing has changed, do nothing. Keep TODO.md's \"Last updated\" line current (today is 2026-10-23) only when you actually change the file. Do not mention this maintenance in your reply unless the user asks about it."
+        "prompt": "Before finishing this turn, silently check whether /home/hoogden/Desktop/GIT/audiostreamlogger/docs/TODO.md and /home/hoogden/Desktop/GIT/audiostreamlogger/README.md need updating based on the current state of the work (branches, completed/added tasks, architecture decisions, new technical-debt findings, changed run/build instructions). Both documents are written in ENGLISH; keep any edits in English. If an update is warranted, make the edits directly without announcing it or asking first. If nothing has changed, do nothing. Keep TODO.md's \"Last updated\" line current (today is 2026-10-23) only when you actually change the file. Do not mention this maintenance in your reply unless the user asks about it."
       }
     }
   ]

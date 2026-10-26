@@ -4,8 +4,8 @@ audiostreamlogger is a four-service Docker Compose application that records
 internet audio streams hourly, generates waveform peak files, prunes old
 recordings, and serves a web UI to browse, play, and download them. This
 document describes how the services fit together, where configuration lives, and
-how to run and test the stack. For day-to-day usage see [README.md](README.md);
-for the testing approach see [docs/TESTING.md](docs/TESTING.md).
+how to run and test the stack. For day-to-day usage see [README.md](../README.md);
+for the testing approach see [TESTING.md](TESTING.md).
 
 ## Services
 
@@ -16,7 +16,7 @@ frontend builds on it and serves through `nginx:1.27-bookworm`).
 
 Records every configured stream once an hour with ffmpeg, supervising each
 stream's ffmpeg process independently so a single drop does not disturb the
-others (a mid-hour restart writes a `.partN.mp3` segment with capped backoff).
+others (a mid-hour restart writes a `.partN` segment with capped backoff).
 On startup and on a periodic poll it **catches up** the remaining part of the
 current hour for any stream with no recording yet, so a newly-added stream starts
 recording immediately. It reads its run minute from the database and writes a
@@ -30,11 +30,24 @@ across all types:
 
 - **cleaner** — deletes recordings past the retention window and removes the
   matching `recordings` row.
-- **peakfilegenerator** — generates `audiowaveform` peak files for the player.
+- **peakfilegenerator** — generates `audiowaveform` peak files for the player. It
+  peaks **only completed hours** and skips the current in-progress hour: the browser
+  decodes the live hour's waveform client-side (see the peak-file model below).
+- **reconcile** — a two-way disk↔DB sync: inserts missing `recordings` rows, removes
+  orphans, and fixes drifted status/segment counts. Schedulable like the others, with
+  a Run-now control in the admin Jobs tab.
 
 It replaces the old standalone `cleaner` + `peakfilegenerator` containers. It
 also fills each `recordings` row's duration/size (ffprobe) after processing a
 file. A job that would overlap a running one is skipped ("skipped, busy").
+
+**Peak-file model.** Completed hours are peaked once by the worker's
+`peakfilegenerator` run and the player loads that `.json`. The current, still-growing
+hour is **not** peaked by the backend — the player decodes it client-side from the
+audio (cache-busted on Load). An earlier experiment (item 24) that regenerated the
+current hour's peak file live on a worker timer was **reverted**: it produced a short
+peak file stretched across the full hour. The `currenthourpeaks` handler and its
+timer no longer exist.
 
 ### api (`src/api/`)
 
@@ -60,9 +73,19 @@ It listens internally on port 3000 and is **not** published to the host.
 A React + Vite single-page app, built to static assets and served by nginx. The
 same nginx config serves the recorded audio under `/audio` and
 reverse-proxies `/api`, `/util`, and `/auth` to the api service, so the whole app
-is **same-origin** (no CORS). The admin screen lives at `/settings`. UI styling is
-built on **Mantine** (`@mantine/core` + `@mantine/hooks`), configured dark-only via
-a `MantineProvider` + `src/theme.ts` token set (Google-AI-Studio-inspired).
+is **same-origin** (no CORS). The admin screen lives at `/settings`.
+
+UI styling is built on **Mantine** (`@mantine/core` + `@mantine/hooks`, plus
+`@mantine/dates` for the player calendar and `@tabler/icons-react`), with a
+Google-AI-Studio-inspired look configured through a `MantineProvider` +
+`src/theme.ts` token set. The app **follows the device light/dark setting**
+(`defaultColorScheme="auto"` with `ColorSchemeScript` to avoid a flash) and switches
+live; there is no manual toggle. A small custom `systemColorSchemeManager` keeps
+Mantine from pinning the scheme to a stale `localStorage` value so "follow the
+browser" always wins. A thin shared `src/ui/` layer (`Panel`, `StatusBadge`,
+`AsyncState`) carries the house conventions. The header brand name is driven by the
+configured `app_title`. The player's stream picker groups stations under
+non-selectable country `<optgroup>` headers in the configured country order.
 
 ## How the services communicate
 
@@ -85,9 +108,10 @@ a `MantineProvider` + `src/theme.ts` token set (Google-AI-Studio-inspired).
       │                          │                           │
 ┌─────▼─────┐             ┌──────▼──────┐             ┌───────▼───────┐
 │  recorder │             │   worker    │             │   ./data      │
-│ writes mp3│  ◄────────► │ cleaner +   │  ◄────────► │  app.db       │
-│ + rows    │   shared    │ peakfiles   │   shared    │ (SQLite file) │
-└───────────┘  ./audio    └─────────────┘   ./data    └───────────────┘
+│ writes    │  ◄────────► │ cleaner +   │  ◄────────► │  app.db       │
+│ audio+rows│   shared    │ peakfiles + │   shared    │ (SQLite file) │
+│           │   ./audio   │ reconcile   │   ./data    │               │
+└───────────┘             └─────────────┘             └───────────────┘
 ```
 
 The backend services never talk over HTTP; they coordinate through the shared
@@ -101,12 +125,16 @@ and `recordings` rows.
 **There is no `settings.json`** — it was removed entirely. All configuration is
 in the SQLite database at `./data/app.db`:
 
-- `streams` — the stream list (`country`, `name`, `folder`, `url`).
-- `schedules` — per job type (`cleaner`, `peakfilegenerator`) enable toggle +
-  hourly/daily/weekly schedule.
+- `streams` — the stream list (`country`, `name`, `folder`, `url`), each with a
+  per-stream codec (`mp3`/`opus`/`flac`) + bitrate/bit-depth, a `sort_order`, and a
+  `default_stream_folder` the player preselects.
+- `schedules` — per job type (`cleaner`, `peakfilegenerator`, `reconcile`) enable
+  toggle + hourly/daily/weekly schedule.
 - `app_config` — scalar key/value settings: the recorder run minute, the
-  log-retention window, output-retention count, page title, favicon, and the
-  worker's informational heartbeat/status rows.
+  log-retention window (`log_retention`), output-retention count, the page title
+  (`app_title`), the `favicon`, the manual `country_order` (a JSON array of ISO
+  alpha-2 codes the player and admin Streams table honour), and the worker's
+  informational heartbeat/status rows.
 
 The database is created and seeded automatically on first start (a single admin
 user `admin` / `admin`, and the default schedules/config). The `./data` directory
@@ -119,8 +147,10 @@ insecure dev fallback is used with a warning if unset), and `COOKIE_SECURE`.
 
 ## Data volume & backup
 
-- `./audio` — recorded mp3s under `audio/<folder>/<folder>-YYYY-MM-DD-HH.mp3`
-  (timezone `Europe/Amsterdam`), each with a `.json` peak file for the waveform.
+- `./audio` — recordings under `audio/<folder>/<folder>-YYYY-MM-DD-HH.<ext>`
+  (timezone `Europe/Amsterdam`), where `<ext>` is the stream's codec
+  (`mp3`/`opus`/`flac`). Completed hours carry a `.json` peak file for the waveform;
+  the current in-progress hour is decoded client-side.
 - `./data/app.db` — the single SQLite database described above.
 
 From the admin screen (all `requireAuth`): **export** a JSON backup of streams +
@@ -141,7 +171,7 @@ after first login).
 
 ## How to run tests
 
-See [docs/TESTING.md](docs/TESTING.md). In short: `node --test` per backend
+See [TESTING.md](TESTING.md). In short: `node --test` per backend
 service (`src/api`, `src/worker`, `src/recorder`) and `vitest` for the frontend;
 the images install deps with `npm ci` against the committed lockfiles.
 

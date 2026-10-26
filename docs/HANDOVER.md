@@ -8,10 +8,13 @@ system design lives in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Current state
 
-The modernization roadmap is complete and merged to `origin/main`. Working tree
-clean, no open worktrees/branches of ours left dangling (bar the
-`frontend-toolchain-upgrade` branch awaiting its merge step). For what is still
-open, defer to [TODO.md](TODO.md) — don't track it here.
+The modernization roadmap **and** the full frontend UI/UX overhaul (the Mantine
+house style, auto light/dark, the admin content reworks, the player restyle and
+fixes, manual country ordering, the peak-file model revert) are complete and merged
+to `origin/main`. Working tree clean, no dangling worktrees/branches of ours. The
+docs now live under `docs/` (this file, `HISTORY.md`, `ARCHITECTURE.md`, `TODO.md`,
+`TESTING.md`); only `README.md` stays in the repo root by GitHub convention. For
+what is still open, defer to [TODO.md](TODO.md) — don't track it here.
 
 ## Language
 
@@ -75,9 +78,10 @@ the start of each turn.
 
 ## Docs hook
 
-`.kiro/hooks/keep-docs-updated.json` keeps `TODO.md` / `README.md` current (in
-English) on each prompt — expect `TODO.md` to get touched automatically. Don't be
-surprised by an auto-edit there.
+`.kiro/hooks/keep-docs-updated.json` keeps `docs/TODO.md` / `README.md` current (in
+English) on each prompt — expect `docs/TODO.md` to get touched automatically. Don't
+be surprised by an auto-edit there. (The hook was repointed to `docs/TODO.md` when
+the docs moved into `docs/`; `README.md` stays at the root.)
 
 ## GitHub & git
 
@@ -95,6 +99,7 @@ conversation in Dutch.
 
 ## What's next
 
-See [TODO.md](TODO.md). In short: the bundled frontend-toolchain upgrade is awaiting
-its merge step, the cursor-anchored wavesurfer zoom is in progress, and a full
-frontend UI/UX overhaul is deferred for later.
+See [TODO.md](TODO.md). In short: AAC stream support with a Test auto-detect of the
+stream's native format (MP3 192 kbps fallback), the mobile player button layout, and
+the mobile current-hour seek bug are the in-flight items; the shared
+`loadSettings()`/`validateMinute()` nit is the remaining lower-priority tech debt.
