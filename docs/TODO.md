@@ -26,9 +26,12 @@ These three are in flight from the latest batch and are being worked separately:
       to MP3 192 kbps when the detected format is unsupported. AAC is only worth
       shipping if the peak-file generator works for it too, so it matches the other
       codecs' experience.
-- [ ] **Mobile player button layout.** On a mobile device the player controls wrap
+- [x] **Mobile player button layout.** On a mobile device the player controls wrap
       unattractively. Lay them out more symmetrically and keep the play/pause button
-      in a stable centre position.
+      in a stable centre position. Done: the transport zone is now three centred
+      zones (rewind skips | play/pause | forward skips), each skip zone an
+      equal-flex group that wraps internally so the negative and positive skips
+      stay balanced around the always-centred play/pause at narrow widths.
 - [ ] **Mobile current-hour seek bug.** On a mobile device the current (in-progress)
       hour can only be played from the start and the skip buttons do nothing; older
       completed files work fine. Likely tied to the current-hour peak/decoding path.
