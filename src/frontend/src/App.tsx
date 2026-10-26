@@ -510,20 +510,32 @@ export default function App() {
           </Group>
         </Stack>
 
-        {/* Transport zone: skip back, play/pause, skip forward. */}
-        <Group justify="center" gap="xs" wrap="wrap">
-          {SKIP_BUTTONS.slice(0, 3).map((b) => (
-            <Button
-              key={b.label}
-              data-value={b.value}
-              className="skip-button"
-              variant="default"
-              size="xs"
-              onClick={() => ws.skip(b.value)}
-            >
-              {b.label}
-            </Button>
-          ))}
+        {/* Transport zone: three mirrored zones — rewind skips (left),
+            play/pause (centre), forward skips (right). The outer Group stays
+            centred at every width; each skip zone is its own Group that wraps
+            internally, so on narrow/mobile widths the negative and positive
+            skips wrap as balanced mirrored blocks around the always-centred
+            play/pause instead of a single lopsided row with a dangling button. */}
+        <Group justify="center" align="center" gap="sm" wrap="wrap">
+          <Group
+            justify="center"
+            gap="xs"
+            wrap="wrap"
+            style={{ flex: "1 1 0", minWidth: 0 }}
+          >
+            {SKIP_BUTTONS.slice(0, 3).map((b) => (
+              <Button
+                key={b.label}
+                data-value={b.value}
+                className="skip-button"
+                variant="default"
+                size="xs"
+                onClick={() => ws.skip(b.value)}
+              >
+                {b.label}
+              </Button>
+            ))}
+          </Group>
           <ActionIcon
             id="playPauseButton"
             aria-label={ws.isPlaying ? "Pause" : "Play"}
@@ -538,18 +550,25 @@ export default function App() {
               <IconPlayerPlay size={20} />
             )}
           </ActionIcon>
-          {SKIP_BUTTONS.slice(3).map((b) => (
-            <Button
-              key={b.label}
-              data-value={b.value}
-              className="skip-button"
-              variant="default"
-              size="xs"
-              onClick={() => ws.skip(b.value)}
-            >
-              {b.label}
-            </Button>
-          ))}
+          <Group
+            justify="center"
+            gap="xs"
+            wrap="wrap"
+            style={{ flex: "1 1 0", minWidth: 0 }}
+          >
+            {SKIP_BUTTONS.slice(3).map((b) => (
+              <Button
+                key={b.label}
+                data-value={b.value}
+                className="skip-button"
+                variant="default"
+                size="xs"
+                onClick={() => ws.skip(b.value)}
+              >
+                {b.label}
+              </Button>
+            ))}
+          </Group>
         </Group>
 
         {/* Selection zone: stream + calendar + hour + load. On narrow widths
