@@ -8,13 +8,16 @@
  * `resolveEncoding(row)` clamps an unrecognised/NULL codec to the
  * behaviour-preserving mp3@160 default so a corrupt DB row can never produce an
  * un-encodable command — the recorder is the last line of defence; the api is
- * the authoritative validator (design §3/§7). `codec === ext` for all three
- * allowlisted codecs (mp3/opus/flac).
+ * the authoritative validator (design §3/§7). `codec === ext` for all four
+ * allowlisted codecs (mp3/opus/aac/flac).
  *
  * `outputOptionsFor(enc)` returns the ffmpeg OUTPUT option ARRAY (never a shell
  * string — NFR-3) per design §6. The container/extension is implied by the
  * output filename extension (fluent-ffmpeg/ffmpeg pick the muxer from it):
- * .mp3->mp3, .opus->ogg (libopus), .flac->flac.
+ * .mp3->mp3, .opus->ogg (libopus), .flac->flac; aac pins its muxer explicitly
+ * ('-f adts', raw ADTS). `copyOutputOptions(enc)` is the stream-copy variant
+ * (no re-encode / no resample) used when the detected source codec matches the
+ * configured codec and the container is copy-eligible (see recorder.js).
  */
 
 // Behaviour-preserving default: exactly today's fixed encoding (libmp3lame,
@@ -38,6 +41,7 @@ const OPUS_SAMPLE_RATE = 48000;
 const CODECS = {
     mp3: { ext: 'mp3', kind: 'lossy', bitrates: [96, 128, 160, 192, 256, 320] },
     opus: { ext: 'opus', kind: 'lossy', bitrates: [64, 96, 128, 160, 192] },
+    aac: { ext: 'aac', kind: 'lossy', bitrates: [96, 128, 160, 192, 256, 320] },
     flac: { ext: 'flac', kind: 'lossless', bitDepths: [16, 24] },
 };
 
@@ -88,6 +92,12 @@ function outputOptionsFor(enc) {
         // libopus rejects 44100 Hz; pin to its native 48000 Hz (see OPUS_SAMPLE_RATE).
         return ['-c:a', 'libopus', '-b:a', `${e.bitrate_kbps}k`, '-ar', String(OPUS_SAMPLE_RATE)];
     }
+    if (e.codec === 'aac') {
+        // Raw ADTS output — pin the muxer explicitly ('.aac' resolves to the
+        // adts muxer, but we never rely on extension-sniffing for aac). The
+        // native encoder 'aac' is always present (no external lib needed).
+        return ['-c:a', 'aac', '-b:a', `${e.bitrate_kbps}k`, '-ar', String(SAMPLE_RATE), '-f', 'adts'];
+    }
     if (e.codec === 'flac') {
         const opts = ['-c:a', 'flac', '-ar', String(SAMPLE_RATE)];
         if (e.bit_depth === 24) {
@@ -101,9 +111,30 @@ function outputOptionsFor(enc) {
     return ['-c:a', 'libmp3lame', '-b:a', `${e.bitrate_kbps}k`, '-ar', String(SAMPLE_RATE)];
 }
 
+// Build the ffmpeg OUTPUT option ARRAY for a STREAM-COPY of the source into the
+// configured codec's container (design §6 copy path). A copy preserves the
+// original bytes untouched: NO re-encode, NO resample — so this NEVER emits
+// `-ar` (adding it would be a no-op at best and misleading at worst). The
+// configured bitrate is ignored in copy mode (the source bytes carry it).
+//
+//   aac -> -c:a copy -f adts   (pin the raw-ADTS muxer, mirrors the transcode path)
+//   mp3 -> -c:a copy           (no explicit muxer needed; .mp3 ext selects it)
+//
+// Only aac/mp3 have a proven copy path (COPY_ELIGIBLE in the api's
+// codec-detect.js: mp3->mp3, aac->aac/adts); opus/flac always transcode, so
+// they never reach this helper. A defensive unknown codec gets a bare copy.
+function copyOutputOptions(enc) {
+    const e = enc || resolveEncoding(null);
+    if (e.codec === 'aac') {
+        return ['-c:a', 'copy', '-f', 'adts'];
+    }
+    return ['-c:a', 'copy'];
+}
+
 module.exports = {
     resolveEncoding,
     outputOptionsFor,
+    copyOutputOptions,
     CODECS,
     DEFAULT_CODEC,
     DEFAULT_BITRATE_KBPS,

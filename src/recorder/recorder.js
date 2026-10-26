@@ -9,7 +9,8 @@ const { backoffDelayMs, shouldRestartWithinHour, segmentOutputName } = require('
 const { isValidFolder, isContainedPath } = require('./folder-utils');
 const { streamsNeedingCatchup } = require('./catchup-helpers');
 const recordingsDb = require('./recordings-db');
-const { resolveEncoding, outputOptionsFor } = require('./encoding');
+const { resolveEncoding, outputOptionsFor, copyOutputOptions } = require('./encoding');
+const { detectSource, isCopyEligible } = require('./detect-source');
 
 // The on-disk root under which every stream's audio folder lives. Defined once
 // so the folder-containment guard (folder-utils.isContainedPath) checks against
@@ -115,7 +116,17 @@ let currentMinute = readRecorderMinute();
 // (attempt 0 keeps `<folder>-<stamp>.<ext>`, attempt >= 1 writes a distinct
 // `<folder>-<stamp>.partN.<ext>` segment — see segmentOutputName/D2). An
 // unrecognised/NULL codec clamps to mp3 defensively and logs a greppable warn.
-function recordStream(item, durationSeconds = 3600, attempt = 0) {
+//
+// `detected` (4th param, the { codec, formatName }|null resolved by
+// detectSource) selects the COPY path: when the detected source codec matches
+// this stream's resolved codec AND the container is copy-eligible (mp3/mp3,
+// aac/adts), the source is stream-copied untouched (no re-encode, no resample —
+// so the `.audioFrequency(44100)` call is DROPPED and copyOutputOptions is used,
+// ignoring the configured bitrate). Otherwise the full transcode path (today's
+// behaviour) runs: `.audioFrequency(44100).outputOptions(outputOptionsFor(enc))`.
+// This function STAYS SYNCHRONOUS — the async probe happens in superviseStream,
+// which passes the already-resolved `detected` in.
+function recordStream(item, durationSeconds = 3600, attempt = 0, detected = null) {
     const { name, folder, url } = item;
     if (!isValidFolder(folder) || !isContainedPath(AUDIO_BASE, folder)) {
         log.error(`recorder: skipping stream ${name}: invalid folder ${JSON.stringify(folder)}`);
@@ -126,18 +137,28 @@ function recordStream(item, durationSeconds = 3600, attempt = 0) {
         log.error(`recorder: unknown codec ${item.codec} for ${folder}, falling back to mp3`);
     }
 
+    const copy = isCopyEligible(enc.codec, detected);
+
     const audioFolderPath = path.join(__dirname, `./audio/${folder}`);
     fs.mkdirSync(audioFolderPath, { recursive: true });
 
     const formattedDate = currentHourStamp();
     const outputPath = `${audioFolderPath}/${segmentOutputName(folder, formattedDate, attempt, enc.ext)}`;
 
-    const command = ffmpeg()
+    if (copy) {
+        log.info(`recorder: source for ${name} (folder ${folder}) matches configured ${enc.codec} (container ${detected.formatName}); stream-copying without re-encode.`);
+    }
+
+    let command = ffmpeg()
         .input(url)
         .inputOptions('-user_agent', `'${name} Logger'`)
-        .duration(durationSeconds)
-        .audioFrequency(44100)
-        .outputOptions(outputOptionsFor(enc))
+        .duration(durationSeconds);
+    // Copy path: preserve the source bytes — NO resample (drop audioFrequency).
+    if (!copy) {
+        command = command.audioFrequency(44100);
+    }
+    command = command
+        .outputOptions(copy ? copyOutputOptions(enc) : outputOptionsFor(enc))
         .output(outputPath)
         .on('start', (commandLine) => {
             log.info(`Started recording for ${name} in folder ${folder}.`);
@@ -160,7 +181,17 @@ function recordStream(item, durationSeconds = 3600, attempt = 0) {
 // hour and we are not shutting down, schedules a single restart after a capped
 // exponential backoff. Each stream is supervised independently: one stream's
 // failure never kills or disturbs another stream's recording (deliverable 1).
-function superviseStream(item, attempt) {
+//
+// rev-3 async wiring: before starting ffmpeg we probe the source codec (bounded
+// <=8s via detectSource) to decide copy-vs-transcode. To tolerate a SIGTERM
+// that arrives DURING that probe window, the supervision entry is registered in
+// `active` IMMEDIATELY with a null command (the shutdown loop skips null-command
+// entries), and `shuttingDown` is re-checked AFTER the await before any ffmpeg
+// is started. detectSource NEVER rejects (resolves null -> transcode), so the
+// probe can only delay, never fail, the start of a recording. The function is
+// async; every caller wraps the returned promise in `.catch` so a rejection can
+// never surface as an unhandled rejection.
+async function superviseStream(item, attempt) {
     if (shuttingDown) {
         return;
     }
@@ -178,6 +209,12 @@ function superviseStream(item, attempt) {
     // error/end is treated as expected and does NOT trigger a restart (D4).
     const entry = { command: null, item, intentionalStop: false };
 
+    // Register the entry BEFORE awaiting the source probe. The command is still
+    // null here; shutdown()'s loop skips null-command entries, so a SIGTERM that
+    // lands during the probe window cannot crash on a missing command — it just
+    // flips shuttingDown, which we re-check right after the await.
+    active.set(id, entry);
+
     // The hour stamp + primary output path for this supervision, captured once
     // so the recordings-row writes (FEAT-002) key on the same hour and the
     // finalize stats the file ffmpeg is actually writing.
@@ -185,6 +222,17 @@ function superviseStream(item, attempt) {
     const enc = resolveEncoding(item);
     const outputName = segmentOutputName(item.folder, stamp, attempt, enc.ext);
     const outputPath = path.join(__dirname, `./audio/${item.folder}/${outputName}`);
+
+    // Probe the source codec to decide copy-vs-transcode (resolves null on any
+    // failure -> transcode). Bounded by detectSource's own ~8s timeout.
+    const detected = await detectSource(item.url);
+
+    // A SIGTERM may have arrived during the probe. If we are now shutting down,
+    // drop the command-less entry and bail WITHOUT starting ffmpeg.
+    if (shuttingDown) {
+        active.delete(id);
+        return;
+    }
 
     // Track the hour row: attempt 0 inserts a 'recording' row on start (with the
     // resolved codec extension so file_path matches what ffmpeg writes); a
@@ -196,9 +244,8 @@ function superviseStream(item, attempt) {
         recordSegmentRow(item.folder, stamp, attempt);
     }
 
-    const command = recordStream(item, remaining, attempt);
+    const command = recordStream(item, remaining, attempt, detected);
     entry.command = command;
-    active.set(id, entry);
 
     const cleanup = () => {
         active.delete(id);
@@ -229,7 +276,13 @@ function superviseStream(item, attempt) {
 
         const delay = backoffDelayMs(attempt, { baseMs: BACKOFF_BASE_MS, capMs: BACKOFF_CAP_MS });
         log.error(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) failed (${reason}) on attempt ${attempt}; scheduling restart in ${delay}ms (${remainingNow}s left this hour).`);
-        setTimeout(() => superviseStream(item, attempt + 1), delay).unref();
+        // superviseStream is async (rev-3); wrap the restart in .catch so a
+        // rejected supervise can never become an unhandled rejection.
+        setTimeout(() => {
+            superviseStream(item, attempt + 1).catch((err) => {
+                log.error(`recorder: restart supervise for ${item.folder} failed:`, err);
+            });
+        }, delay).unref();
     };
 
     command.on('error', (err) => {
@@ -275,7 +328,11 @@ function superviseStream(item, attempt) {
 function startRecording() {
     const streams = readStreams();
     streams.forEach(item => {
-        superviseStream(item, 0);
+        // superviseStream is async (rev-3); .catch so a rejected supervise for
+        // one stream never becomes an unhandled rejection or aborts the loop.
+        superviseStream(item, 0).catch((err) => {
+            log.error(`recorder: supervise for ${item.folder} failed:`, err);
+        });
     });
 }
 
@@ -390,7 +447,14 @@ function shutdown(signal) {
     // Finalize each in-progress recording. SIGTERM lets ffmpeg close the mp3
     // container cleanly; marking intentionalStop prevents the supervisor from
     // treating the resulting error/end as a failure to restart.
-    for (const [, entry] of active) {
+    for (const [id, entry] of active) {
+        // A command-less entry is a supervision still inside its source-probe
+        // window (rev-3): no ffmpeg to SIGTERM yet. Drop it and move on — the
+        // supervisor re-checks shuttingDown after its await and bails itself.
+        if (!entry.command) {
+            active.delete(id);
+            continue;
+        }
         entry.intentionalStop = true;
         try {
             log.info(`recorder: finalizing recording for ${entry.item.name} (folder ${entry.item.folder}) on ${signal}.`);
@@ -479,7 +543,12 @@ function runCatchup(streams, reason) {
     needing.forEach((item) => {
         try {
             log.info(`recorder: ${reason} starting for ${item.folder}: no recording for hour ${stamp} yet (${remaining}s remaining).`);
-            superviseStream(item, 0);
+            // superviseStream is async (rev-3); .catch so a rejected supervise
+            // never becomes an unhandled rejection (the sync try/catch below
+            // only catches a synchronous throw before the first await).
+            superviseStream(item, 0).catch((err) => {
+                log.error(`recorder: ${reason} supervise for ${item.folder} failed:`, err);
+            });
         } catch (err) {
             // One stream's failure must not abort the others or crash the process.
             log.error(`recorder: ${reason} error for ${item.folder}:`, err);
