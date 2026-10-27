@@ -112,3 +112,5 @@ frontend — inside Docker, since the host has no Node. See
 [docs/TESTING.md](docs/TESTING.md) for the exact commands and the unit-vs-integration
 split. CI (`.github/workflows/ci.yml`) runs the same on every push and PR and builds
 all four images.
+
+Good luck!
