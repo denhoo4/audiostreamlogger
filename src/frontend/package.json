@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@mantine/core": "8.3.18",
-    "@mantine/dates": "8.3.18",
+    "@mantine/dates": "9.7.4",
     "@mantine/hooks": "8.3.18",
     "@tabler/icons-react": "^3.49.0",
     "dayjs": "1.11.13",
