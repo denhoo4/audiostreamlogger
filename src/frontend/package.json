@@ -13,7 +13,7 @@
   "dependencies": {
     "@mantine/core": "8.3.18",
     "@mantine/dates": "8.3.18",
-    "@mantine/hooks": "8.3.18",
+    "@mantine/hooks": "9.7.4",
     "@tabler/icons-react": "^3.49.0",
     "dayjs": "1.11.13",
     "react": "^19.3.1",
