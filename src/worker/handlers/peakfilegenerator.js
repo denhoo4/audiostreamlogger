@@ -26,7 +26,7 @@ const {
     ffmpegDecodeToWavArgs,
     audiowaveformStdinArgs,
 } = require('./exec-args');
-const { extractFileDateTime, parseRecordingParts } = require('../filename-utils');
+const { extractFileDateTime, parseRecordingParts, isIgnoredEntry } = require('../filename-utils');
 const { upsertRecordingMeta } = require('../recordings-db');
 const { AUDIO_DIR } = require('./paths');
 
@@ -129,12 +129,16 @@ function runPeakfileGenerator(db) {
     const topEntries = fs.readdirSync(AUDIO_DIR, { withFileTypes: true });
     topEntries
         .filter((dirent) => dirent.isDirectory())
+        // Never descend into the recorder's hidden `.inprogress` work dir (or
+        // any dotfile): its fragments are not finished hours (FEAT-002).
+        .filter((dirent) => !isIgnoredEntry(dirent.name))
         .filter((dirent) => streamFolders.has(dirent.name))
         .forEach((dirent) => {
             const folder = dirent.name;
             const outputFolder = path.join(AUDIO_DIR, folder);
 
             fs.readdirSync(outputFolder)
+                .filter((file) => !isIgnoredEntry(file))
                 .filter((file) => AUDIO_EXTS.has(path.extname(file)))
                 .forEach((file) => {
                     // Derive the peak base from the REAL extension so <base>.json

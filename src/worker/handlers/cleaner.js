@@ -18,7 +18,7 @@
 const fs = require('fs');
 const path = require('path');
 const { validateRetentionHours } = require('../settings-utils');
-const { parseRecordingParts } = require('../filename-utils');
+const { parseRecordingParts, isIgnoredEntry } = require('../filename-utils');
 const { deleteRecordingByFile } = require('../recordings-db');
 const { AUDIO_DIR } = require('./paths');
 
@@ -51,6 +51,12 @@ function resolveRetentionHours(db) {
 function deleteOldFiles(db, dir, thresholdTime, log, counters) {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
+        // Never descend into or stat a dotfile entry, which includes the
+        // recorder's hidden `.inprogress` work dir (FEAT-002): finalise owns
+        // those fragments, the cleaner must not touch them.
+        if (isIgnoredEntry(entry.name)) {
+            continue;
+        }
         const filePath = path.join(dir, entry.name);
         if (entry.isDirectory()) {
             try {

@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
-const { extractFileDateTime, parseRecordingParts } = require('../filename-utils');
+const { extractFileDateTime, parseRecordingParts, isIgnoredEntry } = require('../filename-utils');
 
 test('extractFileDateTime returns the YYYY-MM-DD-HH segment from a stamped filename', () => {
     assert.strictEqual(
@@ -90,4 +90,19 @@ test('parseRecordingParts returns null for non-recording names and bad parts', (
     // .part0/.part1 are nonsensical (part2 == attempt 1) -> null.
     assert.strictEqual(parseRecordingParts('radio1-2026-10-23-14.part1.mp3'), null);
     assert.strictEqual(parseRecordingParts('radio1-2026-10-23-14.part0.opus'), null);
+});
+
+test('isIgnoredEntry flags dotfiles (including the .inprogress work dir)', () => {
+    assert.strictEqual(isIgnoredEntry('.inprogress'), true);
+    assert.strictEqual(isIgnoredEntry('.DS_Store'), true);
+    assert.strictEqual(isIgnoredEntry('.state.123.tmp'), true);
+});
+
+test('isIgnoredEntry leaves ordinary names + stream folders alone', () => {
+    assert.strictEqual(isIgnoredEntry('radio1'), false);
+    assert.strictEqual(isIgnoredEntry('radio1-2026-10-23-14.mp3'), false);
+    assert.strictEqual(isIgnoredEntry('bbc-radio-2'), false);
+    // Defensive: a non-string entry is never ignored (and never throws).
+    assert.strictEqual(isIgnoredEntry(undefined), false);
+    assert.strictEqual(isIgnoredEntry(null), false);
 });

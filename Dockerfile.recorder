@@ -26,6 +26,7 @@ COPY src/recorder/detect-source.js ./
 COPY src/recorder/folder-utils.js ./
 COPY src/recorder/finalize-timeline.js ./
 COPY src/recorder/finalize-hour.js ./
+COPY src/recorder/inprogress.js ./
 
 # Ensure the audio directory exists
 RUN mkdir -p /usr/src/app/audio

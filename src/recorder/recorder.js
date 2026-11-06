@@ -3,14 +3,22 @@ const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const cron = require('node-cron');
 const log = require('./log');
-const { secondsUntilNextHour, currentHourStamp } = require('./time-helpers');
+const { secondsUntilNextHour, elapsedThisHour, currentHourStamp } = require('./time-helpers');
 const { readStreams, readRecorderMinute } = require('./streams-db');
-const { backoffDelayMs, shouldRestartWithinHour, segmentOutputName } = require('./backoff-helpers');
+const { backoffDelayMs, shouldRestartWithinHour } = require('./backoff-helpers');
 const { isValidFolder, isContainedPath } = require('./folder-utils');
-const { streamsNeedingCatchup } = require('./catchup-helpers');
+const { streamsNeedingCatchup, currentHourDecision } = require('./catchup-helpers');
 const recordingsDb = require('./recordings-db');
 const { resolveEncoding, outputOptionsFor, copyOutputOptions } = require('./encoding');
 const { detectSource, isCopyEligible } = require('./detect-source');
+const { buildTimeline } = require('./finalize-timeline');
+const { finalizeHour } = require('./finalize-hour');
+const {
+    inprogressDir,
+    fragmentName,
+    readState,
+    writeState,
+} = require('./inprogress');
 
 // The on-disk root under which every stream's audio folder lives. Defined once
 // so the folder-containment guard (folder-utils.isContainedPath) checks against
@@ -40,17 +48,6 @@ function recordStartRow(folder, stamp, ext = 'mp3') {
         recordingsDb.upsertRecordingStart(recordingsHandle, { folder, stamp, ext });
     } catch (err) {
         log.error(`recorder: recordings start-row write failed for ${folder} ${stamp}:`, err.message);
-    }
-}
-
-function recordSegmentRow(folder, stamp, attempt) {
-    if (!recordingsHandle) {
-        return;
-    }
-    try {
-        recordingsDb.markSegment(recordingsHandle, { folder, stamp, attempt });
-    } catch (err) {
-        log.error(`recorder: recordings segment-row write failed for ${folder} ${stamp} (attempt ${attempt}):`, err.message);
     }
 }
 
@@ -112,10 +109,13 @@ let currentMinute = readRecorderMinute();
 // is resolved via encoding.js into the ffmpeg OUTPUT option ARRAY (never a shell
 // string — NFR-3) and the output-file extension; for the behaviour-preserving
 // default row (mp3@160) this is exactly today's `-c:a libmp3lame -b:a 160k
-// -ar 44100`. `attempt` only changes the output filename for a mid-hour restart
-// (attempt 0 keeps `<folder>-<stamp>.<ext>`, attempt >= 1 writes a distinct
-// `<folder>-<stamp>.partN.<ext>` segment — see segmentOutputName/D2). An
-// unrecognised/NULL codec clamps to mp3 defensively and logs a greppable warn.
+// -ar 44100`. Capture writes an offset-named FRAGMENT into the hidden per-hour
+// work dir (FEAT-002): `.inprogress/<stamp>/<startOffset>-<attempt>.<ext>`.
+// `startOffset` (seconds into the hour) places the fragment on the 3600s
+// timeline; `attempt` disambiguates two fragments at the same offset. The
+// primary `<folder>-<stamp>.<ext>` is written only by finalizeIfNeeded later,
+// never by capture. An unrecognised/NULL codec clamps to mp3 defensively and
+// logs a greppable warn.
 //
 // `detected` (4th param, the { codec, formatName }|null resolved by
 // detectSource) selects the COPY path: when the detected source codec matches
@@ -126,7 +126,7 @@ let currentMinute = readRecorderMinute();
 // behaviour) runs: `.audioFrequency(44100).outputOptions(outputOptionsFor(enc))`.
 // This function STAYS SYNCHRONOUS — the async probe happens in superviseStream,
 // which passes the already-resolved `detected` in.
-function recordStream(item, durationSeconds = 3600, attempt = 0, detected = null) {
+function recordStream(item, durationSeconds = 3600, attempt = 0, detected = null, startOffset = 0, stamp = null) {
     const { name, folder, url } = item;
     if (!isValidFolder(folder) || !isContainedPath(AUDIO_BASE, folder)) {
         log.error(`recorder: skipping stream ${name}: invalid folder ${JSON.stringify(folder)}`);
@@ -139,11 +139,15 @@ function recordStream(item, durationSeconds = 3600, attempt = 0, detected = null
 
     const copy = isCopyEligible(enc.codec, detected);
 
-    const audioFolderPath = path.join(__dirname, `./audio/${folder}`);
-    fs.mkdirSync(audioFolderPath, { recursive: true });
+    // Capture now routes through the hidden per-hour work dir (FEAT-002):
+    // audio/<folder>/.inprogress/<stamp>/<startOffset>-<attempt>.<ext>. The
+    // primary <folder>-<stamp>.<ext> is written only by finalizeIfNeeded later,
+    // never by capture. mkdir the work dir (recursive also creates the folder).
+    const formattedDate = stamp || currentHourStamp();
+    const workDir = inprogressDir(AUDIO_BASE, folder, formattedDate);
+    fs.mkdirSync(workDir, { recursive: true });
 
-    const formattedDate = currentHourStamp();
-    const outputPath = `${audioFolderPath}/${segmentOutputName(folder, formattedDate, attempt, enc.ext)}`;
+    const outputPath = path.join(workDir, fragmentName(startOffset, attempt, enc.ext));
 
     if (copy) {
         log.info(`recorder: source for ${name} (folder ${folder}) matches configured ${enc.codec} (container ${detected.formatName}); stream-copying without re-encode.`);
@@ -215,13 +219,11 @@ async function superviseStream(item, attempt) {
     // flips shuttingDown, which we re-check right after the await.
     active.set(id, entry);
 
-    // The hour stamp + primary output path for this supervision, captured once
-    // so the recordings-row writes (FEAT-002) key on the same hour and the
-    // finalize stats the file ffmpeg is actually writing.
+    // The hour stamp for this supervision, captured once so the sidecar and the
+    // recordings-row writes (FEAT-002) key on the same hour.
     const stamp = currentHourStamp();
     const enc = resolveEncoding(item);
-    const outputName = segmentOutputName(item.folder, stamp, attempt, enc.ext);
-    const outputPath = path.join(__dirname, `./audio/${item.folder}/${outputName}`);
+    const workDir = inprogressDir(AUDIO_BASE, item.folder, stamp);
 
     // Probe the source codec to decide copy-vs-transcode (resolves null on any
     // failure -> transcode). Bounded by detectSource's own ~8s timeout.
@@ -235,16 +237,78 @@ async function superviseStream(item, attempt) {
     }
 
     // Track the hour row: attempt 0 inserts a 'recording' row on start (with the
-    // resolved codec extension so file_path matches what ffmpeg writes); a
-    // mid-hour restart (attempt >= 1) flips it to 'partial' with the new
-    // segment count. Best-effort — never throws into the supervisor.
+    // resolved codec extension so file_path matches the primary name finalise
+    // will write). A mid-hour restart (attempt >= 1) no longer flips the row to
+    // 'partial' — capture leaves the row 'recording' and finalise decides the
+    // final status (FEAT-002; the gap flag lands in FEAT-004). Best-effort.
     if (attempt === 0) {
         recordStartRow(item.folder, stamp, enc.ext);
-    } else {
-        recordSegmentRow(item.folder, stamp, attempt);
     }
 
-    const command = recordStream(item, remaining, attempt, detected);
+    // startOffset = seconds elapsed into the hour, captured JUST BEFORE ffmpeg
+    // starts so this fragment lands at the right place on the 3600s timeline.
+    // A fresh attempt 0 at the top of the hour is 0; a mid-hour restart/resume
+    // appends its fragment at the current offset and the [lastClosed..now] gap
+    // finalises to silence.
+    const startOffset = elapsedThisHour();
+    const copyEligible = isCopyEligible(enc.codec, detected);
+    const fragFile = fragmentName(startOffset, attempt, enc.ext);
+
+    // Append an 'open' fragment to the per-hour sidecar before starting ffmpeg.
+    // recordStream mkdirs the work dir; mkdir here too so the sidecar write that
+    // precedes the ffmpeg start never races a missing dir. Best-effort: a
+    // sidecar write failure only logs and never throws into the supervisor (the
+    // cron/boot backstop still finalises whatever fragments do land on disk).
+    try {
+        fs.mkdirSync(workDir, { recursive: true });
+        const state = readState(workDir) || {
+            folder: item.folder,
+            stamp,
+            ext: enc.ext,
+            copyEligible,
+            fragments: [],
+        };
+        state.ext = enc.ext;
+        state.copyEligible = copyEligible;
+        state.fragments.push({
+            file: fragFile,
+            startOffset,
+            plannedDuration: remaining,
+            attempt,
+            status: 'open',
+        });
+        writeState(workDir, state);
+    } catch (err) {
+        log.error(`recorder: sidecar start write failed for ${item.folder} ${stamp}:`, err.message);
+    }
+
+    // Wall-clock start so the fragment's actualDuration can be measured when
+    // ffmpeg ends/errors (the capture may stop short of `remaining`).
+    const startedAtMs = Date.now();
+
+    // Flip this fragment's sidecar entry to 'closed' with the observed duration.
+    // Best-effort and idempotent per fragment. Returns nothing.
+    const closeFragment = () => {
+        try {
+            const state = readState(workDir);
+            if (!state) {
+                return;
+            }
+            const actualDuration = Math.max(0, Math.round((Date.now() - startedAtMs) / 1000));
+            const frag = state.fragments.find(
+                (f) => f && f.file === fragFile && f.status !== 'closed',
+            );
+            if (frag) {
+                frag.status = 'closed';
+                frag.actualDuration = actualDuration;
+                writeState(workDir, state);
+            }
+        } catch (err) {
+            log.error(`recorder: sidecar close write failed for ${item.folder} ${stamp}:`, err.message);
+        }
+    };
+
+    const command = recordStream(item, remaining, attempt, detected, startOffset, stamp);
     entry.command = command;
 
     const cleanup = () => {
@@ -257,6 +321,9 @@ async function superviseStream(item, attempt) {
         }
         settled = true;
         cleanup();
+        // Whatever happened, this fragment is no longer being written — close it
+        // in the sidecar so finalise/resume see its true captured length.
+        closeFragment();
 
         if (entry.intentionalStop) {
             // We killed it on purpose (shutdown) — not a failure, never restart.
@@ -271,6 +338,8 @@ async function superviseStream(item, attempt) {
         const remainingNow = secondsUntilNextHour();
         if (!shouldRestartWithinHour(remainingNow, RESTART_FLOOR_SECONDS)) {
             log.error(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) failed (${reason}); giving up for this hour, only ${remainingNow}s left — next hourly run takes over.`);
+            // No more restarts this hour and the hour is about to roll over; the
+            // cron/boot backstop finalises this .inprogress hour once it is past.
             return;
         }
 
@@ -299,6 +368,8 @@ async function superviseStream(item, attempt) {
         // this hour's recording — deregister without restarting.
         settled = true;
         cleanup();
+        // Close the fragment either way so the sidecar reflects its true length.
+        closeFragment();
         if (entry.intentionalStop) {
             log.info(`recorder: ffmpeg for ${item.name} (folder ${item.folder}) finalized during shutdown.`);
             return;
@@ -306,20 +377,188 @@ async function superviseStream(item, attempt) {
         if (shuttingDown) {
             return;
         }
-        // Normal finalize (not an intentional stop, not shutdown): stat the mp3
-        // ffmpeg just wrote and record size_bytes + status 'complete' for the
-        // hour. markComplete leaves an already-'partial' hour 'partial'. Best-
-        // effort: a stat/DB error only logs, never throws into this callback.
-        let sizeBytes = null;
-        try {
-            sizeBytes = fs.statSync(outputPath).size;
-        } catch (err) {
-            log.error(`recorder: could not stat ${outputPath} for recordings size:`, err.message);
-        }
-        recordCompleteRow(item.folder, stamp, sizeBytes);
+        // Normal end = this hour's last fragment finished. Lay the fragments on
+        // the 3600s timeline and write the single primary file (FEAT-002). The
+        // finalise is IDEMPOTENT and mutex-guarded so the cron backstop can
+        // never double-run it. Best-effort: a finalise error only logs and the
+        // cron/boot backstop retries the still-present .inprogress dir.
+        finalizeIfNeeded(AUDIO_BASE, item.folder, stamp, enc).catch((err) => {
+            log.error(`recorder: finalise after ffmpeg end failed for ${item.folder} ${stamp}:`, err.message);
+        });
     });
 
     return id;
+}
+
+// --- Idempotent per-hour finalise (FEAT-002) --------------------------------
+// Per-(folder,stamp) finalise mutex: a map of in-flight finalise promises keyed
+// by `${folder}/${stamp}`. ffmpeg-end and the cron backstop (and the boot
+// resume pass) can all race to finalise the same hour; the mutex guarantees
+// only ONE finalise runs per hour — a concurrent caller awaits the same promise
+// instead of spawning a second ffmpeg that would clobber the output.
+const finalizing = new Map();
+
+// Lay a captured hour's fragments on the 3600s timeline and write the single
+// primary file <folder>-<stamp>.<ext>. IDEMPOTENT and "only when needed":
+//   - no sidecar (nothing captured)                      -> no-op
+//   - primary file already present (already finalised)   -> no-op
+//   - otherwise: buildTimeline(state.fragments) -> finalizeHour() to a TEMP
+//     name in the folder, atomic-rename into place, then rm -rf the
+//     .inprogress/<stamp> work dir.
+// Guarded by the per-(folder,stamp) mutex so ffmpeg-end + cron can never
+// double-run. Returns a promise resolving to a small status object.
+function finalizeIfNeeded(audioBase, folder, stamp, enc) {
+    const key = `${folder}/${stamp}`;
+    const existing = finalizing.get(key);
+    if (existing) {
+        return existing;
+    }
+
+    const run = (async () => {
+        if (!isValidFolder(folder) || !isContainedPath(audioBase, folder)) {
+            log.error(`recorder: refusing to finalise invalid folder ${JSON.stringify(folder)}`);
+            return { finalized: false, reason: 'invalid-folder' };
+        }
+
+        const workDir = inprogressDir(audioBase, folder, stamp);
+        const state = readState(workDir);
+        if (!state) {
+            // No sidecar -> nothing was captured for this hour. Nothing to do;
+            // also clean up an empty/stale .inprogress/<stamp> dir if present.
+            try {
+                if (fs.existsSync(workDir)) {
+                    fs.rmSync(workDir, { recursive: true, force: true });
+                }
+            } catch (err) {
+                log.error(`recorder: could not remove stale work dir ${workDir}:`, err.message);
+            }
+            return { finalized: false, reason: 'no-sidecar' };
+        }
+
+        const resolvedEnc = enc || resolveEncoding({ codec: state.ext });
+        const ext = state.ext || resolvedEnc.ext;
+        const primaryName = `${folder}-${stamp}.${ext}`;
+        const folderDir = path.join(audioBase, folder);
+        const primaryPath = path.join(folderDir, primaryName);
+
+        if (fs.existsSync(primaryPath)) {
+            // Already finalised — idempotent no-op. Drop the work dir so a later
+            // call does not keep re-checking it.
+            try {
+                fs.rmSync(workDir, { recursive: true, force: true });
+            } catch (err) {
+                log.error(`recorder: could not remove finalised work dir ${workDir}:`, err.message);
+            }
+            return { finalized: false, reason: 'already-finalised' };
+        }
+
+        // Build the timeline from the sidecar fragments. fragment.file is the
+        // basename inside the work dir; finalizeHour runs ffmpeg with
+        // cwd=workDir so those relative names resolve.
+        const segments = buildTimeline(
+            (state.fragments || []).map((f) => ({
+                startOffset: f.startOffset,
+                actualDuration: f.actualDuration,
+                plannedDuration: f.plannedDuration,
+                file: f.file,
+                ext: f.ext,
+            })),
+        );
+
+        // Write to a temp name first then atomic-rename into place so a reader
+        // never sees a half-written primary file.
+        const tmpName = `.finalize.${process.pid}.${Date.now()}.${ext}`;
+        const tmpPath = path.join(folderDir, tmpName);
+
+        try {
+            const result = await finalizeHour(workDir, tmpPath, resolvedEnc, { segments });
+            fs.renameSync(tmpPath, primaryPath);
+            log.info(`recorder: finalised ${primaryName} (${result.mode}) from ${state.fragments.length} fragment(s).`);
+        } catch (err) {
+            // Leave the work dir in place so the cron/boot backstop can retry;
+            // clean up a half-written temp file.
+            try {
+                if (fs.existsSync(tmpPath)) {
+                    fs.rmSync(tmpPath, { force: true });
+                }
+            } catch { /* ignore */ }
+            throw err;
+        }
+
+        // Record the hour's size + 'complete' status now the primary exists.
+        let sizeBytes = null;
+        try {
+            sizeBytes = fs.statSync(primaryPath).size;
+        } catch (err) {
+            log.error(`recorder: could not stat ${primaryPath} for recordings size:`, err.message);
+        }
+        recordCompleteRow(folder, stamp, sizeBytes);
+
+        // Remove the work dir now the hour is finalised.
+        try {
+            fs.rmSync(workDir, { recursive: true, force: true });
+        } catch (err) {
+            log.error(`recorder: could not remove work dir ${workDir} after finalise:`, err.message);
+        }
+
+        return { finalized: true, primaryPath, fragments: state.fragments.length };
+    })();
+
+    finalizing.set(key, run);
+    // Clear the mutex entry whether the finalise resolved or rejected so a
+    // later retry (cron/boot) can run again.
+    run.finally(() => {
+        if (finalizing.get(key) === run) {
+            finalizing.delete(key);
+        }
+    });
+    return run;
+}
+
+// List the stamps of every `.inprogress/<stamp>` work dir under `folder`.
+// Returns [] for a missing folder / missing .inprogress dir / unreadable dir
+// (never throws) so the cron + boot backstops can scan safely.
+function listInprogressStamps(audioBase, folder) {
+    if (!isValidFolder(folder) || !isContainedPath(audioBase, folder)) {
+        return [];
+    }
+    const base = path.join(audioBase, folder, '.inprogress');
+    try {
+        return fs
+            .readdirSync(base, { withFileTypes: true })
+            .filter((d) => d.isDirectory())
+            .map((d) => d.name);
+    } catch {
+        return [];
+    }
+}
+
+// Cron/boot BACKSTOP (trigger b): finalise every PAST-hour `.inprogress/<stamp>`
+// dir for each configured stream — a dir whose stamp is not the current hour is
+// a rolled-over hour whose ffmpeg-end finalise never landed (crash/update
+// reboot), so finalizeIfNeeded lays its fragments on the timeline (down-window
+// -> silence) and writes the single primary file. IDEMPOTENT via the finalise
+// mutex + already-finalised check. The CURRENT hour is left alone (still being
+// captured). Best-effort: a per-stream error only logs. Returns a promise that
+// resolves once all triggered finalises settle.
+function finalizePastHours(streams) {
+    const currentStamp = currentHourStamp();
+    const list = Array.isArray(streams) ? streams : [];
+    const jobs = [];
+    for (const item of list) {
+        const enc = resolveEncoding(item);
+        for (const stamp of listInprogressStamps(AUDIO_BASE, item.folder)) {
+            if (stamp === currentStamp) {
+                continue; // current hour still capturing — not a backstop target
+            }
+            jobs.push(
+                finalizeIfNeeded(AUDIO_BASE, item.folder, stamp, enc).catch((err) => {
+                    log.error(`recorder: backstop finalise failed for ${item.folder} ${stamp}:`, err.message);
+                }),
+            );
+        }
+    }
+    return Promise.all(jobs);
 }
 
 // Function to read settings and start recording. Each stream is routed through
@@ -342,6 +581,12 @@ function recordingTick() {
     try {
         const now = new Date;
         log.info(`Starting recording at `+String(now.getHours()).padStart(2, '0')+`:`+currentMinute.toString().padStart(2, '0')+`.`);
+        // Backstop: finalise any PAST-hour .inprogress dir left behind by a
+        // missed ffmpeg-end (crash/update reboot) before starting this hour.
+        // Best-effort and idempotent; never blocks the fresh-hour start.
+        finalizePastHours(readStreams()).catch((err) => {
+            log.error('recorder: cron backstop finalise failed:', err);
+        });
         startRecording();
     } catch (err) {
         // A transient error (e.g. unreadable stream list) must not crash the
@@ -508,17 +753,31 @@ writeHeartbeat();
 // the AC-13 race); a legitimately empty DB just exits after the bound.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// True when a recording file for the current hour already exists for `folder`
-// (the "exists = skip" rule). Shared by the startup catch-up and the periodic
-// poll so both honor the same primary-filename convention
-// `<folder>-<stamp>.<ext>` where ext is the stream's resolved codec extension
-// (defaults to 'mp3' for a field-less/legacy row).
-function hasCurrentHourRecording(folder, stamp, ext = 'mp3') {
+// True when the FINALISED primary file for the current hour already exists for
+// `folder` — the hour is done and must not be restarted. Honors the primary
+// name convention `<folder>-<stamp>.<ext>` (ext = the stream's resolved codec
+// extension; defaults to 'mp3' for a field-less/legacy row). Capture no longer
+// writes this file (finalise does), so its presence means "already finalised".
+function hasPrimaryFile(folder, stamp, ext = 'mp3') {
     if (!isValidFolder(folder)) {
         return false;
     }
     const outputPath = path.join(__dirname, `./audio/${folder}/${folder}-${stamp}.${ext}`);
     return fs.existsSync(outputPath);
+}
+
+// True when this process is ACTIVELY capturing `folder` right now (an entry in
+// the supervision registry whose command has started). Distinguishes a live
+// capture (skip) from a stale .inprogress dir left by a crashed capture
+// (resume). A command-less entry is a supervision still inside its probe window
+// — count it as active so the poll does not double-start it.
+function isActivelyCapturing(folder) {
+    for (const entry of active.values()) {
+        if (entry && entry.item && entry.item.folder === folder) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // Start a remainder-of-the-hour recording for every configured stream that has
@@ -538,8 +797,16 @@ function runCatchup(streams, reason) {
     const extByFolder = new Map(
         (Array.isArray(streams) ? streams : []).map((item) => [item.folder, resolveEncoding(item).ext])
     );
+    // .inprogress-aware decision (FEAT-002): skip a folder only if the hour is
+    // already finalised (primary file present) OR a capture for it is actively
+    // running in this process; otherwise resume/top-up (a fresh hour or a stale
+    // .inprogress dir from a crash both resolve to the same "append now" action,
+    // and the pre-capture gap finalises to silence).
     const needing = streamsNeedingCatchup(streams, (folder) =>
-        hasCurrentHourRecording(folder, stamp, extByFolder.get(folder) || 'mp3'));
+        currentHourDecision({
+            hasPrimary: hasPrimaryFile(folder, stamp, extByFolder.get(folder) || 'mp3'),
+            isActivelyCapturing: isActivelyCapturing(folder),
+        }) === 'skip');
     needing.forEach((item) => {
         try {
             log.info(`recorder: ${reason} starting for ${item.folder}: no recording for hour ${stamp} yet (${remaining}s remaining).`);
@@ -556,12 +823,32 @@ function runCatchup(streams, reason) {
     });
 }
 
+// Boot RESUME pass (FEAT-002, trigger (a)+(c)), run BEFORE runCatchup. For each
+// configured stream:
+//   - finalise every PAST-hour .inprogress dir (a rolled-over hour whose
+//     ffmpeg-end never ran because the process was killed/updated) so its
+//     fragments become a ~3600s silence-padded primary file. This is exactly
+//     the cron backstop, reused here at boot.
+//   - the CURRENT hour is intentionally NOT finalised here: runCatchup (called
+//     right after) resumes it by starting a new fragment at
+//     startOffset=elapsedThisHour() for secondsUntilNextHour() seconds; the
+//     [lastClosed..elapsedNow] down-window finalises to silence when the hour
+//     later rolls over. A stale current-hour .inprogress dir with no live
+//     capture is precisely the "resume" case runCatchup now handles.
+// Best-effort: a failure only logs; the cron schedule is already live.
+async function resumePass(streams) {
+    await finalizePastHours(streams);
+}
+
 (async () => {
     let catchupStreams = readStreams();
     for (let i = 0; i < 10 && catchupStreams.length === 0; i++) {
         await sleep(1000);
         catchupStreams = readStreams();
     }
+    // Finalise rolled-over past-hour .inprogress dirs first, then resume/top-up
+    // the current hour via the .inprogress-aware catch-up.
+    await resumePass(catchupStreams);
     runCatchup(catchupStreams, 'catch-up');
 })().catch((err) => {
     // The whole catch-up is best-effort; the cron schedule is already live.

@@ -195,6 +195,30 @@ test('mp3/opus/flac without a peak never touch the aac decode pipe', () => {
     assert.doesNotMatch(summary, /must not be called/);
 });
 
+test('peakfilegenerator never peaks or rows a fragment inside .inprogress', () => {
+    // A finished file alongside a hidden .inprogress dir holding a fragment.
+    writeMp3(`radio1-${PAST_STAMP}.mp3`);
+    const inprog = path.join(audioDir, 'radio1', '.inprogress', '2020-01-01-01');
+    fs.mkdirSync(inprog, { recursive: true });
+    fs.writeFileSync(path.join(inprog, '0-0.mp3'), 'frag-bytes');
+    fs.writeFileSync(path.join(inprog, 'state.json'), '{}');
+    // If the walk ever descended, it would try to peak/stat the fragment.
+    peak.generateAacPeak = () => {
+        throw new Error('must not touch .inprogress');
+    };
+    peak.probeDurationSeconds = () => 3600;
+
+    const summary = peak.runPeakfileGenerator(db);
+
+    // Only the finished hour got a row; the in-progress hour (01) never did.
+    assert.ok(getRow('00'), 'finished hour rowed');
+    assert.strictEqual(getRow('01'), undefined, 'in-progress hour never rowed');
+    assert.doesNotMatch(summary, /must not touch/);
+
+    // Clean up the directory fixture (the shared beforeEach only unlinks files).
+    fs.rmSync(path.join(audioDir, 'radio1', '.inprogress'), { recursive: true, force: true });
+});
+
 test('a per-file ffprobe failure is logged + counted and never fails the job', () => {
     writeMp3(`radio1-${PAST_STAMP}.mp3`);
     peak.probeDurationSeconds = () => {

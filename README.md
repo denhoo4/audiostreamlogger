@@ -101,7 +101,12 @@ The longer-form docs live in [`docs/`](docs/):
 
 - `./audio/<folder>/<folder>-YYYY-MM-DD-HH.<ext>` — recordings (timezone
   `Europe/Amsterdam`), each with a `.json` peak file. `<ext>` is the stream's codec
-  (`mp3`/`opus`/`aac`/`flac`).
+  (`mp3`/`opus`/`aac`/`flac`). Each hour is a single file of exactly one hour, with
+  silence filling any gap from a mid-hour drop or a restart.
+- `./audio/<folder>/.inprogress/<stamp>/` — a hidden per-hour work dir the recorder
+  captures into (offset-named fragments + a `state.json` sidecar); it is finalised
+  into the single hour file above and then removed, and is excluded from every
+  audio-tree scan. You should never see it for a completed hour.
 - `./data/app.db` — the one SQLite database. Bind-mounted, so it survives rebuilds.
   Only `data/.gitkeep` is tracked in git.
 

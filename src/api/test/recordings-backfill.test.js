@@ -21,6 +21,25 @@ const { DatabaseSync } = require('node:sqlite');
 let tmpDir;
 let db;
 let reconcilePlan;
+let runBackfill;
+
+const RECORDINGS_DDL = `
+CREATE TABLE IF NOT EXISTS recordings (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  stream_folder    TEXT    NOT NULL,
+  date             TEXT    NOT NULL,
+  hour             TEXT    NOT NULL,
+  file_path        TEXT    NOT NULL,
+  status           TEXT    NOT NULL
+                     CHECK (status IN ('recording','complete','partial','missing')),
+  duration_seconds REAL,
+  size_bytes       INTEGER,
+  segment_count    INTEGER NOT NULL DEFAULT 1,
+  created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (stream_folder, date, hour)
+);
+`;
 
 before(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'asl-backfill-'));
@@ -28,6 +47,7 @@ before(() => {
     db.exec('PRAGMA journal_mode = DELETE');
     db.exec('PRAGMA busy_timeout = 5000');
     db.exec('PRAGMA foreign_keys = ON');
+    db.exec(RECORDINGS_DDL);
 
     const dbModulePath = require.resolve('../db');
     require.cache[dbModulePath] = {
@@ -37,7 +57,7 @@ before(() => {
         exports: db,
     };
 
-    ({ reconcilePlan } = require('../services/recordings-backfill'));
+    ({ reconcilePlan, runBackfill } = require('../services/recordings-backfill'));
 });
 
 after(() => {
@@ -145,4 +165,26 @@ test('reconcilePlan is idempotent: a second run over the same set inserts nothin
     assert.strictEqual(second.inserts.length, 0, 'nothing new to insert on a re-run');
     assert.strictEqual(second.updates.length, 0, 'matching metadata -> no updates');
     assert.strictEqual(second.removes.length, 0, 'every row still on disk -> no removes');
+});
+
+test('runBackfill never descends into the .inprogress work dir', () => {
+    db.exec('DELETE FROM recordings');
+    const audioDir = path.join(tmpDir, 'audio');
+    fs.mkdirSync(path.join(audioDir, 'radio1'), { recursive: true });
+    // A finished OLD file -> should be backfilled.
+    fs.writeFileSync(path.join(audioDir, 'radio1', 'radio1-2019-08-08-08.mp3'), 'bytes');
+    // A hidden .inprogress dir with a fragment + sidecar -> must be ignored.
+    const inprog = path.join(audioDir, 'radio1', '.inprogress', '2019-09-09-09');
+    fs.mkdirSync(inprog, { recursive: true });
+    fs.writeFileSync(path.join(inprog, '0-0.mp3'), 'frag');
+    fs.writeFileSync(path.join(inprog, 'state.json'), '{}');
+
+    const inserted = runBackfill(db, audioDir);
+    assert.strictEqual(inserted, 1, 'only the finished file is backfilled');
+
+    const rows = db
+        .prepare('SELECT date, hour FROM recordings ORDER BY date, hour')
+        .all()
+        .map((r) => ({ date: r.date, hour: r.hour }));
+    assert.deepStrictEqual(rows, [{ date: '2019-08-08', hour: '08' }]);
 });

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { secondsUntilNextHour, currentHourStamp } = require('./time-helpers');
+const { secondsUntilNextHour, elapsedThisHour, currentHourStamp } = require('./time-helpers');
 
 // Build a Date from explicit LOCAL components so assertions are TZ-stable:
 // the helpers read local-time getters, and so does this constructor.
@@ -26,6 +26,33 @@ test('secondsUntilNextHour: last second of the hour', () => {
 
 test('secondsUntilNextHour: sub-second milliseconds are ignored', () => {
     assert.strictEqual(secondsUntilNextHour(localDate(2026, 10, 23, 14, 0, 0, 999)), 3600);
+});
+
+test('elapsedThisHour: mid-hour', () => {
+    assert.strictEqual(elapsedThisHour(localDate(2026, 10, 23, 14, 37, 10)), 2230);
+});
+
+test('elapsedThisHour: exact top-of-hour returns 0', () => {
+    assert.strictEqual(elapsedThisHour(localDate(2026, 10, 23, 14, 0, 0)), 0);
+});
+
+test('elapsedThisHour: last second of the hour', () => {
+    assert.strictEqual(elapsedThisHour(localDate(2026, 10, 23, 14, 59, 59)), 3599);
+});
+
+test('elapsedThisHour: sub-second milliseconds are ignored', () => {
+    assert.strictEqual(elapsedThisHour(localDate(2026, 10, 23, 14, 0, 0, 999)), 0);
+});
+
+test('elapsedThisHour + secondsUntilNextHour === 3600 (exact inverse)', () => {
+    const cases = [
+        localDate(2026, 10, 23, 14, 37, 10),
+        localDate(2026, 10, 23, 14, 0, 30),
+        localDate(2026, 10, 23, 14, 59, 59),
+    ];
+    for (const d of cases) {
+        assert.strictEqual(elapsedThisHour(d) + secondsUntilNextHour(d), 3600);
+    }
 });
 
 test('currentHourStamp: zero-pads month, day and hour', () => {

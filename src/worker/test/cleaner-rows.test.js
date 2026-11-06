@@ -148,3 +148,25 @@ test('a non-recording filename is unlinked without touching recordings', () => {
     assert.strictEqual(fs.existsSync(p), false);
     assert.match(summary, /0 recordings row\(s\) removed/);
 });
+
+test('cleaner never descends into or deletes the .inprogress work dir', () => {
+    // An old fragment inside .inprogress would be deleted if the cleaner
+    // descended; it must be left untouched (finalise owns those bytes).
+    const inprog = path.join(audioDir, 'radio1', '.inprogress', '2020-01-01-00');
+    fs.mkdirSync(inprog, { recursive: true });
+    const frag = path.join(inprog, '0-0.mp3');
+    fs.writeFileSync(frag, 'old-frag');
+    fs.utimesSync(frag, OLD_MTIME, OLD_MTIME);
+    const sidecar = path.join(inprog, 'state.json');
+    fs.writeFileSync(sidecar, '{}');
+    fs.utimesSync(sidecar, OLD_MTIME, OLD_MTIME);
+
+    const summary = cleaner.runCleaner(db);
+
+    assert.strictEqual(fs.existsSync(frag), true, 'in-progress fragment left in place');
+    assert.strictEqual(fs.existsSync(sidecar), true, 'sidecar left in place');
+    assert.match(summary, /0 recordings row\(s\) removed/);
+
+    // Clean up the directory fixture (the shared beforeEach only unlinks files).
+    fs.rmSync(path.join(audioDir, 'radio1', '.inprogress'), { recursive: true, force: true });
+});

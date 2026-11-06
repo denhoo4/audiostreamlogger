@@ -6,7 +6,7 @@ what was built and why, see [HISTORY.md](HISTORY.md); for how the system fits
 together see [ARCHITECTURE.md](ARCHITECTURE.md); for working style and preferences
 see [HANDOVER.md](HANDOVER.md).
 
-Last updated: 2026-10-23 (recorder-hour-resilience Phase 0 / FEAT-001 finalise primitive landed).
+Last updated: 2026-10-23 (recorder-hour-resilience Phases 1+2 / FEAT-002 recorder core landed).
 
 ## Current state
 
@@ -160,6 +160,21 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
         recorder yet (later phases stitch resumes/merges onto this engine). Note:
         raw ADTS `.aac` hours have no container duration — verify AAC hour length by
         counting frames, not `ffprobe format=duration`.
+        Phase 1+2 (FEAT-002) DONE: the recorder core is now wired onto that
+        engine. Capture routes through a hidden per-hour work dir
+        `audio/<folder>/.inprogress/<stamp>/` writing offset-named fragments
+        (`<startOffset>-<attempt>.<ext>`) plus an atomic `state.json` sidecar;
+        the primary `<folder>-<stamp>.<ext>` is written ONLY by an idempotent,
+        mutex-guarded `finalizeIfNeeded` (triggered by ffmpeg-end, a cron
+        past-hour backstop, and a boot resume pass) that lays the fragments on
+        the 3600s timeline and fills gaps/down-windows with silence — so a
+        mid-hour drop or an update reboot yields exactly ONE ~3600s file with
+        silence for the gap, no more `.partN` files. New `src/recorder/inprogress.js`
+        (shipped via Dockerfile.recorder) + pure `elapsedThisHour` (time-helpers)
+        + pure `currentHourDecision` (catchup-helpers). `.inprogress` is a
+        dotfile excluded from every audio-tree walk (reconcile/peakgen/cleaner/
+        backfill) via a new `isIgnoredEntry`. Still open on this branch: the
+        gap/completeness flag surfaced to the UI (FEAT-004) and later phases.
 - [ ] **"Move station up" must not cross the country boundary.** In the admin
       streams list, the up/down arrows for a STATION should clamp at the top/bottom
       position WITHIN its country group (not jump into the adjacent country). The

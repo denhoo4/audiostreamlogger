@@ -12,10 +12,21 @@ function secondsUntilNextHour(date = new Date()) {
     return 3600 - elapsed;
 }
 
+// Seconds ELAPSED since the top of the current hour — the pure inverse of
+// secondsUntilNextHour (elapsedThisHour + secondsUntilNextHour === 3600). Used
+// as a capture fragment's startOffset on the 3600s hour timeline (FEAT-002): a
+// fragment started now begins this many seconds into the hour, so a mid-hour
+// restart lands its fragment at the right offset and the gap before it finalises
+// to silence. Sub-second milliseconds are ignored. At an exact top-of-hour this
+// returns 0 (the fragment starts the hour).
+function elapsedThisHour(date = new Date()) {
+    return date.getMinutes() * 60 + date.getSeconds();
+}
+
 // `YYYY-MM-DD-HH` stamp using the same zero-padded local-time formatting that
 // recorder.js uses to build its output filenames (single source of truth).
 function currentHourStamp(date = new Date()) {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}-${String(date.getHours()).padStart(2, '0')}`;
 }
 
-module.exports = { secondsUntilNextHour, currentHourStamp };
+module.exports = { secondsUntilNextHour, elapsedThisHour, currentHourStamp };

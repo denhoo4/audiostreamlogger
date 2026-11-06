@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { streamsNeedingCatchup } = require('./catchup-helpers');
+const { streamsNeedingCatchup, currentHourDecision } = require('./catchup-helpers');
 
 const streams = [
     { name: 'Radio One', folder: 'radio1', url: 'http://example/1' },
@@ -34,4 +34,39 @@ test('streamsNeedingCatchup: a brand-new stream appearing is selected', () => {
 test('streamsNeedingCatchup: non-array input yields empty list', () => {
     assert.deepStrictEqual(streamsNeedingCatchup(null, () => false), []);
     assert.deepStrictEqual(streamsNeedingCatchup(undefined, () => false), []);
+});
+
+// --- currentHourDecision (FEAT-002 .inprogress-aware skip/resume) -----------
+
+test('currentHourDecision: finalised hour (primary present) -> skip', () => {
+    assert.strictEqual(
+        currentHourDecision({ hasPrimary: true, isActivelyCapturing: false }),
+        'skip',
+    );
+});
+
+test('currentHourDecision: in-progress current hour actively capturing -> skip', () => {
+    assert.strictEqual(
+        currentHourDecision({ hasPrimary: false, isActivelyCapturing: true }),
+        'skip',
+    );
+});
+
+test('currentHourDecision: no primary + not capturing (fresh or stale .inprogress) -> resume', () => {
+    assert.strictEqual(
+        currentHourDecision({ hasPrimary: false, isActivelyCapturing: false }),
+        'resume',
+    );
+});
+
+test('currentHourDecision: a finalised hour wins even if somehow still flagged capturing', () => {
+    assert.strictEqual(
+        currentHourDecision({ hasPrimary: true, isActivelyCapturing: true }),
+        'skip',
+    );
+});
+
+test('currentHourDecision: missing/empty facts default to resume', () => {
+    assert.strictEqual(currentHourDecision(), 'resume');
+    assert.strictEqual(currentHourDecision({}), 'resume');
 });

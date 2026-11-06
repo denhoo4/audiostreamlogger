@@ -42,6 +42,15 @@ function currentHourStamp(now) {
     );
 }
 
+// True for a directory entry the backfill must ignore: any dotfile/dot-dir,
+// which includes the recorder's hidden `.inprogress` work dir (FEAT-002). A
+// trivial local mirror of the worker's filename-utils.isIgnoredEntry — the api
+// deliberately does not import worker modules (cross-service duplication
+// convention), so the one-line predicate is duplicated here.
+function isIgnoredEntry(name) {
+    return typeof name === 'string' && name.startsWith('.');
+}
+
 /**
  * Scan audio/<folder>/ two levels deep, parse each recording filename, and
  * upsert the reconciled slots that are not already in the table. A folder with
@@ -53,6 +62,8 @@ function runBackfill(db, audioDir = AUDIO_BASE_DIR) {
         folders = fs
             .readdirSync(audioDir, { withFileTypes: true })
             .filter((e) => e.isDirectory())
+            // Skip the recorder's hidden `.inprogress` work dir (FEAT-002).
+            .filter((e) => !isIgnoredEntry(e.name))
             .map((e) => e.name);
     } catch (err) {
         if (err.code === 'ENOENT') {
@@ -71,6 +82,9 @@ function runBackfill(db, audioDir = AUDIO_BASE_DIR) {
             continue; // unreadable folder — skip, do not fail the whole scan
         }
         for (const name of files) {
+            if (isIgnoredEntry(name)) {
+                continue;
+            }
             const parsed = parseRecordingFilename(name);
             if (!parsed) {
                 continue;

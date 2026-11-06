@@ -196,3 +196,32 @@ test('reconcile scans and inserts disk-only opus/flac/aac recordings', () => {
 
     assert.match(summary, /3 added/);
 });
+
+test('reconcile never descends into the .inprogress work dir', () => {
+    // A finished OLD file (should be inserted) next to a hidden .inprogress dir
+    // holding in-flight fragments + a state.json sidecar (must be ignored).
+    writeFile('radio1-2019-08-08-08.mp3');
+    const inprog = path.join(audioDir, 'radio1', '.inprogress', '2019-09-09-09');
+    fs.mkdirSync(inprog, { recursive: true });
+    fs.writeFileSync(path.join(inprog, '0-0.mp3'), 'frag');
+    fs.writeFileSync(
+        path.join(inprog, 'state.json'),
+        JSON.stringify({ folder: 'radio1', stamp: '2019-09-09-09', ext: 'mp3', fragments: [] }),
+    );
+
+    const summary = reconcile.runReconcile(db);
+
+    // The finished file is the ONLY insert; nothing from .inprogress leaks in.
+    assert.ok(getRow('2019-08-08', '08'), 'finished file inserted');
+    assert.strictEqual(
+        getRow('2019-09-09', '09'),
+        undefined,
+        'in-progress hour never reconciled',
+    );
+    assert.match(summary, /1 added/);
+    // No per-slot errors from trying to parse the sidecar/fragment names.
+    assert.match(summary, /0 per-slot error\(s\)/);
+
+    // Clean up the directory fixture (the shared beforeEach only unlinks files).
+    fs.rmSync(path.join(audioDir, 'radio1', '.inprogress'), { recursive: true, force: true });
+});

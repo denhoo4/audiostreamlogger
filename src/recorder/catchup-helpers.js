@@ -18,4 +18,25 @@ function streamsNeedingCatchup(streams, hasRecording) {
     return streams.filter((item) => !hasRecording(item.folder));
 }
 
-module.exports = { streamsNeedingCatchup };
+// Pure decision for the current hour of ONE stream (FEAT-002). Replaces the old
+// "primary file exists -> skip, else start" predicate with an .inprogress-aware
+// decision the catch-up/poll acts on:
+//   - 'skip'   : the hour is already finalised (primary file present) OR an
+//                in-progress capture for this hour is ACTIVELY running in this
+//                process — nothing to start.
+//   - 'resume' : neither of the above — there is no finalised file and no live
+//                capture, so start/top-up a remainder-of-the-hour fragment
+//                (a brand-new hour, or an .inprogress dir left by a crashed/
+//                rebooted capture whose [lastClosed..now] gap finalises to
+//                silence; the two are the same action — append a fragment now).
+// `facts` = { hasPrimary, isActivelyCapturing } booleans supplied by the
+// caller (recorder.js owns the fs existsSync + the runtime `active` map). No fs,
+// no DB here so it unit-tests in isolation.
+function currentHourDecision({ hasPrimary = false, isActivelyCapturing = false } = {}) {
+    if (hasPrimary || isActivelyCapturing) {
+        return 'skip';
+    }
+    return 'resume';
+}
+
+module.exports = { streamsNeedingCatchup, currentHourDecision };

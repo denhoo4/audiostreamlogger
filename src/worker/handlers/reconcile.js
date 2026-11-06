@@ -23,7 +23,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { parseRecordingParts } = require('../filename-utils');
+const { parseRecordingParts, isIgnoredEntry } = require('../filename-utils');
 const { splitStamp, upsertRecordingRow, updateRecordingRow, deleteRecordingBySlot } =
     require('../recordings-db');
 const { reconcilePlan } = require('../reconcile-planner');
@@ -58,6 +58,9 @@ function scanAudioTree(log) {
     const topEntries = fs.readdirSync(AUDIO_DIR, { withFileTypes: true });
     topEntries
         .filter((dirent) => dirent.isDirectory())
+        // Skip the recorder's hidden `.inprogress` work dir (and any other
+        // dotfile) so an in-flight hour is never half-reconciled (FEAT-002).
+        .filter((dirent) => !isIgnoredEntry(dirent.name))
         .forEach((dirent) => {
             const folder = dirent.name;
             const folderPath = path.join(AUDIO_DIR, folder);
@@ -71,6 +74,7 @@ function scanAudioTree(log) {
             }
 
             files
+                .filter((file) => !isIgnoredEntry(file))
                 .filter((file) => AUDIO_EXTS.has(path.extname(file)))
                 .forEach((file) => {
                     const parts = parseRecordingParts(file);

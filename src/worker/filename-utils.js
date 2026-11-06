@@ -61,4 +61,18 @@ function parseRecordingParts(name, { allowMissingExt = false } = {}) {
     return { stamp, part, ext: bareKey ? null : extRaw };
 }
 
-module.exports = { extractFileDateTime, parseRecordingParts, RECORDING_PARTS_RE };
+// True for a directory entry that every audio-tree walk must ignore: any
+// dotfile/dot-directory, which includes the recorder's hidden `.inprogress`
+// work dir (FEAT-002) holding in-flight fragments + the state.json sidecar. The
+// walks (reconcile/peakgen/cleaner/backfill) must never descend into or stat
+// such an entry so an in-progress hour is never half-reconciled or peaked.
+function isIgnoredEntry(name) {
+    return typeof name === 'string' && name.startsWith('.');
+}
+
+module.exports = {
+    extractFileDateTime,
+    parseRecordingParts,
+    isIgnoredEntry,
+    RECORDING_PARTS_RE,
+};
