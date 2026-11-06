@@ -6,7 +6,7 @@ what was built and why, see [HISTORY.md](HISTORY.md); for how the system fits
 together see [ARCHITECTURE.md](ARCHITECTURE.md); for working style and preferences
 see [HANDOVER.md](HANDOVER.md).
 
-Last updated: 2026-10-23 (recorder-hour-resilience Phase 5 / FEAT-005 deploy restart-minimisation: recorder stop_grace_period 15s + documented selective-restart cronjob snippet in HANDOVER.md).
+Last updated: 2026-10-23 (recorder-hour-resilience redesign merged to `main`: one exact-3600s file per hour with silence for gaps, resume-on-restart, AAC exactness, `.partN` retired, additive gap flag, stop_grace_period + documented selective-restart cronjob).
 
 ## Current state
 
@@ -108,7 +108,7 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
 ## New backlog (user, 2026-10-23) — grouped by theme
 
 ### Bugs / correctness (fix first)
-- [ ] **DESIGN-FIRST: "Hour completeness & recorder-lifecycle resilience" — one
+- [x] **DONE — "Hour completeness & recorder-lifecycle resilience" — one
       coordinated design for ALL the partial/half-hour edge cases (user, 2026-10-23).**
       The user wants every "an hour isn't a full hour" cause designed together, once,
       instead of patched piecemeal, because they are the same problem (the recorder
@@ -148,7 +148,7 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
       coherent design. (Note: the auto-deploy restart is operational, not a code bug,
       but the recorder should be resilient to it; also worth telling the user a
       zero-downtime recorder deploy or a drain-before-restart could reduce the cut.)
-      - IN PROGRESS on branch `recorder-hour-resilience` (design under
+      - DONE and merged to `main` (branch `recorder-hour-resilience`, design under
         `.agents/tasks/audiostreamlogger-recorder-hour-resilience-2026-10-23/`).
         Phase 0 (FEAT-001) DONE: the finalise primitive — a pure
         `buildTimeline(fragments, hourSeconds=3600)` that tiles the hour and

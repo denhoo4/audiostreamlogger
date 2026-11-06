@@ -16,7 +16,7 @@ the tests see [docs/TESTING.md](docs/TESTING.md).
 
 | Service | Role |
 | --- | --- |
-| `recorder` | Records each stream once an hour with ffmpeg; supervises each stream independently and catches up a newly-added stream mid-hour. |
+| `recorder` | Records each stream once an hour with ffmpeg; supervises each stream independently and catches up a newly-added stream mid-hour. Each hour finalises to exactly one ~3600 s file: dropped streams and mid-hour container restarts (e.g. a deploy) resume into the same hour, and any gap is padded with silence so the file is never short. |
 | `worker` | Runs one job at a time: cleaner (prune old recordings), peakfilegenerator (waveforms), reconcile (sync disk ↔ DB). |
 | `api` | Express backend; owns the SQLite database, auth, the admin screen's endpoints, the scheduler, and OpenAPI docs. Internal only. |
 | `frontend` | React + Vite SPA served by nginx, which also serves `/audio` and proxies the api (same-origin, no CORS). |
