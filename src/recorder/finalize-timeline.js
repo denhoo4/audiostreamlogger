@@ -102,4 +102,42 @@ function buildTimeline(fragments, hourSeconds = 3600) {
     return segments;
 }
 
-module.exports = { buildTimeline };
+/**
+ * Pure fragment-validation gate (hotfix — RC2).
+ *
+ * A per-hour sidecar `state.json` ledger can reference a fragment file that was
+ * never written to disk (or was lost), e.g. `956-0.mp3`. Feeding such a name
+ * straight into `buildTimeline` keeps it on the timeline, and ffmpeg then exits
+ * 1 with "`956-0.mp3`: No such file or directory", which (pre-hotfix) crashed
+ * the recorder. This helper drops any fragment whose file does NOT pass the
+ * injected `existsAndNonEmpty(file) -> boolean` predicate BEFORE the timeline is
+ * built. Because `buildTimeline` turns every uncovered time-range into silence,
+ * dropping a missing fragment automatically WIDENS the surrounding silence to
+ * cover its offset range, so the finalised hour stays exactly 3600s with no
+ * extra math.
+ *
+ * Kept PURE (the fs stat is the injected predicate, supplied by the caller) so
+ * it unit-tests in isolation like the rest of this module. Fragments without a
+ * usable string `file` are passed through unchanged — `buildTimeline` already
+ * drops those — so this helper only ever removes fragments the predicate
+ * rejects.
+ *
+ * @param {Array}    fragments         raw sidecar fragment list.
+ * @param {function} existsAndNonEmpty predicate: (file) => boolean.
+ * @returns {Array} the fragments whose file passed (or had no string file).
+ */
+function filterUsableFragments(fragments, existsAndNonEmpty) {
+    const list = Array.isArray(fragments) ? fragments : [];
+    const predicate = typeof existsAndNonEmpty === 'function' ? existsAndNonEmpty : () => true;
+    return list.filter((frag) => {
+        const file = frag && frag.file;
+        if (typeof file !== 'string' || file.length === 0) {
+            // No usable file reference — buildTimeline drops it anyway; leave the
+            // decision to buildTimeline rather than stat a non-string.
+            return true;
+        }
+        return predicate(file) === true;
+    });
+}
+
+module.exports = { buildTimeline, filterUsableFragments };

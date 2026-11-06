@@ -11,14 +11,30 @@ const { streamsNeedingCatchup, currentHourDecision } = require('./catchup-helper
 const recordingsDb = require('./recordings-db');
 const { resolveEncoding, outputOptionsFor, copyOutputOptions } = require('./encoding');
 const { detectSource, isCopyEligible } = require('./detect-source');
-const { buildTimeline } = require('./finalize-timeline');
-const { finalizeHour } = require('./finalize-hour');
+const { finalizeSidecar } = require('./finalize-sidecar');
 const {
     inprogressDir,
     fragmentName,
     readState,
     writeState,
 } = require('./inprogress');
+
+// Last-resort process-level safety net (hotfix RC1b). The real fix for the
+// crash-loop is the fail-safe finalise call sites + handled mutex cleanup, but
+// a single stray async rejection (from ANY future call site) must never be able
+// to kill the recorder: a dead recorder records nothing for every stream. These
+// handlers LOG a loud, greppable line (so the underlying bug is still findable
+// in prod) and DELIBERATELY DO NOT call process.exit — the recorder keeps
+// running and the cron schedule keeps firing. Registered at module top, before
+// the boot IIFE, so they are active for the very first boot resume pass.
+process.on('unhandledRejection', (reason) => {
+    const detail = reason instanceof Error ? (reason.stack || reason.message) : String(reason);
+    log.error('recorder: UNHANDLED REJECTION (kept running, not fatal):', detail);
+});
+process.on('uncaughtException', (err) => {
+    const detail = err instanceof Error ? (err.stack || err.message) : String(err);
+    log.error('recorder: UNCAUGHT EXCEPTION (kept running, not fatal):', detail);
+});
 
 // The on-disk root under which every stream's audio folder lives. Defined once
 // so the folder-containment guard (folder-utils.isContainedPath) checks against
@@ -458,55 +474,49 @@ function finalizeIfNeeded(audioBase, folder, stamp, enc) {
             return { finalized: false, reason: 'already-finalised' };
         }
 
-        // Build the timeline from the sidecar fragments. fragment.file is the
-        // basename inside the work dir; finalizeHour runs ffmpeg with
-        // cwd=workDir so those relative names resolve.
-        const segments = buildTimeline(
-            (state.fragments || []).map((f) => ({
-                startOffset: f.startOffset,
-                actualDuration: f.actualDuration,
-                plannedDuration: f.plannedDuration,
-                file: f.file,
-                ext: f.ext,
-            })),
+        // Write to a temp name first then atomic-rename into place so a reader
+        // never sees a half-written primary file. finalizeSidecar validates each
+        // sidecar fragment against the disk BEFORE building the timeline (hotfix
+        // RC2): the ledger can reference a fragment that was never written / was
+        // lost (the production `956-0.mp3` case), and feeding such a name to
+        // ffmpeg exits 1 ("No such file or directory"). A missing/zero-byte/
+        // unreadable fragment is dropped (buildTimeline widens the surrounding
+        // silence over its offset range so the hour stays exactly 3600s); if
+        // NOTHING survives it returns { finalized:false, reason:
+        // 'no-usable-fragments' } instead of emitting a broken/empty file; and a
+        // failed finalise removes its half-written temp before re-throwing.
+        const tmpName = `.finalize.${process.pid}.${Date.now()}.${ext}`;
+
+        const status = await finalizeSidecar(
+            {
+                workDir,
+                folderDir,
+                primaryName,
+                tmpName,
+                fragments: state.fragments || [],
+                enc: resolvedEnc,
+            },
+            { fs, log },
         );
 
-        // Write to a temp name first then atomic-rename into place so a reader
-        // never sees a half-written primary file.
-        const tmpName = `.finalize.${process.pid}.${Date.now()}.${ext}`;
-        const tmpPath = path.join(folderDir, tmpName);
-
-        try {
-            const result = await finalizeHour(workDir, tmpPath, resolvedEnc, { segments });
-            fs.renameSync(tmpPath, primaryPath);
-            log.info(`recorder: finalised ${primaryName} (${result.mode}) from ${state.fragments.length} fragment(s).`);
-        } catch (err) {
-            // Leave the work dir in place so the cron/boot backstop can retry;
-            // clean up a half-written temp file.
+        if (!status.finalized && status.reason === 'no-usable-fragments') {
+            // Every fragment the ledger referenced is missing/empty: do not emit
+            // a broken/empty hour and do not crash. Clean up the orphaned work
+            // dir (and any stray temp) and skip finalisation.
+            log.warn(`recorder: all fragments missing for ${folder} ${stamp}, skipping finalise and cleaning up work dir.`);
             try {
-                if (fs.existsSync(tmpPath)) {
-                    fs.rmSync(tmpPath, { force: true });
-                }
-            } catch { /* ignore */ }
-            throw err;
+                fs.rmSync(workDir, { recursive: true, force: true });
+            } catch (err) {
+                log.error(`recorder: could not remove work dir ${workDir} after no-usable-fragments skip:`, err.message);
+            }
+            return { finalized: false, reason: 'no-usable-fragments' };
         }
 
         // Record the hour's size + 'complete' status now the primary exists.
-        let sizeBytes = null;
-        try {
-            sizeBytes = fs.statSync(primaryPath).size;
-        } catch (err) {
-            log.error(`recorder: could not stat ${primaryPath} for recordings size:`, err.message);
-        }
-        // Per-hour gap flag (FEAT-004): total silence the timeline padded in for
-        // down-windows, as whole seconds. The hour stays 'complete' regardless —
-        // a gap-padded hour is a full-length file with silence, not 'partial'.
-        const gapSeconds = Math.round(
-            segments
-                .filter((s) => s.kind === 'silence')
-                .reduce((sum, s) => sum + (Number(s.durationSeconds) || 0), 0),
-        );
-        recordCompleteRow(folder, stamp, sizeBytes, gapSeconds);
+        // gapSeconds is the whole-second silence the timeline padded in for
+        // down-windows (including any dropped-fragment range); the hour stays
+        // 'complete' — a gap-padded hour is a full-length file with silence.
+        recordCompleteRow(folder, stamp, status.sizeBytes, status.gapSeconds);
 
         // Remove the work dir now the hour is finalised.
         try {
@@ -515,17 +525,26 @@ function finalizeIfNeeded(audioBase, folder, stamp, enc) {
             log.error(`recorder: could not remove work dir ${workDir} after finalise:`, err.message);
         }
 
-        return { finalized: true, primaryPath, fragments: state.fragments.length };
+        return { finalized: true, primaryPath, fragments: status.fragments };
     })();
 
     finalizing.set(key, run);
     // Clear the mutex entry whether the finalise resolved or rejected so a
-    // later retry (cron/boot) can run again.
-    run.finally(() => {
+    // later retry (cron/boot) can run again. CRITICAL (hotfix RC1a): the cleanup
+    // must NOT leave a derived promise unhandled. A bare `run.finally(cleanup)`
+    // returns a NEW promise that re-raises run's rejection; nobody awaits it, so
+    // under Node's default --unhandled-rejections=throw (Node >=15) that stray
+    // rejection crashed the recorder. Attaching cleanup via then(cleanup, cleanup)
+    // runs it on both settle paths AND marks run's rejection as handled on this
+    // chain, and the trailing .catch(()=>{}) swallows any throw from cleanup
+    // itself, so no unhandled rejection can ever escape here. The returned `run`
+    // is unchanged, so the real rejection still surfaces to the caller's .catch.
+    const cleanup = () => {
         if (finalizing.get(key) === run) {
             finalizing.delete(key);
         }
-    });
+    };
+    run.then(cleanup, cleanup).catch(() => {});
     return run;
 }
 
@@ -545,6 +564,48 @@ function listInprogressStamps(audioBase, folder) {
     } catch {
         return [];
     }
+}
+
+// Boot-time stale `.finalize.*` sweep (hotfix RC3). A finalise writes to a temp
+// name `.finalize.<pid>.<ts>.<ext>` and atomic-renames it onto the primary on
+// success; a crash mid-finalise (the old crash-loop) left the temp behind, so
+// production accumulated a pile of empty `.finalize.*` files. Fixing the crash
+// stops NEW leaks; this sweep clears the existing backlog. It only ever touches
+// `.finalize.*` entries directly under a CONTAINED, valid stream folder (reusing
+// isValidFolder + isContainedPath), never recurses, and never throws — a failure
+// only logs. Returns the number of temps removed (for logging/tests).
+function sweepStaleFinalizeTemps(audioBase, streams) {
+    const list = Array.isArray(streams) ? streams : [];
+    let removed = 0;
+    for (const item of list) {
+        const folder = item && item.folder;
+        if (!isValidFolder(folder) || !isContainedPath(audioBase, folder)) {
+            continue;
+        }
+        const folderDir = path.join(audioBase, folder);
+        let entries;
+        try {
+            entries = fs.readdirSync(folderDir, { withFileTypes: true });
+        } catch {
+            continue; // folder not present yet / unreadable — nothing to sweep
+        }
+        for (const ent of entries) {
+            if (!ent.isFile() || !ent.name.startsWith('.finalize.')) {
+                continue;
+            }
+            const tmpPath = path.join(folderDir, ent.name);
+            try {
+                fs.rmSync(tmpPath, { force: true });
+                removed += 1;
+            } catch (err) {
+                log.error(`recorder: could not remove stale finalise temp ${tmpPath}:`, err.message);
+            }
+        }
+    }
+    if (removed > 0) {
+        log.info(`recorder: swept ${removed} stale .finalize temp file(s) at boot.`);
+    }
+    return removed;
 }
 
 // Cron/boot BACKSTOP (trigger b): finalise every PAST-hour `.inprogress/<stamp>`
@@ -860,10 +921,25 @@ async function resumePass(streams) {
         await sleep(1000);
         catchupStreams = readStreams();
     }
-    // Finalise rolled-over past-hour .inprogress dirs first, then resume/top-up
-    // the current hour via the .inprogress-aware catch-up.
-    await resumePass(catchupStreams);
+    // Clean the backlog of stale `.finalize.*` temps left by the old crash-loop
+    // (hotfix RC3) before anything else. Best-effort; never blocks capture.
+    try {
+        sweepStaleFinalizeTemps(AUDIO_BASE, catchupStreams);
+    } catch (err) {
+        log.error('recorder: stale finalise-temp sweep failed:', err.message);
+    }
+    // Crash-loop containment (hotfix RC4): schedule the CURRENT hour's capture
+    // FIRST, so even if every past-hour finalise fails the recorder still comes
+    // up and records this hour. Past-hour finalisation is best-effort and is
+    // fired AFTER, WITHOUT awaiting it, so a slow/failing backstop can never
+    // block or delay current-hour capture. resumePass/finalizePastHours already
+    // isolate each stream/hour with its own try/catch + .catch, so one broken
+    // hour cannot abort the others.
     runCatchup(catchupStreams, 'catch-up');
+    resumePass(catchupStreams).catch((err) => {
+        // Best-effort boot backstop; the cron schedule + current hour are live.
+        log.error('recorder: boot resume pass failed:', err);
+    });
 })().catch((err) => {
     // The whole catch-up is best-effort; the cron schedule is already live.
     log.error('recorder: startup catch-up failed:', err);

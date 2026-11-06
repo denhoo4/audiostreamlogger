@@ -219,6 +219,49 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
         crontab (outside the repo) and is not applied automatically. This
         addresses item 1's operational mitigation (reduce reboots + drain before
         restart).
+- [x] **DONE — recorder finalise CRASH-LOOP hotfix (production incident,
+      2026-10-23; branch `recorder-finalise-hotfix`).** After the
+      recorder-hour-resilience redesign went to production the recorder
+      crash-looped on boot, leaving a pile of empty `.finalize.*` temp files and
+      a leftover `.inprogress` dir, and recorded nothing. Root causes:
+      (1) **Unhandled rejection killed the process.** `finalizeIfNeeded`'s mutex
+          cleanup was a floating `run.finally(cleanup)` whose derived promise
+          re-raised the finalise rejection with no handler; under Node's default
+          `--unhandled-rejections=throw` (prod node v26) that stray rejection
+          crashed the recorder (the stacktrace ending at `finalize-hour.js:181`
+          with no "backstop finalise failed" prefix). There was also no
+          process-level guard.
+      (2) **A missing fragment was fatal.** The per-hour `state.json` ledger
+          referenced a fragment (`956-0.mp3`) that did not exist on disk; it was
+          fed straight to ffmpeg, which exited 1 ("No such file or directory").
+      (3) **Empty `.finalize.*` temps piled up** because the crash happened
+          mid-finalise so the temp-cleanup `catch` never ran; no boot sweep
+          existed for the backlog.
+      (4) **The boot resume pass blocked the current hour** — it was `await`ed
+          before `runCatchup`, so a boot-pass crash prevented the current hour
+          from ever being scheduled.
+      Fix: a fail-safe finalise core (`finalize-sidecar.js`) validates every
+      sidecar fragment against the disk BEFORE building the timeline — a
+      missing/zero-byte/unreadable fragment is dropped and becomes silence
+      (`buildTimeline` widens the surrounding silence so the hour stays exactly
+      3600s); an all-missing hour is a clean skip (no broken/empty file, no
+      crash) with the orphaned work dir removed; a failed finalise removes its
+      own temp before re-throwing. The mutex cleanup is now
+      `run.then(cleanup, cleanup).catch(()=>{})` so no derived promise is left
+      unhandled. Added `process.on('unhandledRejection')` + `uncaughtException`
+      guards that LOG and keep running (never `process.exit`). Added a boot-time
+      sweep of stale `.finalize.*` temps (contained-folder-guarded). Re-ordered
+      the boot IIFE so current-hour catch-up is scheduled FIRST and the
+      best-effort past-hour resume runs AFTER without blocking it. New tests:
+      `finalize-sidecar.test.js` (pure fail-safe + boot-isolation + mutex-cleanup
+      cases), `finalize-missing-fragment.int.test.js` (ffmpeg regression
+      reproducing the exact `956-0.mp3` + stale-temps production state), and
+      `filterUsableFragments` unit cases in `finalize-timeline.test.js`. Recorder
+      suite: 141 pass / 8 skip pure (was 131/5), 149 pass / 0 skip with ffmpeg.
+      No firm invariant regressed (one ~3600s file per hour with silence for
+      gaps; `.partN` still read, never written; AAC copy-remux when no gap;
+      idempotent finalise). See
+      `.agents/tasks/audiostreamlogger-recorder-finalise-hotfix-2026-10-23/verification.md`.
 - [ ] **"Move station up" must not cross the country boundary.** In the admin
       streams list, the up/down arrows for a STATION should clamp at the top/bottom
       position WITHIN its country group (not jump into the adjacent country). The

@@ -130,6 +130,34 @@ the docs moved into `docs/`; `README.md` stays at the root.)
   **prefer REST for PR operations when GraphQL fails**.
 - **Never force-push. Never modify git config.**
 
+## Known failure modes
+
+- **Recorder finalise crash-loop (fixed 2026-10-23, branch
+  `recorder-finalise-hotfix`).** After the hour-resilience redesign shipped, the
+  recorder crash-looped on boot: a pile of empty `.finalize.*` temp files, a
+  leftover `.inprogress` dir, and no recordings. Four root causes, all fixed:
+  (1) a floating `run.finally(cleanup)` in `finalizeIfNeeded`'s mutex left the
+  finalise rejection unhandled, which crashed node v26 (default
+  `--unhandled-rejections=throw`); (2) the `state.json` ledger referenced a
+  fragment missing on disk (`956-0.mp3`) and ffmpeg exited 1 on it; (3) each
+  crash leaked one `.finalize.*` temp; (4) the boot resume pass was `await`ed
+  before the current-hour catch-up, so a boot crash also blocked the current
+  hour. The fix: a fail-safe `finalize-sidecar.js` that validates every fragment
+  against the disk and turns a missing/zero-byte one into silence (hour stays
+  3600s), skips cleanly when nothing is usable, and removes its temp on failure;
+  a handled mutex cleanup; process-level `unhandledRejection`/`uncaughtException`
+  guards that log and keep running; a boot sweep of stale `.finalize.*` temps;
+  and a re-ordered boot IIFE (current hour first, past-hour resume best-effort
+  after). **Recovery:** the fixed recorder self-recovers on next boot — it sweeps
+  the stale `.finalize.*` temps and treats the missing fragment as silence (or
+  skips the hour if nothing is usable), no manual action required. If you want to
+  clean up by hand instead, it is SAFE to delete the empty `.finalize.*` temp
+  files under each `audio/<stream>/` folder (they are failed finalise temps,
+  never a finished recording) and to delete a stale
+  `audio/<stream>/.inprogress/<past-hour-stamp>/` dir whose referenced fragments
+  are gone (the hour cannot be reconstructed). Do NOT delete the current hour's
+  `.inprogress/<stamp>/` or any finished `<stream>-<stamp>.<ext>` primary file.
+
 ## Tone & relationship
 
 Direct and concise, in Dutch with the user. Offer a few options and a recommendation

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { buildTimeline } = require('./finalize-timeline');
+const { buildTimeline, filterUsableFragments } = require('./finalize-timeline');
 
 // Sum of segment durations — the core invariant is that this is always 3600.
 function sumDuration(segments) {
@@ -161,4 +161,67 @@ test('buildTimeline: ext is passed through on fragment segments when present', (
 test('buildTimeline: summed duration is exactly 3600 for a custom hourSeconds too', () => {
     const tl = buildTimeline([{ startOffset: 10, actualDuration: 20, file: 'a.mp3' }], 120);
     assert.strictEqual(sumDuration(tl), 120);
+});
+
+// --- filterUsableFragments (hotfix RC2) -------------------------------------
+// The sidecar ledger can reference a fragment file that is missing / zero-byte
+// on disk (the production `956-0.mp3` case). filterUsableFragments drops those
+// BEFORE the timeline is built, using an injected existence predicate, so the
+// missing fragment's offset range becomes silence and the hour stays 3600s.
+
+test('filterUsableFragments: all fragments present -> list unchanged', () => {
+    const present = new Set(['0-0.mp3', '1800-0.mp3']);
+    const fragments = [
+        { startOffset: 0, actualDuration: 1800, file: '0-0.mp3' },
+        { startOffset: 1800, actualDuration: 1800, file: '1800-0.mp3' },
+    ];
+    const kept = filterUsableFragments(fragments, (f) => present.has(f));
+    assert.deepStrictEqual(kept, fragments);
+});
+
+test('filterUsableFragments: a missing middle fragment is dropped and buildTimeline widens silence over its range to exactly 3600s', () => {
+    // Three back-to-back 1200s fragments; the middle one is missing on disk.
+    const present = new Set(['0-0.mp3', '2400-0.mp3']); // 1200-0.mp3 is NOT present
+    const fragments = [
+        { startOffset: 0, actualDuration: 1200, file: '0-0.mp3' },
+        { startOffset: 1200, actualDuration: 1200, file: '956-0.mp3' }, // the production missing-fragment shape
+        { startOffset: 2400, actualDuration: 1200, file: '2400-0.mp3' },
+    ];
+    const kept = filterUsableFragments(fragments, (f) => present.has(f));
+    assert.strictEqual(kept.length, 2);
+    assert.ok(!kept.some((k) => k.file === '956-0.mp3'), 'missing fragment must be dropped');
+
+    const tl = buildTimeline(kept);
+    assert.strictEqual(sumDuration(tl), 3600, 'hour stays exactly 3600s');
+    assert.deepStrictEqual(tl, [
+        { kind: 'fragment', durationSeconds: 1200, file: '0-0.mp3' },
+        { kind: 'silence', durationSeconds: 1200 }, // widened over the dropped fragment's range
+        { kind: 'fragment', durationSeconds: 1200, file: '2400-0.mp3' },
+    ]);
+});
+
+test('filterUsableFragments: ALL fragments missing -> empty list -> buildTimeline is a single 3600s silence', () => {
+    const present = new Set(); // nothing on disk
+    const fragments = [
+        { startOffset: 0, actualDuration: 1800, file: '0-0.mp3' },
+        { startOffset: 1800, actualDuration: 1800, file: '956-0.mp3' },
+    ];
+    const kept = filterUsableFragments(fragments, (f) => present.has(f));
+    assert.deepStrictEqual(kept, []);
+    const tl = buildTimeline(kept);
+    assert.deepStrictEqual(tl, [{ kind: 'silence', durationSeconds: 3600 }]);
+    assert.strictEqual(sumDuration(tl), 3600);
+});
+
+test('filterUsableFragments: a fragment with no string file is passed through (buildTimeline drops it)', () => {
+    const kept = filterUsableFragments(
+        [{ startOffset: 0, actualDuration: 10 }],
+        () => false,
+    );
+    assert.strictEqual(kept.length, 1, 'non-string file is not stat-ed; left for buildTimeline');
+});
+
+test('filterUsableFragments: non-array input -> empty list', () => {
+    assert.deepStrictEqual(filterUsableFragments(null, () => true), []);
+    assert.deepStrictEqual(filterUsableFragments(undefined, () => true), []);
 });
