@@ -6,7 +6,7 @@ what was built and why, see [HISTORY.md](HISTORY.md); for how the system fits
 together see [ARCHITECTURE.md](ARCHITECTURE.md); for working style and preferences
 see [HANDOVER.md](HANDOVER.md).
 
-Last updated: 2026-10-26.
+Last updated: 2026-10-23.
 
 ## Current state
 
@@ -17,6 +17,14 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
 
 ## Open items
 
+- [x] **Mantine v9 upgrade (done on `mantine9`).** All `@mantine/*` packages moved
+      from `8.3.18` to the installed `9.7.5` line as one coordinated upgrade
+      (`@mantine/core`, `@mantine/dates`, `@mantine/hooks`), with
+      `postcss-preset-mantine` aligned. The lockfile is reproducible (`npm ci`
+      clean) and the frontend build + full vitest suite are green on v9. This
+      single coordinated upgrade supersedes the split Dependabot PRs #16 and #17
+      (which bumped individual Mantine packages piecemeal) — close those as
+      done-by-this-upgrade.
 - [x] **AAC stream support + Test auto-detect (done on `aac-copy-support`).** AAC
       is now a first-class recordable codec alongside mp3/opus/flac (raw ADTS
       `.aac`, lossy bitrate set `[96,128,160,192,256,320]`). Full stack:
@@ -61,6 +69,91 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
       still won't seek, escalate to serving a header-stamped/finalized live-hour
       snapshot (backend, not done here). See
       `.agents/tasks/mobile-seek-verification.md`.
+
+## New backlog (user, 2026-10-23) — grouped by theme
+
+### Bugs / correctness (fix first)
+- [ ] **Recordings sometimes longer/shorter than one hour — happens with AAC
+      streams.** The per-hour files are not exactly 1h for AAC. Investigate the
+      recorder duration/segmenting for AAC (likely the ADTS copy/transcode path,
+      timestamps, or the hour-boundary cut). Use the Graphify graph for impact
+      (`graphify explain`/`path` on the recorder record/duration path) before
+      reading. Reproduce, then make AAC hours exactly one hour like the other codecs.
+- [ ] **At most ONE recording file per hour — no resume / no `.partN` segments.**
+      Today a mid-hour stream drop is restarted into a new `<folder>-<stamp>.partN`
+      segment (recorder-resilience) because ffmpeg can't cleanly append to an mp3.
+      The user wants a single file per hour and NO `.partN` files in the folder.
+      DECISION NEEDED (build-time): this is a trade-off — either (a) accept that a
+      mid-hour drop leaves a gap (one file, the rest of the hour missing) and drop
+      the segment-restart, or (b) keep capturing on drop but MERGE/concat the
+      segments into the single `<folder>-<stamp>.<ext>` at hour finalize so the
+      folder only ever shows one file. Recommend (b) if we want no data loss;
+      confirm with the user. Touches the recorder supervision/segment logic +
+      the recordings-row/peak/cleaner assumptions about one file per hour.
+- [ ] **"Move station up" must not cross the country boundary.** In the admin
+      streams list, the up/down arrows for a STATION should clamp at the top/bottom
+      position WITHIN its country group (not jump into the adjacent country). The
+      COUNTRY up/down buttons already clamp correctly — mirror that behavior for the
+      per-station reorder. Frontend (StreamTable reorder) + the reorder persistence.
+
+### Config / recording features
+- [ ] **Per-stream retention instead of one global retention.** Each stream gets
+      its own log-retention window; the cleaner uses the per-stream value instead of
+      the single global `log_retention`. Additive schema (a retention column on
+      `streams`, falling back to the global default when unset) + the cleaner reading
+      per-stream + the admin UI (a retention field per stream, likely in the stream
+      row/editor). Keep the global as the default/fallback.
+- [ ] **Schedulable recording period per stream (future start + end date).** Allow a
+      stream to be recorded only during a chosen PERIOD — a start (possibly in the
+      future) and an end date — rather than always-on. The recorder only records a
+      stream while "now" is within its window; outside the window it doesn't capture.
+      Additive schema (start/end on `streams`, nullable = always-on) + recorder
+      honoring it + admin UI. Consider how this interacts with catch-up and the
+      new-stream poll.
+
+### DB
+- [ ] **DB optimizations.** Review the SQLite schema/queries for indexes and query
+      shape (e.g. the recordings/analysis/health/storage queries, the jobs/schedules
+      polling). Add missing indexes, tighten hot queries. Use Graphify + EXPLAIN
+      QUERY PLAN to target the real hot paths; additive/index-only, no destructive
+      migration. (Scope to be refined — gather the actual slow/among-frequent queries
+      first.)
+
+### Admin UI structure
+- [ ] **Recordings & Health in the same order/structure as the Streams tab.** The
+      merged Recordings & Health table should present streams in the SAME order as
+      the Streams tab (i.e. honor the manual stream `sort_order` + `country_order`
+      grouping), so the two tabs line up. Frontend-only (ordering/grouping of the
+      RecordingsHealth rows, reusing the country-order + sort_order helpers).
+
+### Notifications
+- [ ] **Build in notifications.** (NEEDS CLARIFICATION — see the question relayed to
+      the user.) Unclear yet: notify about WHAT (e.g. a stream going down / a failed
+      recording / a job failure / disk filling up?), to WHOM, and via WHICH channel
+      (in-app banner, email, the existing Telegram bot, web push?). Decide the trigger
+      events + channel before building. Placeholder until the user specifies.
+
+### Big feature — frontend auth + user management + long-term saved hours
+- [ ] **Frontend login + user management + per-user saved/starred hours.** A large,
+      multi-part feature:
+      - A **frontend login screen** so the player/admin is per-user (today only the
+        admin screen is login-gated with a single seeded admin).
+      - **User management in the backend**: multiple users. The user wants to AVOID
+        storing passwords where possible — support **OAuth via Gmail (Google) and
+        Outlook (Microsoft)** as sign-in, AND still allow a **local user**. So: both
+        local accounts and Google/Microsoft OAuth users can be granted access.
+      - **Per-user long-term saved hours**: a separate place where chosen hours are
+        kept for the long term (exempt from the retention cleaner). Mechanism idea:
+        a **star** toggle on an hour in the frontend; starred hours are preserved.
+        Because it's per-user, it hangs off the login/user-management above.
+      DECISIONS NEEDED (build-time): the OAuth provider setup (Google + Microsoft
+      OAuth apps, redirect URIs, client id/secret in `.env`), how a local user +
+      OAuth users coexist in the `users` table, session model, which routes become
+      user-gated vs public, and whether "starred/long-term" hours are a per-user set
+      of (stream, date, hour) that the cleaner must skip + the storage/retention
+      interaction. This is big enough for its own design-first workflow (likely split
+      into: auth/OAuth + user model, then per-user starred-hours + cleaner exemption,
+      then the frontend login + star UI). Do NOT start without a design pass.
 
 ## Remaining tech debt (lower priority)
 
