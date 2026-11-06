@@ -43,3 +43,6 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# Graphify knowledge graph (generated, machine-local)
+graphify-out/
