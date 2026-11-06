@@ -94,23 +94,46 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
 ## New backlog (user, 2026-10-23) — grouped by theme
 
 ### Bugs / correctness (fix first)
-- [ ] **Recordings sometimes longer/shorter than one hour — happens with AAC
-      streams.** The per-hour files are not exactly 1h for AAC. Investigate the
-      recorder duration/segmenting for AAC (likely the ADTS copy/transcode path,
-      timestamps, or the hour-boundary cut). Use the Graphify graph for impact
-      (`graphify explain`/`path` on the recorder record/duration path) before
-      reading. Reproduce, then make AAC hours exactly one hour like the other codecs.
-- [ ] **At most ONE recording file per hour — no resume / no `.partN` segments.**
-      Today a mid-hour stream drop is restarted into a new `<folder>-<stamp>.partN`
-      segment (recorder-resilience) because ffmpeg can't cleanly append to an mp3.
-      The user wants a single file per hour and NO `.partN` files in the folder.
-      DECISION NEEDED (build-time): this is a trade-off — either (a) accept that a
-      mid-hour drop leaves a gap (one file, the rest of the hour missing) and drop
-      the segment-restart, or (b) keep capturing on drop but MERGE/concat the
-      segments into the single `<folder>-<stamp>.<ext>` at hour finalize so the
-      folder only ever shows one file. Recommend (b) if we want no data loss;
-      confirm with the user. Touches the recorder supervision/segment logic +
-      the recordings-row/peak/cleaner assumptions about one file per hour.
+- [ ] **DESIGN-FIRST: "Hour completeness & recorder-lifecycle resilience" — one
+      coordinated design for ALL the partial/half-hour edge cases (user, 2026-10-23).**
+      The user wants every "an hour isn't a full hour" cause designed together, once,
+      instead of patched piecemeal, because they are the same problem (the recorder
+      being interrupted or mis-cutting the hour). Collect and design for:
+      1. **Auto-deploy restarts (NEW, the main real-world cause).** The user runs a
+         cronjob every 10 minutes that `git pull`s and `docker compose up -d` when a
+         new version exists — which RESTARTS the recorder container MID-HOUR on every
+         deploy, truncating the in-progress recording. The design must make the
+         recorder survive/resume across a restart so a deploy doesn't leave a half
+         hour: e.g. on startup, if a recording for the current hour already exists
+         but is short, RESUME/continue capturing the remainder of the current hour
+         (the existing startup catch-up records the remainder only when NO file
+         exists — extend it to top up a truncated current-hour file), and/or MERGE
+         the pre-restart partial with the post-restart remainder into one file at
+         hour finalize. Consider a graceful-shutdown handoff so compose stop → start
+         loses as little as possible.
+      2. **Mid-hour stream drops / `.partN` segments.** A dropped stream is currently
+         restarted into `<folder>-<stamp>.partN` (recorder-resilience). The user wants
+         a SINGLE file per hour and NO `.partN` files. DECISION NEEDED: (a) accept a
+         gap on drop (one file, remainder missing) vs (b) keep capturing on drop then
+         MERGE/concat segments into the single `<folder>-<stamp>.<ext>` at hour
+         finalize (recommended if no data loss wanted). This is the same merge
+         machinery the deploy-restart case needs — design them together.
+      3. **AAC hours longer/shorter than one hour.** Per-hour AAC files aren't exactly
+         1h (likely the ADTS copy/transcode timestamps or the hour-boundary cut).
+         Make AAC hours exactly one hour like the other codecs. May share the
+         hour-boundary cutting logic the above cases touch.
+      4. **The "one file per hour" invariant everywhere.** Once segments are merged /
+         resumes are stitched, the recordings-row / peak-generation / cleaner /
+         reconcile / player assumptions should see exactly ONE file per (stream, hour)
+         with ~3600s duration. Audit those consumers so they match the new invariant.
+      Approach: DESIGN-FIRST workflow (Graphify-driven impact on the recorder
+      record/duration/segment/catch-up + the recordings/peak/cleaner consumers)
+      resolving the (a)/(b) decision and the restart-resume/merge mechanism, THEN
+      implement. Do NOT patch these as three separate quick fixes — they share the
+      hour-boundary + segment-merge + resume-on-restart machinery and must be one
+      coherent design. (Note: the auto-deploy restart is operational, not a code bug,
+      but the recorder should be resilient to it; also worth telling the user a
+      zero-downtime recorder deploy or a drain-before-restart could reduce the cut.)
 - [ ] **"Move station up" must not cross the country boundary.** In the admin
       streams list, the up/down arrows for a STATION should clamp at the top/bottom
       position WITHIN its country group (not jump into the adjacent country). The
