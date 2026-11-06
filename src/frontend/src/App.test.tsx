@@ -41,6 +41,11 @@ function resetFakeWs() {
 // Guard WaveSurfer so it never tries to decode real audio in jsdom. We stub the
 // module with a minimal instance that records event handlers + transport calls
 // so the loading-state and play-selection suites can drive and observe it.
+// This mock tracks the wavesurfer v8 API shape: load(url, channelData?,
+// duration?) keeps its v7 positional signature but now returns a Promise<void>
+// (v8 rejects it with AbortError on supersession); play()/playPause() also
+// return Promise<void> in v8. The hook calls all three fire-and-forget, so the
+// mock returns a resolved promise to match the real type without decoding.
 vi.mock("wavesurfer.js", () => {
   class FakeWaveSurfer {
     handlers: Record<string, ((arg?: unknown) => void)[]> = {};
@@ -82,17 +87,28 @@ vi.mock("wavesurfer.js", () => {
     on(event: string, handler: (arg?: unknown) => void) {
       (this.handlers[event] ??= []).push(handler);
     }
-    load(url: string, peaks?: number[][], duration?: number) {
+    // v8 load(url, channelData?, duration?): Promise<void> — same positional
+    // signature as v7, now returning a promise (which rejects with AbortError
+    // on supersession in the real lib). The hook ignores the return value;
+    // returning a resolved promise matches the real type and lets a future test
+    // assert supersession without changing this recorder.
+    load(url: string, peaks?: number[][], duration?: number): Promise<void> {
       loadedUrls.push(url);
       loadCalls.push({ url, peaks, duration });
       this.loadedDuration = duration;
       this.currentTime = 0;
+      return Promise.resolve();
     }
-    playPause() {}
-    play() {
+    // v8 playPause()/play() return Promise<void>; called fire-and-forget.
+    playPause(): Promise<void> {
+      return Promise.resolve();
+    }
+    play(): Promise<void> {
       this.playCalls += 1;
+      return Promise.resolve();
     }
-    // Mirror WaveSurfer v7: skip(delta) == setTime(currentTime + delta).
+    // Mirror WaveSurfer skip (unchanged v7->v8): skip(delta) ==
+    // setTime(currentTime + delta).
     skip(seconds: number) {
       this.setTime(this.getCurrentTime() + seconds);
     }
@@ -124,6 +140,12 @@ vi.mock("wavesurfer.js", () => {
 // can read its start/end. Reset per suite.
 let fakeRegion: { start: number; end: number } | null = null;
 
+// Regions plugin mock tracking the v8 API shape. The names the hook uses are
+// unchanged from v7: static create(), addRegion(RegionParams): Region,
+// clearRegions(), and on the region the public start/end fields + setOptions().
+// v8's region.play() is play(stopAtEnd?: boolean) (v7 took no arg); the hook
+// never calls region.play() (it uses the timeupdate guard), so the stub just
+// accepts the optional arg to match the v8 type.
 vi.mock("wavesurfer.js/dist/plugins/regions.esm.js", () => {
   class FakeRegions {
     static create() {
@@ -137,7 +159,7 @@ vi.mock("wavesurfer.js/dist/plugins/regions.esm.js", () => {
           fakeRegion!.start = o.start;
           fakeRegion!.end = o.end;
         },
-        play() {},
+        play(_stopAtEnd?: boolean) {},
       } as unknown as { start: number; end: number };
       return fakeRegion;
     }

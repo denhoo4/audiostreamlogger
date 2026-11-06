@@ -8,8 +8,9 @@ import RegionsPlugin, {
 //   WaveSurfer.create({ container: "#waveform", waveColor: "violet",
 //     progressColor: "purple", normalize: true }).registerPlugin(RegionsPlugin.create())
 // No barWidth/barGap/barHeight/cursorColor/height were set by the old app, so
-// wavesurfer v7 defaults apply (continuous waveform, default height 128). Do NOT
-// add bar styling: matching the old look means leaving these at default.
+// wavesurfer defaults apply (continuous waveform, default height 128). Do NOT
+// add bar styling: matching the old look means leaving these at default. These
+// option names (waveColor/progressColor/normalize) are unchanged in v8.
 export const WAVE_COLOR = "violet";
 export const PROGRESS_COLOR = "purple";
 export const NORMALIZE = true;
@@ -81,9 +82,13 @@ export interface UseWavesurfer {
 }
 
 /**
- * Creates and manages a single WaveSurfer v7 instance with the Regions plugin,
+ * Creates and manages a single WaveSurfer v8 instance with the Regions plugin,
  * reproducing the behaviors recovered from the legacy bundle. A single region
- * exists at a time (the old "rt" variable).
+ * exists at a time (the old "rt" variable). The public API this hook uses is
+ * unchanged from v7 (create/registerPlugin/load/zoom/skip/seekTo/setTime/
+ * getDuration/getCurrentTime/getWrapper/getScroll + the regions addRegion/
+ * clearRegions/setOptions/start/end); v8 only widened some return types to
+ * promises (load/play/playPause) — all called fire-and-forget here.
  */
 export function useWavesurfer(): UseWavesurfer {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -144,6 +149,10 @@ export function useWavesurfer(): UseWavesurfer {
       setIsPlaying(false);
       playingRegionEndRef.current = null;
     };
+    // v8 passes the error as [error: Error]; we intentionally ignore the arg.
+    // A load() superseded by a newer load() (the live-hour poll) does NOT emit
+    // 'error' in v8 (it only rejects the returned promise with AbortError), so
+    // this handler never fires spuriously on a poll tick.
     const onError = () => {
       setIsLoading(false);
       setLoadError(true);
@@ -168,8 +177,8 @@ export function useWavesurfer(): UseWavesurfer {
     };
     // Mouse-wheel scroll-to-zoom, replicating the old bundle's feel (sign-only
     // deltaY, fixed 5 px/sec step, lower clamp at 0) plus the user's explicit
-    // ask to anchor the zoom at the point under the cursor. v7's zoom() throws
-    // if no audio is loaded, so guard on getDuration() first.
+    // ask to anchor the zoom at the point under the cursor. zoom() throws if no
+    // audio is loaded (v7 and v8 alike), so guard on getDuration() first.
     const onWheel = (e: WheelEvent) => {
       const duration = ws.getDuration();
       if (!duration) return; // nothing decoded: let the page scroll
@@ -224,11 +233,21 @@ export function useWavesurfer(): UseWavesurfer {
       // shows until 'ready' (or 'error') fires for this load.
       setIsLoading(true);
       setLoadError(false);
-      // WaveSurfer v7's load() signature is load(url, peaks?, duration?). Pass
-      // only the arguments we have so the live hour (explicit duration, no
-      // peaks: url + undefined + duration) still fetches + decodes the growing
-      // mp3 for the waveform while getting a finite timeline, past hours keep
-      // their precomputed peaks, and the no-extra-info fallback stays load(url).
+      // WaveSurfer's load() positional signature is unchanged in v8:
+      // load(url, channelData?, duration?). Pass only the arguments we have so
+      // the live hour (explicit duration, no peaks: url + undefined + duration)
+      // still fetches + decodes the growing mp3 for the waveform while getting a
+      // finite timeline, past hours keep their precomputed peaks, and the
+      // no-extra-info fallback stays load(url).
+      //
+      // v8 contract: load() returns a Promise<void> that REJECTS with a
+      // DOMException AbortError when a newer load() supersedes it before it
+      // completes — which the live-hour LIVE_POLL_MS reload does on every tick.
+      // This is normal control flow (no 'error' event is emitted for it). Keep
+      // these calls FIRE-AND-FORGET: do NOT await or .catch() them. v8 attaches
+      // its own no-op rejection handler to the same returned promise, so an
+      // unawaited superseded load produces no unhandled-rejection noise;
+      // awaiting would surface AbortError on every poll.
       if (peaks && duration !== undefined) {
         ws.load(audioUrl, peaks, duration);
       } else if (peaks) {
@@ -335,7 +354,9 @@ export function useWavesurfer(): UseWavesurfer {
   // Play ONLY the current selection: seek to its start and play. The auto-pause
   // at the region end is guaranteed by the timeupdate guard above
   // (playingRegionEndRef), which is version-independent and does not rely on
-  // wavesurfer v7's region.play() stopping at the region end on its own.
+  // the regions plugin's region.play() stopping at the region end on its own
+  // (v7's region.play() vs v8's region.play(stopAtEnd?) differ — the guard
+  // sidesteps that difference entirely).
   const playRegion = useCallback(() => {
     const ws = wsRef.current;
     const region = regionRef.current;

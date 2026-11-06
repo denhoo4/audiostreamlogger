@@ -17,6 +17,27 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
 
 ## Open items
 
+- [x] **wavesurfer.js v8 upgrade (done on `wavesurfer8`).** The player's
+      `wavesurfer.js` moved from `7.12.12` to `8.0.5` (Dependabot PR #15) — the
+      only dependency change (its regions plugin ships from the same package,
+      unchanged import path `wavesurfer.js/dist/plugins/regions.esm.js`). This is
+      a MAJOR bump but the public surface this app uses is unchanged: verified
+      against the installed v8.0.5 `.d.ts` that `create`/`registerPlugin`/
+      `load(url, channelData?, duration?)`/`zoom`/`skip`/`seekTo`/`setTime`/
+      `getDuration`/`getCurrentTime`/`getWrapper`/`getScroll` and the regions
+      `addRegion`/`clearRegions`/`setOptions`/`start`/`end` all keep their v7
+      names and signatures. The three real v8 semantics (`load()` now returns a
+      `Promise<void>` that rejects with AbortError on supersession — relevant to
+      the live-hour poll, kept fire-and-forget; `getMediaElement()` can return
+      null under WebAudio — not called here; `peaks` type widened — assignable)
+      are documented in `useWavesurfer.ts` and needed no code change beyond
+      comments. The vitest WaveSurfer/Regions mock was migrated to the v8 shape
+      (load/play/playPause return promises; region.play(stopAtEnd?)) without
+      weakening any behavioral assertion. The lockfile is reproducible (`npm ci`
+      clean) and the frontend build + full vitest suite are green on v8 (149
+      tests, same as the v7 baseline). Runtime behaviors that the mocked suite
+      cannot prove require a browser check — see
+      `.agents/tasks/audiostreamlogger-wavesurfer8-2026-10-23/verification.md`.
 - [x] **Mantine v9 upgrade (done on `mantine9`).** All `@mantine/*` packages moved
       from `8.3.18` to the installed `9.7.5` line as one coordinated upgrade
       (`@mantine/core`, `@mantine/dates`, `@mantine/hooks`), with
