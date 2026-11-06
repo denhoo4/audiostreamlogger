@@ -38,6 +38,20 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
       tests, same as the v7 baseline). Runtime behaviors that the mocked suite
       cannot prove require a browser check — see
       `.agents/tasks/audiostreamlogger-wavesurfer8-2026-10-23/verification.md`.
+- [x] **TypeScript 7.0.2 upgrade (done on `typescript7`).** The frontend
+      `typescript` devDependency moved from `5.9.3` to `7.0.2` (Dependabot PR #14) —
+      the native Go-based `tsgo` compiler. The npm `typescript@7.0.2` package ships
+      `bin/tsc` plus 20 per-platform optional binaries under
+      `@typescript/typescript-<os>-<arch>` (linux-x64 selected in Docker/CI); `tsc`
+      is invoked exactly as before, so the unchanged `tsc -b && vite build` script
+      works as-is. No source changes and no type fixes were needed. Verified clean:
+      `npm ci` reproducible, a full `tsc -b --force` type-check passes with zero
+      errors, `vite build` emits a byte-identical bundle, and the full vitest suite
+      is green (149 tests, same baseline). The build/test toolchain (vite 8,
+      `@vitejs/plugin-react`, vitest) does its type-stripping via esbuild/rolldown
+      and does not consume the TypeScript compiler API, so TS 7's API-compat caveats
+      don't apply here; CI needs no change. See
+      `.agents/tasks/audiostreamlogger-typescript7-2026-10-23/verification.md`.
 - [x] **Mantine v9 upgrade (done on `mantine9`).** All `@mantine/*` packages moved
       from `8.3.18` to the installed `9.7.5` line as one coordinated upgrade
       (`@mantine/core`, `@mantine/dates`, `@mantine/hooks`), with
