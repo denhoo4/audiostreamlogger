@@ -24,6 +24,8 @@ COPY src/recorder/recordings-db.js ./
 COPY src/recorder/encoding.js ./
 COPY src/recorder/detect-source.js ./
 COPY src/recorder/folder-utils.js ./
+COPY src/recorder/finalize-timeline.js ./
+COPY src/recorder/finalize-hour.js ./
 
 # Ensure the audio directory exists
 RUN mkdir -p /usr/src/app/audio

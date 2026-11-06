@@ -6,7 +6,7 @@ what was built and why, see [HISTORY.md](HISTORY.md); for how the system fits
 together see [ARCHITECTURE.md](ARCHITECTURE.md); for working style and preferences
 see [HANDOVER.md](HANDOVER.md).
 
-Last updated: 2026-10-23.
+Last updated: 2026-10-23 (recorder-hour-resilience Phase 0 / FEAT-001 finalise primitive landed).
 
 ## Current state
 
@@ -148,6 +148,18 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
       coherent design. (Note: the auto-deploy restart is operational, not a code bug,
       but the recorder should be resilient to it; also worth telling the user a
       zero-downtime recorder deploy or a drain-before-restart could reduce the cut.)
+      - IN PROGRESS on branch `recorder-hour-resilience` (design under
+        `.agents/tasks/audiostreamlogger-recorder-hour-resilience-2026-10-23/`).
+        Phase 0 (FEAT-001) DONE: the finalise primitive — a pure
+        `buildTimeline(fragments, hourSeconds=3600)` that tiles the hour and
+        inserts silence for every gap, plus a `finalizeHour(workDir, outPath, enc,
+        {segments})` ffmpeg runner (concat-with-silence path for mp3/opus/flac and
+        AAC-with-gap, AAC no-gap copy-remux fast path with no resample). Pure argv
+        builders, array-only ffmpeg options. New files `src/recorder/finalize-timeline.js`
+        + `finalize-hour.js` (shipped via Dockerfile.recorder); not wired into the
+        recorder yet (later phases stitch resumes/merges onto this engine). Note:
+        raw ADTS `.aac` hours have no container duration — verify AAC hour length by
+        counting frames, not `ffprobe format=duration`.
 - [ ] **"Move station up" must not cross the country boundary.** In the admin
       streams list, the up/down arrows for a STATION should clamp at the top/bottom
       position WITHIN its country group (not jump into the adjacent country). The
