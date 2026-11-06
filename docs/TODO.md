@@ -38,7 +38,7 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
       tests, same as the v7 baseline). Runtime behaviors that the mocked suite
       cannot prove require a browser check — see
       `.agents/tasks/audiostreamlogger-wavesurfer8-2026-10-23/verification.md`.
-- [x] **TypeScript 7.0.2 upgrade (done on `typescript7`).** The frontend
+- [x] **TypeScript 7.0.2 upgrade (merged to `main`, PR #14).** The frontend
       `typescript` devDependency moved from `5.9.3` to `7.0.2` (Dependabot PR #14) —
       the native Go-based `tsgo` compiler. The npm `typescript@7.0.2` package ships
       `bin/tsc` plus 20 per-platform optional binaries under
