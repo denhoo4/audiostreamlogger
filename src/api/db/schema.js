@@ -94,6 +94,8 @@ CREATE TABLE IF NOT EXISTS recordings (
   duration_seconds REAL,
   size_bytes       INTEGER,
   segment_count    INTEGER NOT NULL DEFAULT 1,
+  gap_seconds      INTEGER,
+  has_silence      INTEGER NOT NULL DEFAULT 0 CHECK (has_silence IN (0,1)),
   created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at       TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (stream_folder, date, hour)
@@ -169,6 +171,37 @@ function migrateStreamsQuality(db) {
     }
 }
 
+/**
+ * Guarded in-place migration for the additive per-hour gap-flag columns
+ * `gap_seconds` + `has_silence` on the recordings table (FEAT-004). Mirrors the
+ * `migrateStreamsQuality`/`migrateStreamsSortOrder` precedent: read
+ * `PRAGMA table_info(recordings)` and add each column only when absent, so
+ * applySchema stays idempotent and an existing app.db migrates in place with
+ * zero row loss.
+ *
+ * `gap_seconds` is a plain nullable INTEGER (seconds of silence the recorder's
+ * finalise padded into the single hour file; NULL when unknown, e.g. a legacy
+ * row the recorder never finalised). `has_silence` is `INTEGER NOT NULL DEFAULT
+ * 0 CHECK (has_silence IN (0,1))` — a constant default an `ALTER TABLE ADD
+ * COLUMN` allows, backfilling every existing row to 0 (no known silence). Each
+ * `if` is independently guarded so a half-applied migration self-heals on the
+ * next boot. It does NOT alter/drop an existing column, does NOT touch the
+ * recordings `status` CHECK (a gap-padded hour stays 'complete'), and does NOT
+ * touch PRAGMA journal_mode.
+ */
+function migrateRecordingsGapFlag(db) {
+    const cols = db.prepare('PRAGMA table_info(recordings)').all();
+    const has = (name) => cols.some((c) => c.name === name);
+    if (!has('gap_seconds')) {
+        db.exec('ALTER TABLE recordings ADD COLUMN gap_seconds INTEGER');
+    }
+    if (!has('has_silence')) {
+        db.exec(
+            'ALTER TABLE recordings ADD COLUMN has_silence INTEGER NOT NULL DEFAULT 0 CHECK (has_silence IN (0,1))'
+        );
+    }
+}
+
 function applySchema(db) {
     db.exec(STREAMS_TABLE);
     migrateStreamsSortOrder(db);
@@ -180,6 +213,7 @@ function applySchema(db) {
     db.exec(SCHEDULES_TABLE);
     db.exec(APP_CONFIG_TABLE);
     db.exec(RECORDINGS_TABLE);
+    migrateRecordingsGapFlag(db);
     db.exec(RECORDINGS_FOLDER_DATE_INDEX);
     db.exec(RECORDINGS_DATE_INDEX);
 }
@@ -188,4 +222,5 @@ module.exports = {
     applySchema,
     migrateStreamsSortOrder,
     migrateStreamsQuality,
+    migrateRecordingsGapFlag,
 };

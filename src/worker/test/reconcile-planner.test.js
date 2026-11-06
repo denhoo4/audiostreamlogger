@@ -80,8 +80,11 @@ test("db-only row with status 'recording' -> NOT removed", () => {
     assert.strictEqual(plan.removes.length, 0, "'recording' row is guarded");
 });
 
-test('slot whose status/segment_count drifted -> updates', () => {
-    // DB thinks 'complete'/1; disk now has a .part2 -> 'partial'/2.
+test('segment_count drift on a folded legacy .partN hour -> update stays complete', () => {
+    // DB thinks 'complete'/1; disk now has a primary + a legacy .part2. FEAT-004
+    // folds a multi-part hour to ONE 'complete' slot (segment_count 2), never
+    // 'partial'. Only segment_count drifts, so this is a complete->complete
+    // update bumping the count.
     const existing = [row('radio1', '2026-10-23', '09')];
     const files = [
         scanned('radio1', '2026-10-23', '09', 1),
@@ -95,9 +98,28 @@ test('slot whose status/segment_count drifted -> updates', () => {
         stream_folder: 'radio1',
         date: '2026-10-23',
         hour: '09',
-        status: 'partial',
+        status: 'complete',
         segment_count: 2,
         file_path: '/audio/radio1/radio1-2026-10-23-09.mp3',
+    });
+});
+
+test('a legacy multi-part hour with no DB row folds into one complete insert', () => {
+    // Disk has a primary + a legacy .part2 for an hour with no row yet. It must
+    // insert as a SINGLE 'complete' slot (segment_count 2), not 'partial'.
+    const files = [
+        scanned('radio1', '2026-10-23', '09', 1),
+        scanned('radio1', '2026-10-23', '09', 2),
+    ];
+    const plan = reconcilePlan([], files);
+    assert.strictEqual(plan.inserts.length, 1, 'one folded slot');
+    assert.deepStrictEqual(plan.inserts[0], {
+        stream_folder: 'radio1',
+        date: '2026-10-23',
+        hour: '09',
+        file_path: '/audio/radio1/radio1-2026-10-23-09.mp3',
+        status: 'complete',
+        segment_count: 2,
     });
 });
 

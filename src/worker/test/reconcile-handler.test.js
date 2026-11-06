@@ -119,7 +119,9 @@ test('reconcile inserts disk-only, removes orphan, fixes drift, guards the curre
          VALUES ('radio1', '2019-06-15', '12', 'radio1/radio1-2019-06-15-12.mp3', 'complete', 1)`
     ).run();
 
-    // Drifted row: DB says complete/1, disk has primary + a .part2 -> fix to partial/2.
+    // Drifted row: DB says complete/1, disk has primary + a legacy .part2. FEAT-004
+    // folds a multi-part hour to ONE 'complete' slot, so only segment_count
+    // drifts (1 -> 2) and the fix keeps status 'complete'.
     writeFile('radio1-2019-03-03-08.mp3');
     writeFile('radio1-2019-03-03-08.part2.mp3');
     db.prepare(
@@ -147,7 +149,7 @@ test('reconcile inserts disk-only, removes orphan, fixes drift, guards the curre
     // Fixed.
     const fixed = getRow('2019-03-03', '08');
     assert.ok(fixed, 'drifted row still present');
-    assert.strictEqual(fixed.status, 'partial');
+    assert.strictEqual(fixed.status, 'complete', 'a folded legacy multi-part hour stays complete');
     assert.strictEqual(fixed.segment_count, 2);
 
     // Guarded current hour left intact.

@@ -71,11 +71,13 @@ function missingSlots(expectedSlots, presentRows) {
 /**
  * Fold recording rows into one summary object per stream_folder:
  *   { stream_folder, total_hours, storage_bytes, recording_count,
- *     avg_duration_seconds, earliest, latest }
+ *     avg_duration_seconds, silence_hours, gap_seconds_total, earliest, latest }
  * where total_hours == recording_count (one row per hour-slot), storage_bytes is
  * the summed size_bytes (nulls treated as 0), avg_duration_seconds is the mean of
- * the non-null duration_seconds (null when none are known), and earliest/latest
- * are the min/max 'YYYY-MM-DD-HH' slot keys. Pure: it does not touch the DB.
+ * the non-null duration_seconds (null when none are known), silence_hours is the
+ * count of gap-padded hours (SUM of has_silence), gap_seconds_total is the summed
+ * gap_seconds (nulls treated as 0), and earliest/latest are the min/max
+ * 'YYYY-MM-DD-HH' slot keys. Pure: it does not touch the DB.
  */
 function aggregateByStream(rows) {
     const byStream = new Map();
@@ -88,6 +90,8 @@ function aggregateByStream(rows) {
                 total_hours: 0,
                 storage_bytes: 0,
                 recording_count: 0,
+                silence_hours: 0,
+                gap_seconds_total: 0,
                 _durationSum: 0,
                 _durationCount: 0,
                 earliest: null,
@@ -99,6 +103,8 @@ function aggregateByStream(rows) {
         agg.recording_count += 1;
         agg.total_hours += 1;
         agg.storage_bytes += Number(row.size_bytes) || 0;
+        agg.silence_hours += Number(row.has_silence) || 0;
+        agg.gap_seconds_total += Number(row.gap_seconds) || 0;
         if (row.duration_seconds !== null && row.duration_seconds !== undefined) {
             agg._durationSum += Number(row.duration_seconds);
             agg._durationCount += 1;
@@ -120,6 +126,8 @@ function aggregateByStream(rows) {
         recording_count: agg.recording_count,
         avg_duration_seconds:
             agg._durationCount > 0 ? agg._durationSum / agg._durationCount : null,
+        silence_hours: agg.silence_hours,
+        gap_seconds_total: agg.gap_seconds_total,
         earliest: agg.earliest,
         latest: agg.latest,
     }));
@@ -269,10 +277,14 @@ function totalStoredBytes() {
 /**
  * Indexed SQL aggregates grouped by stream_folder plus an overall roll-up:
  *   { per_stream: [{ stream_folder, total_hours, storage_bytes,
- *                    recording_count, avg_duration_seconds, earliest, latest }],
+ *                    recording_count, avg_duration_seconds, silence_hours,
+ *                    gap_seconds_total, earliest, latest }],
  *     overall:    { total_hours, storage_bytes, recording_count,
- *                   avg_duration_seconds, earliest, latest, stream_count } }
- * Shapes match aggregateByStream so the two are interchangeable for the router.
+ *                   avg_duration_seconds, silence_hours, gap_seconds_total,
+ *                   earliest, latest, stream_count } }
+ * silence_hours is SUM(has_silence) (gap-padded hour count); gap_seconds_total is
+ * COALESCE(SUM(gap_seconds),0). Shapes match aggregateByStream so the two are
+ * interchangeable for the router.
  */
 function summarize() {
     const perStream = db
@@ -283,6 +295,8 @@ function summarize() {
                COALESCE(SUM(size_bytes), 0)     AS storage_bytes,
                COUNT(*)                         AS recording_count,
                AVG(duration_seconds)            AS avg_duration_seconds,
+               SUM(has_silence)                 AS silence_hours,
+               COALESCE(SUM(gap_seconds), 0)    AS gap_seconds_total,
                MIN(date || '-' || hour)         AS earliest,
                MAX(date || '-' || hour)         AS latest
              FROM recordings
@@ -298,6 +312,8 @@ function summarize() {
                COALESCE(SUM(size_bytes), 0)        AS storage_bytes,
                COUNT(*)                            AS recording_count,
                AVG(duration_seconds)               AS avg_duration_seconds,
+               SUM(has_silence)                    AS silence_hours,
+               COALESCE(SUM(gap_seconds), 0)       AS gap_seconds_total,
                MIN(date || '-' || hour)            AS earliest,
                MAX(date || '-' || hour)            AS latest,
                COUNT(DISTINCT stream_folder)       AS stream_count

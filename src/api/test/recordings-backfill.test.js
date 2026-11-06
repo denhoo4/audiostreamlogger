@@ -114,7 +114,10 @@ test('reconcilePlan plans inserts only for slots not already present', () => {
     }
 });
 
-test('reconcilePlan folds a .partN segment into segment_count + status partial', () => {
+test('reconcilePlan folds a legacy .partN hour into one complete slot (segment_count kept)', () => {
+    // FEAT-004: capture no longer writes .partN, but a legacy multi-part hour on
+    // disk still parses (READ) and folds to ONE 'complete' slot — the mid-hour
+    // 'partial' status was retired. segment_count still counts the folded files.
     const files = [
         scanned('radio1', '2026-10-23', '09', 1),
         scanned('radio1', '2026-10-23', '09', 2),
@@ -122,7 +125,7 @@ test('reconcilePlan folds a .partN segment into segment_count + status partial',
     ];
     const plan = reconcilePlan([], files);
     assert.strictEqual(plan.inserts.length, 1, 'all segments fold into one hour-slot');
-    assert.strictEqual(plan.inserts[0].status, 'partial');
+    assert.strictEqual(plan.inserts[0].status, 'complete');
     assert.strictEqual(plan.inserts[0].segment_count, 3);
     // file_path points at the primary file for the slot.
     assert.strictEqual(
@@ -131,11 +134,11 @@ test('reconcilePlan folds a .partN segment into segment_count + status partial',
     );
 });
 
-test('reconcilePlan with only a .partN (no primary) is still partial', () => {
+test('reconcilePlan with only a legacy .partN (no primary) still folds to complete', () => {
     const files = [scanned('radio1', '2026-10-23', '09', 2)];
     const plan = reconcilePlan([], files);
     assert.strictEqual(plan.inserts.length, 1);
-    assert.strictEqual(plan.inserts[0].status, 'partial');
+    assert.strictEqual(plan.inserts[0].status, 'complete');
     assert.strictEqual(plan.inserts[0].segment_count, 1);
     assert.strictEqual(
         plan.inserts[0].file_path,

@@ -16,11 +16,13 @@
  *   options       { currentStamp } where currentStamp is the local
  *                 'YYYY-MM-DD-HH' slot actively being recorded (may be null).
  *
- * Folding (identical to the original recordings-backfill reconcilePlan): scanned
- * files collapse into one slot per 'folder|date|hour'. segment_count = number of
- * distinct files folded; status is 'partial' if ANY `.partN` segment is present,
- * else 'complete'; file_path is the primary file when present, else the
- * lowest-part segment seen.
+ * Folding: scanned files collapse into one slot per 'folder|date|hour'.
+ * segment_count = number of distinct files folded; file_path is the primary file
+ * when present, else the lowest-part segment seen. FEAT-004 retired the mid-hour
+ * 'partial' status: a folded slot is ALWAYS 'complete', even a legacy multi-part
+ * `.partN` hour (those files are kept for READ back-compat but fold into one
+ * 'complete' slot — capture no longer writes `.partN`). segment_count still
+ * reflects how many files were folded.
  *
  *   inserts  folded slots with NO matching existingRow, as
  *            { stream_folder, date, hour, file_path, status, segment_count }
@@ -62,7 +64,6 @@ function foldScannedFiles(scannedFiles) {
                 _primaryPath: null,
                 _minPart: file.part,
                 segment_count: 0,
-                _hasSegment: false,
             };
             slots.set(key, slot);
         }
@@ -70,8 +71,6 @@ function foldScannedFiles(scannedFiles) {
         slot.segment_count += 1;
         if (file.part === 1) {
             slot._primaryPath = file.file_path;
-        } else {
-            slot._hasSegment = true;
         }
         if (file.part < slot._minPart) {
             slot._minPart = file.part;
@@ -88,7 +87,10 @@ function foldScannedFiles(scannedFiles) {
             date: slot.date,
             hour: slot.hour,
             file_path: slot._primaryPath || slot.file_path,
-            status: slot._hasSegment ? 'partial' : 'complete',
+            // FEAT-004: a folded hour is always 'complete' — the mid-hour
+            // 'partial' status was retired. A legacy multi-part `.partN` hour on
+            // disk folds to one 'complete' slot (segment_count keeps the count).
+            status: 'complete',
             segment_count: slot.segment_count,
         });
     }

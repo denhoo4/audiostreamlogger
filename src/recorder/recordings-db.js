@@ -121,23 +121,37 @@ function markSegment(db, { folder, stamp, attempt }) {
     });
 }
 
-// A normal finalize sets size_bytes and flips status to 'complete' — but NEVER
-// downgrades an already-'partial' hour (a mid-hour restart happened, so the hour
-// stays 'partial'). updated_at is bumped. Only touches an existing row.
-function markComplete(db, { folder, stamp, sizeBytes }) {
+// The finalise sets size_bytes, the per-hour gap flag (gap_seconds +
+// has_silence) and flips status to 'complete'. A gap-padded hour (silence filled
+// in for a down-window) stays 'complete' — FEAT-004 retired the mid-hour
+// 'partial' status for WRITES, so finalise never produces 'partial'; the legacy
+// CASE below only preserves an already-'partial' row (e.g. one left by an older
+// recorder on disk) so this write is strictly non-destructive to it. updated_at
+// is bumped. Only touches an existing row.
+//
+// gapSeconds/hasSilence come from the finalise timeline (sum of the silence
+// segments' durations). Both default to "unknown/none" so a legacy caller that
+// omits them leaves gap_seconds NULL / has_silence 0 — behaviour-preserving.
+function markComplete(db, { folder, stamp, sizeBytes, gapSeconds, hasSilence }) {
     const parts = parseStamp(stamp);
     if (!parts) {
         throw new Error(`recorder: cannot parse hour stamp ${JSON.stringify(stamp)}`);
     }
     const size = Number.isFinite(sizeBytes) ? Math.floor(sizeBytes) : null;
+    const gap = Number.isFinite(gapSeconds) ? Math.max(0, Math.floor(gapSeconds)) : null;
+    // has_silence is a 0/1 flag; derive it from the explicit flag when given,
+    // else from a positive gap, so the two columns can never disagree.
+    const silence = (hasSilence === true || hasSilence === 1 || (gap !== null && gap > 0)) ? 1 : 0;
     return withBusyRetry(() => {
         db.prepare(
             `UPDATE recordings
                 SET status = CASE WHEN status = 'partial' THEN 'partial' ELSE 'complete' END,
                     size_bytes = ?,
+                    gap_seconds = ?,
+                    has_silence = ?,
                     updated_at = datetime('now')
               WHERE stream_folder = ? AND date = ? AND hour = ?`
-        ).run(size, folder, parts.date, parts.hour);
+        ).run(size, gap, silence, folder, parts.date, parts.hour);
     });
 }
 

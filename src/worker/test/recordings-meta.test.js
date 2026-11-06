@@ -149,7 +149,8 @@ test('upsertRecordingMeta INSERT builds a non-mp3 file_path from the ext param',
     assert.strictEqual(wroteFlac, true);
     const flacRow = getRow('flacfm', '2026-10-23', '21');
     assert.strictEqual(flacRow.file_path, 'flacfm/flacfm-2026-10-23-21.flac');
-    assert.strictEqual(flacRow.status, 'partial');
+    // FEAT-004: a folded legacy multi-part hour inserts 'complete', not 'partial'.
+    assert.strictEqual(flacRow.status, 'complete');
     assert.strictEqual(flacRow.segment_count, 2);
 });
 
@@ -167,7 +168,9 @@ test('upsertRecordingMeta INSERT defaults the file_path ext to mp3 when omitted'
     );
 });
 
-test('upsertRecordingMeta marks a .partN segment partial on insert', () => {
+test('upsertRecordingMeta inserts a folded legacy .partN hour as complete', () => {
+    // FEAT-004: a legacy multi-part hour (part > 1 still parses for READ) folds
+    // to ONE 'complete' slot on insert; the mid-hour 'partial' status is retired.
     const wrote = upsertRecordingMeta(db, {
         folder: 'radio1',
         stamp: '2026-10-23-16',
@@ -178,11 +181,11 @@ test('upsertRecordingMeta marks a .partN segment partial on insert', () => {
 
     assert.strictEqual(wrote, true);
     const row = getRow('radio1', '2026-10-23', '16');
-    assert.strictEqual(row.status, 'partial');
+    assert.strictEqual(row.status, 'complete');
     assert.strictEqual(row.segment_count, 2);
 });
 
-test('upsertRecordingMeta bumps an existing row to partial for a .partN segment', () => {
+test('upsertRecordingMeta never restatuses an existing hour and bumps segment_count', () => {
     db.prepare(
         `INSERT INTO recordings (stream_folder, date, hour, file_path, status, segment_count)
          VALUES ('radio1', '2026-10-23', '17', 'radio1/radio1-2026-10-23-17.mp3', 'complete', 1)`
@@ -197,7 +200,8 @@ test('upsertRecordingMeta bumps an existing row to partial for a .partN segment'
     });
 
     const row = getRow('radio1', '2026-10-23', '17');
-    assert.strictEqual(row.status, 'partial');
+    // Status untouched (finalise owns it); segment_count bumped to the folded count.
+    assert.strictEqual(row.status, 'complete');
     assert.strictEqual(row.segment_count, 3);
     assert.strictEqual(row.duration_seconds, 900);
 });

@@ -149,13 +149,22 @@ test('a non-recording filename is unlinked without touching recordings', () => {
     assert.match(summary, /0 recordings row\(s\) removed/);
 });
 
-test('cleaner never descends into or deletes the .inprogress work dir', () => {
-    // An old fragment inside .inprogress would be deleted if the cleaner
-    // descended; it must be left untouched (finalise owns those bytes).
-    const inprog = path.join(audioDir, 'radio1', '.inprogress', '2020-01-01-00');
+// 'YYYY-MM-DD-HH' local-hour stamp a given number of hours before now.
+function stampHoursAgo(hoursAgo) {
+    const d = new Date(Date.now() - hoursAgo * 60 * 60 * 1000);
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}-${p(d.getHours())}`;
+}
+
+test('the file-retention pass never descends into the .inprogress work dir', () => {
+    // A RECENT in-progress dir (current hour) is actively capturing; neither the
+    // file-retention pass (it is a dotfile) nor the orphan pass (within the 2h
+    // window) may touch its fragments — finalise owns those bytes.
+    const inprog = path.join(audioDir, 'radio1', '.inprogress', stampHoursAgo(0));
     fs.mkdirSync(inprog, { recursive: true });
     const frag = path.join(inprog, '0-0.mp3');
-    fs.writeFileSync(frag, 'old-frag');
+    fs.writeFileSync(frag, 'fresh-frag');
+    // Even with an ancient mtime the file-retention pass must not reach it.
     fs.utimesSync(frag, OLD_MTIME, OLD_MTIME);
     const sidecar = path.join(inprog, 'state.json');
     fs.writeFileSync(sidecar, '{}');
@@ -163,10 +172,41 @@ test('cleaner never descends into or deletes the .inprogress work dir', () => {
 
     const summary = cleaner.runCleaner(db);
 
-    assert.strictEqual(fs.existsSync(frag), true, 'in-progress fragment left in place');
+    assert.strictEqual(fs.existsSync(frag), true, 'current-hour fragment left in place');
     assert.strictEqual(fs.existsSync(sidecar), true, 'sidecar left in place');
-    assert.match(summary, /0 recordings row\(s\) removed/);
+    assert.match(summary, /0 orphaned work dir\(s\) removed/);
 
-    // Clean up the directory fixture (the shared beforeEach only unlinks files).
+    fs.rmSync(path.join(audioDir, 'radio1', '.inprogress'), { recursive: true, force: true });
+});
+
+test('cleaner ages out an orphaned (never-finalised) .inprogress work dir', () => {
+    // A work dir whose hour is well past the orphan window (the recorder crashed
+    // mid-hour and never finalised it) is removed (FEAT-004).
+    const orphanStamp = stampHoursAgo(5);
+    const inprog = path.join(audioDir, 'radio1', '.inprogress', orphanStamp);
+    fs.mkdirSync(inprog, { recursive: true });
+    fs.writeFileSync(path.join(inprog, '0-0.mp3'), 'stale-frag');
+    fs.writeFileSync(path.join(inprog, 'state.json'), '{}');
+
+    const summary = cleaner.runCleaner(db);
+
+    assert.strictEqual(fs.existsSync(inprog), false, 'orphaned work dir removed');
+    assert.match(summary, /1 orphaned work dir\(s\) removed/);
+
+    fs.rmSync(path.join(audioDir, 'radio1', '.inprogress'), { recursive: true, force: true });
+});
+
+test('cleaner leaves a recent .inprogress work dir inside the orphan window', () => {
+    // One hour ago is still inside the 2h orphan window -> not removed.
+    const recentStamp = stampHoursAgo(1);
+    const inprog = path.join(audioDir, 'radio1', '.inprogress', recentStamp);
+    fs.mkdirSync(inprog, { recursive: true });
+    fs.writeFileSync(path.join(inprog, '0-0.mp3'), 'recent-frag');
+
+    const summary = cleaner.runCleaner(db);
+
+    assert.strictEqual(fs.existsSync(inprog), true, 'recent work dir left in place');
+    assert.match(summary, /0 orphaned work dir\(s\) removed/);
+
     fs.rmSync(path.join(audioDir, 'radio1', '.inprogress'), { recursive: true, force: true });
 });

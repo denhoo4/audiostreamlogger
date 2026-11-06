@@ -98,7 +98,9 @@ function mergeRows(
  * and renders ONE per-stream table inside a single Panel, with two prominent
  * summary lines (projected total + currently on disk) above it. Replaces the
  * former RecordingsAnalysis + StreamHealth + StorageEstimate panels; the old
- * Gaps & coverage UI is intentionally dropped. Loading (Loader + dimmed Text)
+ * Gaps & coverage UI is intentionally dropped. The 'Gaps' column surfaces the
+ * per-stream silence-hour count (FEAT-004) as a 'partial' pill, or a dash when
+ * the stream has no gap-padded hours. Loading (Loader + dimmed Text)
  * and ApiError (<Alert color='red' role='alert'>) states mirror those panels.
  */
 export default function RecordingsHealth() {
@@ -181,6 +183,7 @@ export default function RecordingsHealth() {
                       <Table.Th>Stream</Table.Th>
                       <Table.Th>Total hours</Table.Th>
                       <Table.Th>Storage</Table.Th>
+                      <Table.Th>Gaps</Table.Th>
                       <Table.Th>Range</Table.Th>
                       <Table.Th>Health</Table.Th>
                       <Table.Th>Bytes/hour</Table.Th>
@@ -196,6 +199,18 @@ export default function RecordingsHealth() {
                           {row.summary
                             ? formatBytes(row.summary.storage_bytes)
                             : "—"}
+                        </Table.Td>
+                        <Table.Td>
+                          {row.summary && row.summary.silence_hours > 0 ? (
+                            <StatusBadge
+                              status="partial"
+                              aria-label={`${row.summary.silence_hours} hour(s) with silence gaps`}
+                            >
+                              {row.summary.silence_hours}
+                            </StatusBadge>
+                          ) : (
+                            "—"
+                          )}
                         </Table.Td>
                         <Table.Td>
                           {row.summary

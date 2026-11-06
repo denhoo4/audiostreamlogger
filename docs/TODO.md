@@ -6,7 +6,7 @@ what was built and why, see [HISTORY.md](HISTORY.md); for how the system fits
 together see [ARCHITECTURE.md](ARCHITECTURE.md); for working style and preferences
 see [HANDOVER.md](HANDOVER.md).
 
-Last updated: 2026-10-23 (recorder-hour-resilience Phase 3 / FEAT-003 AAC hour exactness landed).
+Last updated: 2026-10-23 (recorder-hour-resilience Phase 4 / FEAT-004 gap-flag schema + .partN write-retire + Recordings & Health gaps column landed).
 
 ## Current state
 
@@ -186,8 +186,23 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
         `format=duration`). No production code change was needed — FEAT-001's
         `finalizeHour` already selects copy-vs-concat from the timeline shape and
         FEAT-002 already routes AAC through `finalizeIfNeeded`; FEAT-003 added the
-        regression coverage that proves it. Still open on this branch: the
-        gap/completeness flag surfaced to the UI (FEAT-004) and later phases.
+        regression coverage that proves it.
+        Phase 4 (FEAT-004) DONE: `.partN` is retired for WRITES (capture only
+        ever writes the hidden `.inprogress/<stamp>/` fragments; the legacy
+        `.partN` branch is kept for READ back-compat so old multi-part hours on
+        disk still parse and fold into ONE `complete` slot — retention ages the
+        legacy files out). Additive guarded schema migration
+        `migrateRecordingsGapFlag` adds `recordings.gap_seconds` (nullable) +
+        `has_silence` (0/1, default 0) — the status CHECK is untouched, a
+        gap-padded hour stays `complete`. The recorder finalise now writes the
+        per-hour gap flag (silence seconds summed from the timeline) via
+        `markComplete`; the two byte-identical reconcile-planner copies and the
+        worker row writers fold a multi-part hour to one `complete` slot; the
+        cleaner ages out orphaned `.inprogress/<stamp>` work dirs (>2h past their
+        hour). The gap flag is surfaced in Recordings & Health: the api summary
+        carries `silence_hours` + `gap_seconds_total` and the frontend shows a
+        `Gaps` column. This resolves item 2 (single file, no `.partN`) and
+        item 4 (one-file-per-hour invariant across the consumers) above.
 - [ ] **"Move station up" must not cross the country boundary.** In the admin
       streams list, the up/down arrows for a STATION should clamp at the top/bottom
       position WITHIN its country group (not jump into the adjacent country). The

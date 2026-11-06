@@ -25,6 +25,8 @@ CREATE TABLE recordings (
   duration_seconds REAL,
   size_bytes       INTEGER,
   segment_count    INTEGER NOT NULL DEFAULT 1,
+  gap_seconds      INTEGER,
+  has_silence      INTEGER NOT NULL DEFAULT 0 CHECK (has_silence IN (0,1)),
   created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at       TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (stream_folder, date, hour)
@@ -169,6 +171,54 @@ test('markComplete: sets complete + size_bytes on a plain recording row', () => 
     assert.strictEqual(all.length, 1);
     assert.strictEqual(all[0].status, 'complete');
     assert.strictEqual(all[0].size_bytes, 12345);
+});
+
+test('markComplete: writes gap_seconds + has_silence for a gap-padded hour (stays complete)', () => {
+    buildDb();
+    const db = openDb();
+    try {
+        upsertRecordingStart(db, { folder: 'radio1', stamp: '2026-10-23-14' });
+        markComplete(db, {
+            folder: 'radio1',
+            stamp: '2026-10-23-14',
+            sizeBytes: 7000,
+            gapSeconds: 120,
+            hasSilence: true,
+        });
+    } finally {
+        db.close();
+    }
+    const all = rows();
+    assert.strictEqual(all.length, 1);
+    assert.strictEqual(all[0].status, 'complete', 'a gap-padded hour stays complete, never partial');
+    assert.strictEqual(all[0].gap_seconds, 120);
+    assert.strictEqual(all[0].has_silence, 1);
+});
+
+test('markComplete: derives has_silence from a positive gap even when the flag is omitted', () => {
+    buildDb();
+    const db = openDb();
+    try {
+        upsertRecordingStart(db, { folder: 'radio1', stamp: '2026-10-23-14' });
+        markComplete(db, { folder: 'radio1', stamp: '2026-10-23-14', sizeBytes: 1, gapSeconds: 5 });
+    } finally {
+        db.close();
+    }
+    assert.strictEqual(rows()[0].has_silence, 1);
+});
+
+test('markComplete: leaves gap_seconds NULL and has_silence 0 when no gap is given', () => {
+    buildDb();
+    const db = openDb();
+    try {
+        upsertRecordingStart(db, { folder: 'radio1', stamp: '2026-10-23-14' });
+        markComplete(db, { folder: 'radio1', stamp: '2026-10-23-14', sizeBytes: 1 });
+    } finally {
+        db.close();
+    }
+    const row = rows()[0];
+    assert.strictEqual(row.gap_seconds, null);
+    assert.strictEqual(row.has_silence, 0);
 });
 
 test('markComplete: does NOT downgrade an already-partial hour to complete', () => {

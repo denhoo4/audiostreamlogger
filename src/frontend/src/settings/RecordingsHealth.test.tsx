@@ -34,6 +34,8 @@ const SUMMARY: AnalysisSummary = {
       storage_bytes: 10 * MiB,
       recording_count: 48,
       avg_duration_seconds: 3600,
+      silence_hours: 3,
+      gap_seconds_total: 540,
       earliest: "2026-10-20-00",
       latest: "2026-10-21-23",
     },
@@ -43,6 +45,8 @@ const SUMMARY: AnalysisSummary = {
       storage_bytes: 512 * 1024,
       recording_count: 24,
       avg_duration_seconds: null,
+      silence_hours: 0,
+      gap_seconds_total: 0,
       earliest: "2026-10-22-00",
       latest: "2026-10-22-23",
     },
@@ -52,6 +56,8 @@ const SUMMARY: AnalysisSummary = {
     storage_bytes: 10 * MiB + 512 * 1024,
     recording_count: 72,
     avg_duration_seconds: 3600,
+    silence_hours: 3,
+    gap_seconds_total: 540,
     earliest: "2026-10-20-00",
     latest: "2026-10-22-23",
     stream_count: 2,
@@ -170,6 +176,25 @@ describe("RecordingsHealth", () => {
     // Per-stream projected sizes.
     expect(screen.getByText("24 MB")).toBeInTheDocument();
     expect(screen.getByText("48 MB")).toBeInTheDocument();
+  });
+
+  it("renders a gaps indicator for a stream with silence hours and a dash otherwise", async () => {
+    mockAll();
+    renderWithMantine(<RecordingsHealth />);
+
+    await screen.findByText("Radio One");
+
+    // radio_one has 3 gap-padded hours -> a pill showing the count.
+    const oneRow = screen.getByText("Radio One").closest("tr");
+    expect(
+      oneRow?.querySelector('[aria-label="3 hour(s) with silence gaps"]'),
+    ).not.toBeNull();
+
+    // radio_two has no silence hours -> no gaps pill in its row.
+    const twoRow = screen.getByText("Radio Two").closest("tr");
+    expect(
+      twoRow?.querySelector('[aria-label$="with silence gaps"]'),
+    ).toBeNull();
   });
 
   it("renders the two summary lines above the table", async () => {

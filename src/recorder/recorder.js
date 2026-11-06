@@ -51,12 +51,18 @@ function recordStartRow(folder, stamp, ext = 'mp3') {
     }
 }
 
-function recordCompleteRow(folder, stamp, sizeBytes) {
+function recordCompleteRow(folder, stamp, sizeBytes, gapSeconds) {
     if (!recordingsHandle) {
         return;
     }
     try {
-        recordingsDb.markComplete(recordingsHandle, { folder, stamp, sizeBytes });
+        recordingsDb.markComplete(recordingsHandle, {
+            folder,
+            stamp,
+            sizeBytes,
+            gapSeconds,
+            hasSilence: Number.isFinite(gapSeconds) && gapSeconds > 0,
+        });
     } catch (err) {
         log.error(`recorder: recordings complete-row write failed for ${folder} ${stamp}:`, err.message);
     }
@@ -492,7 +498,15 @@ function finalizeIfNeeded(audioBase, folder, stamp, enc) {
         } catch (err) {
             log.error(`recorder: could not stat ${primaryPath} for recordings size:`, err.message);
         }
-        recordCompleteRow(folder, stamp, sizeBytes);
+        // Per-hour gap flag (FEAT-004): total silence the timeline padded in for
+        // down-windows, as whole seconds. The hour stays 'complete' regardless —
+        // a gap-padded hour is a full-length file with silence, not 'partial'.
+        const gapSeconds = Math.round(
+            segments
+                .filter((s) => s.kind === 'silence')
+                .reduce((sum, s) => sum + (Number(s.durationSeconds) || 0), 0),
+        );
+        recordCompleteRow(folder, stamp, sizeBytes, gapSeconds);
 
         // Remove the work dir now the hour is finalised.
         try {

@@ -88,6 +88,14 @@ export interface AnalysisStreamSummary {
   storage_bytes: number;
   recording_count: number;
   avg_duration_seconds: number | null;
+  /**
+   * Count of gap-padded hours for this stream (SUM of has_silence) — hours the
+   * recorder finalised with interior/leading/trailing silence for a down-window
+   * (FEAT-004). The hour is still 'complete'; this just flags it has silence.
+   */
+  silence_hours: number;
+  /** Total silence seconds summed across this stream's gap-padded hours. */
+  gap_seconds_total: number;
   earliest: string | null;
   latest: string | null;
 }
@@ -102,6 +110,10 @@ export interface AnalysisOverall {
   storage_bytes: number;
   recording_count: number;
   avg_duration_seconds: number | null;
+  /** Count of gap-padded hours across every stream (SUM of has_silence). */
+  silence_hours: number;
+  /** Total silence seconds across every stream's gap-padded hours. */
+  gap_seconds_total: number;
   earliest: string | null;
   latest: string | null;
   stream_count: number;

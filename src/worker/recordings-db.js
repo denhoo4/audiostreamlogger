@@ -30,14 +30,19 @@ function splitStamp(stamp) {
 /**
  * Fill duration_seconds + size_bytes on the (stream_folder,date,hour) row.
  *
- * - If the row exists: UPDATE its duration_seconds/size_bytes/updated_at. When
- *   `part` > 1 (a mid-hour `.partN` segment) also mark status 'partial' and
- *   bump segment_count so the hour reflects the restart.
+ * - If the row exists: UPDATE its duration_seconds/size_bytes/updated_at. The
+ *   hour's status is left untouched (the recorder's finalise owns it).
  * - If no row exists yet (the recorder has not written one, or backfill has not
- *   run): INSERT one with status 'partial' for a `.partN` else 'complete',
- *   segment_count = part, and file_path `${folder}/${folder}-${stamp}.${ext}`
- *   (ext is the real codec extension, default 'mp3'). `ext` is consulted ONLY on
- *   the INSERT branch; the UPDATE branches key on (folder,date,hour) only.
+ *   run): INSERT one with status 'complete', segment_count = max(part,1), and
+ *   file_path `${folder}/${folder}-${stamp}.${ext}` (ext is the real codec
+ *   extension, default 'mp3'). `ext` is consulted ONLY on the INSERT branch; the
+ *   UPDATE branch keys on (folder,date,hour) only.
+ *
+ * FEAT-004: capture no longer writes `.partN` so `part` is 1 for every new file;
+ * a reconciled LEGACY multi-part hour (`part` > 1 still parses for READ
+ * back-compat) folds to a 'complete' hour — the mid-hour 'partial' status was
+ * retired. segment_count still reflects the part count on insert so a folded
+ * legacy hour keeps its count.
  *
  * Returns true when a row was written. Throws only on a non-busy DB error.
  */
@@ -59,32 +64,27 @@ function upsertRecordingMeta(db, { folder, stamp, durationSeconds, sizeBytes, pa
             .get(folder, date, hour);
 
         if (existing === undefined) {
-            const status = segment > 1 ? 'partial' : 'complete';
             // file_path is required NOT NULL; reconstruct the on-disk basename
             // with the real codec extension (defaults to mp3 — FEAT-002 §5.5).
+            // A folded legacy multi-part hour inserts as 'complete' (FEAT-004).
             const filePath = `${folder}/${folder}-${stamp}.${ext}`;
             db.prepare(
                 `INSERT INTO recordings
                    (stream_folder, date, hour, file_path, status, duration_seconds, size_bytes, segment_count)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-            ).run(folder, date, hour, filePath, status, duration, size, segment);
+                 VALUES (?, ?, ?, ?, 'complete', ?, ?, ?)`
+            ).run(folder, date, hour, filePath, duration, size, segment);
             return true;
         }
 
-        if (segment > 1) {
-            db.prepare(
-                `UPDATE recordings
-                   SET duration_seconds = ?, size_bytes = ?, status = 'partial',
-                       segment_count = MAX(segment_count, ?), updated_at = datetime('now')
-                 WHERE stream_folder = ? AND date = ? AND hour = ?`
-            ).run(duration, size, segment, folder, date, hour);
-        } else {
-            db.prepare(
-                `UPDATE recordings
-                   SET duration_seconds = ?, size_bytes = ?, updated_at = datetime('now')
-                 WHERE stream_folder = ? AND date = ? AND hour = ?`
-            ).run(duration, size, folder, date, hour);
-        }
+        // Only fill in the per-file metadata; never restatus an existing hour
+        // (the recorder's finalise owns status). segment_count is bumped for a
+        // folded legacy multi-part hour so the count reflects the files seen.
+        db.prepare(
+            `UPDATE recordings
+               SET duration_seconds = ?, size_bytes = ?,
+                   segment_count = MAX(segment_count, ?), updated_at = datetime('now')
+             WHERE stream_folder = ? AND date = ? AND hour = ?`
+        ).run(duration, size, segment, folder, date, hour);
         return true;
     });
 }

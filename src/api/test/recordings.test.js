@@ -133,7 +133,7 @@ test('missingSlots returns expected slots with no matching present row', () => {
     assert.ok(missing.some((s) => s.hour === '10'));
 });
 
-test('aggregateByStream folds rows per stream incl. a partial row', () => {
+test('aggregateByStream folds rows per stream incl. the gap flag', () => {
     const rows = [
         {
             stream_folder: 'radio1',
@@ -143,15 +143,20 @@ test('aggregateByStream folds rows per stream incl. a partial row', () => {
             duration_seconds: 3600,
             size_bytes: 1000,
             segment_count: 1,
+            has_silence: 0,
+            gap_seconds: null,
         },
         {
             stream_folder: 'radio1',
             date: '2026-10-23',
             hour: '10',
-            status: 'partial',
+            // A gap-padded hour (FEAT-004): still 'complete', has silence.
+            status: 'complete',
             duration_seconds: null, // unknown duration — excluded from the mean
             size_bytes: 500,
-            segment_count: 2,
+            segment_count: 1,
+            has_silence: 1,
+            gap_seconds: 120,
         },
         {
             stream_folder: 'radio2',
@@ -161,6 +166,8 @@ test('aggregateByStream folds rows per stream incl. a partial row', () => {
             duration_seconds: 1800,
             size_bytes: 2000,
             segment_count: 1,
+            has_silence: 0,
+            gap_seconds: null,
         },
     ];
 
@@ -172,12 +179,66 @@ test('aggregateByStream folds rows per stream incl. a partial row', () => {
     assert.strictEqual(r1.recording_count, 2);
     assert.strictEqual(r1.storage_bytes, 1500);
     assert.strictEqual(r1.avg_duration_seconds, 3600); // only the one known duration
+    assert.strictEqual(r1.silence_hours, 1);
+    assert.strictEqual(r1.gap_seconds_total, 120);
     assert.strictEqual(r1.earliest, '2026-10-23-09');
     assert.strictEqual(r1.latest, '2026-10-23-10');
 
     assert.strictEqual(r2.total_hours, 1);
     assert.strictEqual(r2.avg_duration_seconds, 1800);
+    assert.strictEqual(r2.silence_hours, 0);
+    assert.strictEqual(r2.gap_seconds_total, 0);
     assert.strictEqual(r2.earliest, '2026-10-22-23');
+});
+
+test('summarize carries silence_hours + gap_seconds_total per stream and overall', () => {
+    db.exec('DELETE FROM recordings');
+    // radio1: one plain complete hour + one gap-padded complete hour.
+    recordings.upsertRecording(db, {
+        stream_folder: 'radio1',
+        date: '2026-10-23',
+        hour: '09',
+        file_path: '/audio/radio1/radio1-2026-10-23-09.mp3',
+        status: 'complete',
+        size_bytes: 1000,
+    });
+    db.prepare(
+        `UPDATE recordings SET gap_seconds = NULL, has_silence = 0
+         WHERE stream_folder='radio1' AND date='2026-10-23' AND hour='09'`
+    ).run();
+    recordings.upsertRecording(db, {
+        stream_folder: 'radio1',
+        date: '2026-10-23',
+        hour: '10',
+        file_path: '/audio/radio1/radio1-2026-10-23-10.mp3',
+        status: 'complete',
+        size_bytes: 500,
+    });
+    db.prepare(
+        `UPDATE recordings SET gap_seconds = 90, has_silence = 1
+         WHERE stream_folder='radio1' AND date='2026-10-23' AND hour='10'`
+    ).run();
+    // radio2: a single plain complete hour, no silence.
+    recordings.upsertRecording(db, {
+        stream_folder: 'radio2',
+        date: '2026-10-23',
+        hour: '00',
+        file_path: '/audio/radio2/radio2-2026-10-23-00.mp3',
+        status: 'complete',
+        size_bytes: 2000,
+    });
+
+    const { per_stream, overall } = recordings.summarize();
+    const r1 = per_stream.find((r) => r.stream_folder === 'radio1');
+    const r2 = per_stream.find((r) => r.stream_folder === 'radio2');
+
+    assert.strictEqual(r1.silence_hours, 1);
+    assert.strictEqual(r1.gap_seconds_total, 90);
+    assert.strictEqual(r2.silence_hours, 0);
+    assert.strictEqual(r2.gap_seconds_total, 0);
+
+    assert.strictEqual(overall.silence_hours, 1);
+    assert.strictEqual(overall.gap_seconds_total, 90);
 });
 
 test('parseRecordingFilename handles primary, .partN, and non-matches and returns ext', () => {

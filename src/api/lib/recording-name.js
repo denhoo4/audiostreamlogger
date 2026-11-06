@@ -1,11 +1,15 @@
 /**
  * Pure parser for recorded-audio filenames (no fs, no DB) — FEAT-001.
  *
- * The recorder's single source of truth for the on-disk name is
- * src/recorder/backoff-helpers.js::segmentOutputName:
- *   primary (attempt 0):      `<folder>-YYYY-MM-DD-HH.<ext>`
- *   mid-hour restart (>=1):   `<folder>-YYYY-MM-DD-HH.part<n+1>.<ext>`  (.part2 == attempt 1)
- * where `<ext>` is one of the allowlisted codecs (mp3/opus/aac/flac).
+ * The recorder's on-disk primary name is `<folder>-YYYY-MM-DD-HH.<ext>` where
+ * `<ext>` is one of the allowlisted codecs (mp3/opus/aac/flac).
+ *
+ * FEAT-004: capture NO LONGER writes `.partN` files — the recorder finalises the
+ * hidden `.inprogress/<stamp>/` fragments into a single `<folder>-<stamp>.<ext>`.
+ * The optional `.part<N>` branch below is kept purely for READ back-compat so
+ * legacy multi-part hours still on disk keep parsing (retention ages them out).
+ * The legacy mid-hour name was `<folder>-YYYY-MM-DD-HH.part<n+1>.<ext>`
+ * (.part2 == attempt 1).
  *
  * parseRecordingFilename(name) returns
  *   { folder, date ('YYYY-MM-DD'), hour ('HH'), part, ext } | null

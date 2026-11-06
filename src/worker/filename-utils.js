@@ -13,6 +13,12 @@ function extractFileDateTime(filename) {
 // is non-greedy up to the trailing date so folders may contain hyphens. Mirrors
 // src/api/lib/recording-name.js and the recorder's segmentOutputName source of
 // truth (.part2 == attempt 1).
+//
+// FEAT-004: capture NO LONGER writes `.partN` files (the recorder finalises
+// fragments from the hidden `.inprogress/<stamp>/` work dir into a single
+// `<folder>-<stamp>.<ext>`). The optional `.part<N>` branch is kept purely for
+// READ back-compat so legacy multi-part hours still on disk keep parsing and
+// fold into their one hour slot; retention ages those legacy files out.
 const RECORDING_PARTS_RE =
     /-(\d{4}-\d{2}-\d{2}-\d{2})(?:\.part(\d+))?\.(mp3|opus|flac|aac)$/;
 

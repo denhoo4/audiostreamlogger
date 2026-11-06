@@ -24,6 +24,16 @@ const { AUDIO_DIR } = require('./paths');
 
 const DEFAULT_RETENTION_HOURS = 2;
 
+// The recorder's hidden per-hour work dir name (mirrors
+// src/recorder/inprogress.js INPROGRESS_DIR). The cleaner never descends into it
+// for file retention, but it DOES age out orphaned work dirs (see below).
+const INPROGRESS_DIR = '.inprogress';
+// A never-finalised `.inprogress/<stamp>` dir this many hours past its own hour
+// is orphaned (the recorder crashed mid-hour and never came back to finalise it);
+// the cleaner removes it so it does not linger. Comfortably clear of the current
+// hour + the finalise cron backstop so a still-active hour is never touched.
+const INPROGRESS_ORPHAN_HOURS = 2;
+
 /**
  * Read log_retention from app_config, falling back to 2 if unset. Validates the
  * resolved value and throws on out-of-bounds.
@@ -107,24 +117,109 @@ function removeRecordingRow(db, dir, fileName, log, counters) {
 }
 
 /**
+ * Parse a `YYYY-MM-DD-HH` work-dir stamp into the epoch ms of the START of that
+ * local hour, or null when the name is not a valid stamp. Mirrors the recorder's
+ * local-time hour stamp (time-helpers.currentHourStamp); `new Date(y, m-1, d, h)`
+ * interprets the parts in the host's local time, matching how the stamp was
+ * minted, so no UTC/offset drift creeps into the age comparison.
+ */
+function parseStampStartMs(stamp) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})-(\d{2})$/.exec(String(stamp));
+    if (!m) {
+        return null;
+    }
+    const [, y, mo, d, h] = m.map(Number);
+    const dt = new Date(y, mo - 1, d, h, 0, 0, 0);
+    return Number.isNaN(dt.getTime()) ? null : dt.getTime();
+}
+
+/**
+ * Age out orphaned recorder work dirs: for each stream folder, remove any
+ * `audio/<folder>/.inprogress/<stamp>` whose hour is more than
+ * INPROGRESS_ORPHAN_HOURS past "now" (a never-finalised dir left by a crash/
+ * update mid-hour). A recent/current dir is LEFT UNTOUCHED (finalise owns its
+ * in-flight fragments). Per-dir failure is logged + counted, never fatal; an
+ * unreadable `.inprogress` parent is skipped. The file-retention pass never
+ * descends into `.inprogress` (dotfile), so this is the ONLY cleaner path that
+ * touches it.
+ */
+function removeOrphanInprogressDirs(audioDir, log, counters, nowMs) {
+    const cutoffMs = nowMs - INPROGRESS_ORPHAN_HOURS * 60 * 60 * 1000;
+    let folders;
+    try {
+        folders = fs.readdirSync(audioDir, { withFileTypes: true });
+    } catch (err) {
+        log.push(`Error reading audio dir ${audioDir} for .inprogress cleanup: ${err.message}`);
+        return;
+    }
+    for (const folder of folders) {
+        if (!folder.isDirectory() || isIgnoredEntry(folder.name)) {
+            continue;
+        }
+        const inprogressBase = path.join(audioDir, folder.name, INPROGRESS_DIR);
+        let stamps;
+        try {
+            if (!fs.existsSync(inprogressBase)) {
+                continue;
+            }
+            stamps = fs.readdirSync(inprogressBase, { withFileTypes: true });
+        } catch (err) {
+            log.push(`Error reading ${inprogressBase}: ${err.message}`);
+            counters.inprogressErrors += 1;
+            continue;
+        }
+        for (const stampEntry of stamps) {
+            if (!stampEntry.isDirectory()) {
+                continue;
+            }
+            const startMs = parseStampStartMs(stampEntry.name);
+            // Unparseable name -> leave it alone (don't guess); a dir whose hour
+            // start is still within the orphan window stays (may finalise soon).
+            if (startMs === null || startMs > cutoffMs) {
+                continue;
+            }
+            const dir = path.join(inprogressBase, stampEntry.name);
+            try {
+                fs.rmSync(dir, { recursive: true, force: true });
+                log.push(`Removing orphaned work dir: ${dir}`);
+                counters.inprogressRemoved += 1;
+            } catch (err) {
+                log.push(`Error removing orphaned work dir ${dir}: ${err.message}`);
+                counters.inprogressErrors += 1;
+            }
+        }
+    }
+}
+
+/**
  * Run the cleaner once. Returns a summary string on success; throws on an
  * out-of-bounds retention value or a top-level unreadable audio dir (-> failed).
  */
 function runCleaner(db) {
     const log = [];
     const hours = resolveRetentionHours(db);
+    const now = Date.now();
     // Recompute the threshold on every run so the cutoff stays relative to "now".
-    const thresholdTime = new Date(Date.now() - hours * 60 * 60 * 1000);
+    const thresholdTime = new Date(now - hours * 60 * 60 * 1000);
     log.push(
         `Cleaner run at ${new Date().toISOString()}: deleting files older than ${hours} hour(s) under ${AUDIO_DIR}.`
     );
 
-    const counters = { deleted: 0, errors: 0, rowsRemoved: 0, rowErrors: 0 };
+    const counters = {
+        deleted: 0,
+        errors: 0,
+        rowsRemoved: 0,
+        rowErrors: 0,
+        inprogressRemoved: 0,
+        inprogressErrors: 0,
+    };
     // A top-level unreadable audio dir throws -> the job fails.
     deleteOldFiles(db, AUDIO_DIR, thresholdTime, log, counters);
+    // Age out never-finalised recorder work dirs (FEAT-004). Non-fatal.
+    removeOrphanInprogressDirs(AUDIO_DIR, log, counters, now);
 
     log.push(
-        `Cleaner done: ${counters.deleted} file(s) deleted, ${counters.errors} per-file error(s); ${counters.rowsRemoved} recordings row(s) removed, ${counters.rowErrors} row error(s).`
+        `Cleaner done: ${counters.deleted} file(s) deleted, ${counters.errors} per-file error(s); ${counters.rowsRemoved} recordings row(s) removed, ${counters.rowErrors} row error(s); ${counters.inprogressRemoved} orphaned work dir(s) removed, ${counters.inprogressErrors} work-dir error(s).`
     );
     return log.join('\n');
 }

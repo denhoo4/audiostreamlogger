@@ -140,14 +140,17 @@ test('peakfilegenerator generates the <base>.json for a flac file (no .flac in t
     assert.strictEqual(row.duration_seconds, 1800);
 });
 
-test('peakfilegenerator folds a .partN segment into a partial row', () => {
+test('peakfilegenerator folds a legacy .partN segment into a complete row', () => {
+    // FEAT-004: a legacy .partN file still parses (READ) and folds to a single
+    // 'complete' hour via upsertRecordingMeta — the mid-hour 'partial' status was
+    // retired. segment_count still reflects the folded part count.
     writeMp3(`radio1-${PAST_STAMP}.part2.mp3`);
 
     peak.runPeakfileGenerator(db);
 
     const row = getRow('00');
     assert.ok(row);
-    assert.strictEqual(row.status, 'partial');
+    assert.strictEqual(row.status, 'complete');
     assert.strictEqual(row.segment_count, 2);
 });
 
