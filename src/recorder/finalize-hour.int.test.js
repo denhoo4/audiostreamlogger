@@ -63,6 +63,63 @@ function makeFragment(dir, name, ext, seconds) {
     return out;
 }
 
+// Create a raw-ADTS AAC fragment carrying a NON-ZERO / drifting start PTS — the
+// pathological shape FEAT-003 guards against. A live AAC stream can hand the
+// recorder a source whose first demuxed packet sits far from 0; copying such a
+// source onto a `-t` window without re-anchoring the timestamps can yield a
+// short/overlong (or even empty) hour. We fabricate the drift by encoding the
+// tone into an mpegts carrier with `-output_ts_offset` (mpegts persists packet
+// timestamps, unlike raw ADTS) and then remuxing that carrier back out to raw
+// ADTS, so the resulting .aac fragment demuxes with a non-zero start PTS. The
+// recorder's copy-remux path (`-fflags +genpts -c copy -t <hour>`) must still
+// land the output exactly on the hour boundary.
+function makeDriftingAacFragment(dir, name, seconds, offsetSeconds) {
+    const carrier = path.join(dir, `${name}.carrier.ts`);
+    const out = path.join(dir, name);
+    const mk = spawnSync(
+        'ffmpeg',
+        [
+            '-y',
+            '-f', 'lavfi',
+            '-t', String(seconds),
+            '-i', 'sine=frequency=440:sample_rate=44100',
+            '-ac', '2',
+            '-c:a', 'aac', '-b:a', '192k', '-ar', '44100',
+            '-output_ts_offset', String(offsetSeconds),
+            '-f', 'mpegts', carrier,
+        ],
+        { stdio: 'ignore' },
+    );
+    assert.strictEqual(mk.status, 0, `failed to generate drifting carrier for ${name}`);
+    // Remux the drifting carrier to raw ADTS without touching the samples.
+    const remux = spawnSync(
+        'ffmpeg',
+        ['-y', '-i', carrier, '-c', 'copy', '-f', 'adts', out],
+        { stdio: 'ignore' },
+    );
+    assert.strictEqual(remux.status, 0, `failed to remux drifting fragment ${name}`);
+    return out;
+}
+
+// Probe a stream's codec name and sample rate (used to assert the copy path did
+// NOT re-encode or resample).
+function probeStream(file) {
+    const r = spawnSync(
+        'ffprobe',
+        [
+            '-v', 'error',
+            '-select_streams', 'a:0',
+            '-show_entries', 'stream=codec_name,sample_rate',
+            '-of', 'default=nk=1:noprint_wrappers=1',
+            file,
+        ],
+        { encoding: 'utf8' },
+    );
+    assert.strictEqual(r.status, 0, `ffprobe (stream) failed for ${file}`);
+    const [codec_name, sample_rate] = r.stdout.trim().split('\n');
+    return { codec_name, sample_rate: parseInt(sample_rate, 10) };
+}
+
 // Measure the exact played-out duration of a file. A raw ADTS (.aac) stream has
 // NO container duration, so ffprobe's `format=duration` is a bitrate GUESS that
 // is wildly wrong for loud test tones; we instead count decoded AAC frames
@@ -156,5 +213,54 @@ test('finalizeHour: AAC no-gap copy-remux trims a single fragment onto the targe
         assert.strictEqual(res.mode, 'copy-remux');
         const dur = probeDuration(out);
         assert.ok(Math.abs(dur - 4) <= TOLERANCE, `aac copy-remux duration ${dur} != 4`);
+    });
+});
+
+// --- FEAT-003: AAC hour exactness under a drifting source PTS ---------------
+// Raw ADTS has no container duration and a live AAC source can present a
+// non-zero/drifting start PTS. Copying such a source onto the hour boundary
+// without re-anchoring timestamps is the reported cause of short/overlong AAC
+// hours. These cases fabricate a drifting-PTS ADTS source and prove BOTH AAC
+// finalise paths still produce an exact hour (3600 +/- one AAC frame).
+
+test('finalizeHour: AAC drifting-PTS no-gap copy-remux still lands exactly on the hour (stays a copy)', { skip: !FFMPEG_OK }, async () => {
+    await withTempDir(async (dir) => {
+        // A single unbroken copy-eligible fragment with a large start-PTS drift.
+        // Slightly longer than the target so the copy path TRIMS to the hour.
+        const frag = makeDriftingAacFragment(dir, 'frag.aac', 6, 95443);
+        const segments = [{ kind: 'fragment', durationSeconds: 6, file: frag }];
+        const out = path.join(dir, 'hour.aac');
+        const enc = resolveEncoding({ codec: 'aac', bitrate_kbps: 192 });
+        const res = await finalizeHour(dir, out, enc, { segments, hourSeconds: 4 });
+        // The no-gap single-fragment shape must route through copy-remux: no
+        // re-encode, no resample.
+        assert.strictEqual(res.mode, 'copy-remux');
+        const dur = probeDuration(out);
+        assert.ok(Math.abs(dur - 4) <= TOLERANCE, `aac drifting copy-remux duration ${dur} != 4`);
+        // Prove it stayed a stream copy: same codec, same sample rate (no resample).
+        const { codec_name, sample_rate } = probeStream(out);
+        assert.strictEqual(codec_name, 'aac', `copy-remux output codec ${codec_name} != aac`);
+        assert.strictEqual(sample_rate, 44100, `copy-remux output sample rate ${sample_rate} != 44100`);
+    });
+});
+
+test('finalizeHour: AAC drifting-PTS WITH a gap transcodes via concat to an exact 3600s hour', { skip: !FFMPEG_OK }, async () => {
+    await withTempDir(async (dir) => {
+        // Drifting fragments plus an interior gap -> the timeline carries silence,
+        // forcing the concat/re-encode path (copy cannot bridge a gap).
+        const a = makeDriftingAacFragment(dir, 'a.aac', 3, 95443);
+        const b = makeDriftingAacFragment(dir, 'b.aac', 3, 48211);
+        const segments = [
+            { kind: 'fragment', durationSeconds: 3, file: a },
+            { kind: 'silence', durationSeconds: 20 },
+            { kind: 'fragment', durationSeconds: 3, file: b },
+            { kind: 'silence', durationSeconds: 3574 },
+        ];
+        const out = path.join(dir, 'hour.aac');
+        const enc = resolveEncoding({ codec: 'aac', bitrate_kbps: 192 });
+        const res = await finalizeHour(dir, out, enc, { segments });
+        assert.strictEqual(res.mode, 'concat');
+        const dur = probeDuration(out);
+        assert.ok(Math.abs(dur - 3600) <= TOLERANCE, `aac drifting (gap) hour duration ${dur} != 3600`);
     });
 });

@@ -6,7 +6,7 @@ what was built and why, see [HISTORY.md](HISTORY.md); for how the system fits
 together see [ARCHITECTURE.md](ARCHITECTURE.md); for working style and preferences
 see [HANDOVER.md](HANDOVER.md).
 
-Last updated: 2026-10-23 (recorder-hour-resilience Phases 1+2 / FEAT-002 recorder core landed).
+Last updated: 2026-10-23 (recorder-hour-resilience Phase 3 / FEAT-003 AAC hour exactness landed).
 
 ## Current state
 
@@ -173,7 +173,20 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
         (shipped via Dockerfile.recorder) + pure `elapsedThisHour` (time-helpers)
         + pure `currentHourDecision` (catchup-helpers). `.inprogress` is a
         dotfile excluded from every audio-tree walk (reconcile/peakgen/cleaner/
-        backfill) via a new `isIgnoredEntry`. Still open on this branch: the
+        backfill) via a new `isIgnoredEntry`.
+        Phase 3 (FEAT-003) DONE: AAC hour exactness now flows through that
+        same shared finalise (resolving item 3 below). An AAC hour captured as
+        one unbroken copy-eligible fragment finalises to exactly 3600s via the
+        copy-remux fast path (no re-encode, no resample); any gap routes to the
+        decode->concat-with-silence->re-encode-AAC path and also lands on exactly
+        3600s. A drifting/non-zero source start PTS is re-anchored so the hour is
+        still exactly 3600 +/- one AAC frame. Verified by new drifting-PTS
+        integration cases in `src/recorder/finalize-hour.int.test.js` (run inside
+        the Dockerfile.recorder image; AAC duration measured by frame count, not
+        `format=duration`). No production code change was needed — FEAT-001's
+        `finalizeHour` already selects copy-vs-concat from the timeline shape and
+        FEAT-002 already routes AAC through `finalizeIfNeeded`; FEAT-003 added the
+        regression coverage that proves it. Still open on this branch: the
         gap/completeness flag surfaced to the UI (FEAT-004) and later phases.
 - [ ] **"Move station up" must not cross the country boundary.** In the admin
       streams list, the up/down arrows for a STATION should clamp at the top/bottom
