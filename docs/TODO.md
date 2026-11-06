@@ -6,7 +6,7 @@ what was built and why, see [HISTORY.md](HISTORY.md); for how the system fits
 together see [ARCHITECTURE.md](ARCHITECTURE.md); for working style and preferences
 see [HANDOVER.md](HANDOVER.md).
 
-Last updated: 2026-10-23 (recorder-hour-resilience redesign merged to `main`: one exact-3600s file per hour with silence for gaps, resume-on-restart, AAC exactness, `.partN` retired, additive gap flag, stop_grace_period + documented selective-restart cronjob).
+Last updated: 2026-10-23 (recorder finalise crash-loop hotfix merged to `main`: fail-safe finalise with missing-fragment-as-silence, process-level unhandled-rejection/uncaught-exception guards, stale `.finalize.*` boot sweep, and non-blocking boot resume — on top of the recorder-hour-resilience redesign).
 
 ## Current state
 
@@ -220,7 +220,7 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
         addresses item 1's operational mitigation (reduce reboots + drain before
         restart).
 - [x] **DONE — recorder finalise CRASH-LOOP hotfix (production incident,
-      2026-10-23; branch `recorder-finalise-hotfix`).** After the
+      2026-10-23; branch `recorder-finalise-hotfix`, merged to `main`).** After the
       recorder-hour-resilience redesign went to production the recorder
       crash-looped on boot, leaving a pile of empty `.finalize.*` temp files and
       a leftover `.inprogress` dir, and recorded nothing. Root causes:
