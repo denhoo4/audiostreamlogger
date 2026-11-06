@@ -6,7 +6,7 @@ what was built and why, see [HISTORY.md](HISTORY.md); for how the system fits
 together see [ARCHITECTURE.md](ARCHITECTURE.md); for working style and preferences
 see [HANDOVER.md](HANDOVER.md).
 
-Last updated: 2026-10-23 (recorder-hour-resilience Phase 4 / FEAT-004 gap-flag schema + .partN write-retire + Recordings & Health gaps column landed).
+Last updated: 2026-10-23 (recorder-hour-resilience Phase 5 / FEAT-005 deploy restart-minimisation: recorder stop_grace_period 15s + documented selective-restart cronjob snippet in HANDOVER.md).
 
 ## Current state
 
@@ -203,6 +203,22 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
         carries `silence_hours` + `gap_seconds_total` and the frontend shows a
         `Gaps` column. This resolves item 2 (single file, no `.partN`) and
         item 4 (one-file-per-hour invariant across the consumers) above.
+        Phase 5 (FEAT-005) DONE: deploy restart-minimisation (ops/docs only, no
+        app code). `docker-compose.yml` gives the recorder service
+        `stop_grace_period: 15s` so Docker waits past recorder.js's 8s SIGTERM
+        grace and ffmpeg closes its `.inprogress` fragments cleanly before
+        SIGKILL on a `docker compose up -d` recreate. `docs/HANDOVER.md` now
+        documents the selective-restart cronjob snippet: it diffs the pulled
+        range (`HEAD@{1}..HEAD`), builds a per-service list by grepping
+        `^src/recorder/|^Dockerfile.recorder` -> recorder (and the api/worker/
+        frontend equivalents), and only `docker compose up -d --build $svc` for
+        the changed services — so a frontend/api/worker-only deploy never touches
+        the recorder, and when the recorder does bounce, stop_grace_period + the
+        boot resume pass means a recreate loses only the brief down-window
+        (filled with silence), not the hour. The snippet lives in the user's
+        crontab (outside the repo) and is not applied automatically. This
+        addresses item 1's operational mitigation (reduce reboots + drain before
+        restart).
 - [ ] **"Move station up" must not cross the country boundary.** In the admin
       streams list, the up/down arrows for a STATION should clamp at the top/bottom
       position WITHIN its country group (not jump into the adjacent country). The

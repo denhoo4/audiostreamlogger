@@ -4,6 +4,12 @@ services:
       context: .
       dockerfile: Dockerfile.recorder
     restart: unless-stopped
+    # Give the recorder room to shut down cleanly on a `docker compose up -d`
+    # recreate. recorder.js traps SIGTERM and waits up to SHUTDOWN_GRACE_MS=8s
+    # for ffmpeg to close its .inprogress fragments; 15s (> 8s) ensures Docker
+    # does not SIGKILL mid-flush, so the boot resume pass only ever has to fill
+    # the brief down-window with silence rather than recover a truncated hour.
+    stop_grace_period: 15s
     volumes:
       - ./audio:/usr/src/app/audio
       # DELIBERATE OVERRIDE of the :ro requirement (FEAT-002): the recorder now

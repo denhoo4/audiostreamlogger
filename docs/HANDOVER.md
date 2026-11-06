@@ -69,6 +69,46 @@ what is still open, defer to [TODO.md](TODO.md) — don't track it here.
   (`docker compose up -d --build`), not a single service. A stale image once
   rendered an "undefined" Stream Health panel.
 
+## Deploy: selective restart cronjob
+
+The user runs a cronjob (every 10 minutes, **in the user's crontab — outside this
+repo**) that pulls new versions of the logger and recreates the stack. A blind
+`docker compose up -d --build` on every pull recreates **every** service, including
+the recorder, which means each unrelated frontend/api/worker deploy needlessly
+bounces the capture process and punches a hole in the current hour.
+
+To avoid that, the cronjob should only recreate services whose source actually
+changed, and bounce the recorder **only** when recorder source changed. Document
+the snippet below is the one the user keeps in their crontab; it is **not** applied
+automatically by this repo:
+
+```sh
+# Run from the repo checkout after `git pull`. Compare the pulled range
+# (HEAD@{1}..HEAD) and recreate only the services whose source changed.
+changed=$(git diff --name-only 'HEAD@{1}' HEAD)
+
+svc=""
+echo "$changed" | grep -qE '^src/recorder/|^Dockerfile\.recorder' && svc="$svc recorder"
+echo "$changed" | grep -qE '^src/api/|^Dockerfile\.api'           && svc="$svc api"
+echo "$changed" | grep -qE '^src/worker/|^Dockerfile\.worker'     && svc="$svc worker"
+echo "$changed" | grep -qE '^src/frontend/|^Dockerfile\.frontend' && svc="$svc frontend"
+
+# Trim and only recreate if something actually changed.
+svc=$(echo "$svc" | xargs)
+[ -n "$svc" ] && docker compose up -d --build $svc
+```
+
+Why this matters:
+
+- A **frontend/api/worker-only deploy never touches the recorder** — the capture
+  process keeps running across the deploy, so no hour is interrupted.
+- When the recorder *does* have to be recreated, `stop_grace_period: 15s` (above)
+  plus the boot resume pass means a recreate loses only the **brief down-window**
+  (which the resume pass fills with silence), not the whole hour — you still get one
+  60-minute file with a short silent gap rather than a truncated or split recording.
+- Keep this snippet in the crontab, not in the repo. The repo documents the intent;
+  the host owns the schedule.
+
 ## Notifications
 
 The user is kept in the loop via a **Telegram bot** (token + chat id live in `.env`,
