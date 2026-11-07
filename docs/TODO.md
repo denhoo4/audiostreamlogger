@@ -6,7 +6,7 @@ what was built and why, see [HISTORY.md](HISTORY.md); for how the system fits
 together see [ARCHITECTURE.md](ARCHITECTURE.md); for working style and preferences
 see [HANDOVER.md](HANDOVER.md).
 
-Last updated: 2026-10-23 (branch `aac-duration-live-hour` DONE + review APPROVED, not yet merged/pushed: FEAT-001 fixes the AAC finalised-hour duration regression — worker measures AAC length by frame count, the player forces a full-hour scrubber for past `.aac`, plus a one-off backfill for existing wrong rows; FEAT-002 fixes the unplayable current/in-progress hour — the recorder writes a non-canonical, elapsed-length live preview to `audio/<folder>/.live/<stamp>.<ext>` every ~2.5 min, the api browse surfaces that hour, the cleaner ages stale previews out, and the player's live branch loads the preview via `liveAudioUrl()`; the canonical one-3600s-primary finalise is untouched; on top of the recorder finalise crash-loop hotfix and the recorder-hour-resilience redesign).
+Last updated: 2026-10-23 (merged to `main`: FEAT-001 fixes the AAC finalised-hour duration regression — worker measures AAC length by frame count, the player forces a full-hour scrubber for past `.aac`, plus a one-off backfill for existing wrong rows; FEAT-002 fixes the unplayable current/in-progress hour — the recorder writes a non-canonical, elapsed-length live preview to `audio/<folder>/.live/<stamp>.<ext>` every ~2.5 min, the api browse surfaces that hour, the cleaner ages stale previews out, and the player's live branch loads the preview via `liveAudioUrl()`; the canonical one-3600s-primary finalise is untouched. REMAINING MANUAL STEP: run the one-off AAC duration backfill once from inside a worker container with the real ./data + ./audio mounts — `node handlers/aac-duration-backfill.js` — to correct existing `.aac` rows with wrong historical durations).
 
 ## Current state
 
@@ -108,6 +108,31 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
 ## New backlog (user, 2026-10-23) — grouped by theme
 
 ### Bugs / correctness (fix first)
+- [ ] **Two regressions from the recorder-hour-resilience redesign (design done,
+      2026-10-23; `main` @ ed8abd6).** Investigated read-only; one design proposal
+      covers both: `.agents/tasks/aac-duration-and-live-hour-design.md`.
+      (1) **AAC hours report 1000+ minutes.** The finalised `.aac` audio is really
+          ~3600 s, but raw ADTS has no container duration, so both the worker's
+          `ffprobe format=duration` (`probeDurationSeconds`,
+          `src/worker/handlers/peakfilegenerator.js:63`) and the browser's
+          WaveSurfer decode (past-hour `ws.load(url, peaks)` with no explicit
+          duration, `src/frontend/src/App.tsx`) estimate it ~16x too long (same
+          ratio as Firefox bug 2001908 for 44.1 kHz AAC). Metadata-only bug.
+          Fix: measure AAC duration by frame count / decode (not
+          `format=duration`); pass an explicit 3600 s duration to `ws.load` for
+          past `.aac` hours. mp3/opus/flac unaffected (real container/stream
+          duration). Optional backfill of the bad historical `duration_seconds`.
+      (2) **Current (in-progress) hour not playable.** The live hour now exists
+          only as hidden `.inprogress/<stamp>/` fragments; the primary
+          `<folder>-<stamp>.<ext>` appears only at finalise (top of next hour), so
+          the browse tree (`folderContent` regex in `src/api/services/browse.js`)
+          never lists it and the live URL 404s. Recommended fix (Option A): a
+          periodic partial finalise writing a non-canonical `.live/<stamp>` preview
+          (reusing `buildTimeline`/`finalizeHour`), served via `/audio/`, with the
+          player's existing live branch + `liveHourElapsedSeconds()` duration;
+          canonical hour-boundary finalise and all firm invariants untouched. Open
+          sub-decisions (cadence, preview length, recorder-vs-worker, live lag
+          acceptability) listed in the design doc.
 - [x] **DONE — "Hour completeness & recorder-lifecycle resilience" — one
       coordinated design for ALL the partial/half-hour edge cases (user, 2026-10-23).**
       The user wants every "an hour isn't a full hour" cause designed together, once,
