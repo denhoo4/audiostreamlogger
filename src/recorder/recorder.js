@@ -18,6 +18,9 @@ const {
     readState,
     writeState,
 } = require('./inprogress');
+const { buildTimeline } = require('./finalize-timeline');
+const { finalizeHour } = require('./finalize-hour');
+const { writeLivePreview } = require('./live-preview');
 
 // Last-resort process-level safety net (hotfix RC1b). The real fix for the
 // crash-loop is the fail-safe finalise call sites + handled mutex cleanup, but
@@ -763,6 +766,10 @@ function shutdown(signal) {
         clearInterval(newStreamPollTimer);
         newStreamPollTimer = null;
     }
+    if (livePreviewTimer) {
+        clearInterval(livePreviewTimer);
+        livePreviewTimer = null;
+    }
 
     // Finalize each in-progress recording. SIGTERM lets ffmpeg close the mp3
     // container cleanly; marking intentionalStop prevents the supervisor from
@@ -978,5 +985,69 @@ function scheduleNewStreamPoll() {
     newStreamPollTimer.unref();
 }
 scheduleNewStreamPoll();
+
+// --- Periodic live-preview tick (FEAT-002, Regression 2) --------------------
+// The canonical primary <folder>-<stamp>.<ext> is written only once, at the
+// hour boundary, so the CURRENT hour was unplayable mid-hour. This low-frequency
+// tick writes a NON-CANONICAL, ELAPSED-length preview of the current hour to
+// audio/<folder>/.live/<stamp>.<ext> (distinct name, hidden dotfile dir) by
+// reusing buildTimeline + finalizeHour via writeLivePreview. It reads ONLY the
+// current hour's .inprogress/<currentHourStamp()>/state.json sidecar — a stream
+// with no sidecar yet is a no-op. It NEVER writes the canonical primary and
+// NEVER touches finalizeIfNeeded/finalizePastHours, so the one-3600s-primary
+// invariant and its idempotency guard are unchanged. Each stream is isolated in
+// its own try/catch and writeLivePreview is itself best-effort (logs + swallows
+// every error). Mirrors the new-stream poll's schedule/clear/.unref() pattern.
+const LIVE_PREVIEW_MS = 150000; // refresh the current-hour preview every ~2.5 min
+let livePreviewTimer = null;
+
+function livePreviewTick() {
+    try {
+        const streams = readStreams();
+        const stamp = currentHourStamp();
+        for (const item of Array.isArray(streams) ? streams : []) {
+            try {
+                const folder = item && item.folder;
+                if (!folder) {
+                    continue;
+                }
+                // Only preview a stream that has a current-hour work dir; skip
+                // the finalizeHour/ffmpeg cost when nothing is captured yet.
+                const workDir = inprogressDir(AUDIO_BASE, folder, stamp);
+                if (!fs.existsSync(workDir)) {
+                    continue;
+                }
+                const enc = resolveEncoding(item);
+                writeLivePreview(AUDIO_BASE, folder, stamp, enc, {
+                    fs,
+                    log,
+                    readState,
+                    buildTimeline,
+                    finalizeHour,
+                }).catch((err) => {
+                    // writeLivePreview already swallows its own errors; this is a
+                    // belt-and-braces guard so a rejected promise can never
+                    // surface as an unhandled rejection.
+                    log.error(`recorder: live preview for ${folder} ${stamp} rejected:`, err && err.message);
+                });
+            } catch (err) {
+                // One stream's preview failure never aborts the others.
+                log.error('recorder: live preview tick per-stream error:', err && err.message);
+            }
+        }
+    } catch (err) {
+        // Failure-isolated: log and let the next tick retry.
+        log.error('recorder: live preview tick failed, will retry next tick:', err);
+    }
+}
+
+function scheduleLivePreview() {
+    if (shuttingDown) {
+        return;
+    }
+    livePreviewTimer = setInterval(livePreviewTick, LIVE_PREVIEW_MS);
+    livePreviewTimer.unref();
+}
+scheduleLivePreview();
 
 log.info(`Recorder is OK! The recorder process will run every hour at xx:`+currentMinute.toString().padStart(2, '0')+`.`);

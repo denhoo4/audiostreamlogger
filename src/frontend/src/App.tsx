@@ -29,6 +29,7 @@ import {
   getSettings,
   getSettings2,
   isLiveHour,
+  liveAudioUrl,
   liveHourElapsedSeconds,
   SECONDS_PER_HOUR,
   type Codec,
@@ -338,9 +339,12 @@ export default function App() {
       const live = isLiveHour(currentAmsterdamSlot(), sel);
 
       if (live) {
-        // Always cache-bust the live hour so pressing Load (or a poll tick)
-        // refetches the grown mp3 instead of a stale cached copy.
-        const mediaUrl = audioUrl(folder, year, month, day, h, ext, Date.now());
+        // The canonical primary <folder>-<stamp>.<ext> does not exist yet for
+        // the current hour (finalise writes it only at the hour boundary), so
+        // point at the recorder's non-canonical live PREVIEW in .live/ instead
+        // (FEAT-002). Always cache-bust it so pressing Load (or a poll tick)
+        // refetches the grown preview instead of a stale cached copy.
+        const mediaUrl = liveAudioUrl(folder, year, month, day, h, ext, Date.now());
         // The current hour's headerless, still-growing mp3 has no reliable
         // media duration (Infinity/unknown on mobile), so skip/seek are dropped
         // there. Supply an EXPLICIT client-derived duration — seconds elapsed

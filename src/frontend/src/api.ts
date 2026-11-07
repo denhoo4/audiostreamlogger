@@ -422,6 +422,28 @@ export function audioUrl(
 }
 
 /**
+ * URL of the CURRENT hour's live preview for a given folder + date/hour
+ * (FEAT-002). The recorder writes a non-canonical, elapsed-length preview to the
+ * hidden `audio/<folder>/.live/<stamp>.<ext>` path on a ~2.5 min cadence; the
+ * live branch loads this instead of the canonical `<folder>-<stamp>.<ext>`,
+ * which only exists after the hour boundary. Same shape/cache-bust contract as
+ * audioUrl: a `?t=<cacheBust>` is appended when provided so a grown preview is
+ * not served stale. nginx serves the dotfile path as-is (location /audio/).
+ */
+export function liveAudioUrl(
+  folder: string,
+  year: string,
+  month: string,
+  day: string,
+  hour: string,
+  ext: string,
+  cacheBust?: number,
+): string {
+  const base = `${window.location.origin}/audio/${folder}/.live/${year}-${month}-${day}-${hour}.${ext}`;
+  return cacheBust === undefined ? base : `${base}?t=${cacheBust}`;
+}
+
+/**
  * URL of the precomputed peaks JSON for a given folder + date/hour. Only PAST
  * hours have a stable peaks file; the current Amsterdam hour is decoded
  * client-side from the growing mp3 instead. When `cacheBust` is provided a

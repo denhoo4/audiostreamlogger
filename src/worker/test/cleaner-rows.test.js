@@ -210,3 +210,68 @@ test('cleaner leaves a recent .inprogress work dir inside the orphan window', ()
 
     fs.rmSync(path.join(audioDir, 'radio1', '.inprogress'), { recursive: true, force: true });
 });
+
+// --- .live preview age-out (FEAT-002) ---------------------------------------
+
+test('the file-retention pass never descends into the .live preview dir', () => {
+    // The current hour's preview is a dotfile dir, so the mtime-based retention
+    // pass must not reach it even with an ancient mtime. Only the dedicated
+    // age-out (below) may ever remove a preview.
+    const liveDir = path.join(audioDir, 'radio1', '.live');
+    fs.mkdirSync(liveDir, { recursive: true });
+    const preview = path.join(liveDir, `${stampHoursAgo(0)}.mp3`);
+    fs.writeFileSync(preview, 'fresh-preview');
+    fs.utimesSync(preview, OLD_MTIME, OLD_MTIME);
+
+    const summary = cleaner.runCleaner(db);
+
+    assert.strictEqual(fs.existsSync(preview), true, 'current-hour preview left in place');
+    assert.match(summary, /0 stale live preview\(s\) removed/);
+
+    fs.rmSync(liveDir, { recursive: true, force: true });
+});
+
+test('cleaner ages out a stale (past-hour) .live preview', () => {
+    const liveDir = path.join(audioDir, 'radio1', '.live');
+    fs.mkdirSync(liveDir, { recursive: true });
+    // Well past the 2h orphan window -> removed (the hour has rolled over and
+    // the canonical primary has long been written).
+    const stale = path.join(liveDir, `${stampHoursAgo(5)}.aac`);
+    fs.writeFileSync(stale, 'stale-preview');
+
+    const summary = cleaner.runCleaner(db);
+
+    assert.strictEqual(fs.existsSync(stale), false, 'stale preview removed');
+    assert.match(summary, /1 stale live preview\(s\) removed/);
+
+    fs.rmSync(liveDir, { recursive: true, force: true });
+});
+
+test('cleaner leaves a recent .live preview inside the orphan window', () => {
+    const liveDir = path.join(audioDir, 'radio1', '.live');
+    fs.mkdirSync(liveDir, { recursive: true });
+    // One hour ago: still being referenced / inside the window -> kept.
+    const recent = path.join(liveDir, `${stampHoursAgo(1)}.mp3`);
+    fs.writeFileSync(recent, 'recent-preview');
+
+    const summary = cleaner.runCleaner(db);
+
+    assert.strictEqual(fs.existsSync(recent), true, 'recent preview left in place');
+    assert.match(summary, /0 stale live preview\(s\) removed/);
+
+    fs.rmSync(liveDir, { recursive: true, force: true });
+});
+
+test('cleaner leaves a non-stamp .live entry alone (no guessing)', () => {
+    const liveDir = path.join(audioDir, 'radio1', '.live');
+    fs.mkdirSync(liveDir, { recursive: true });
+    const odd = path.join(liveDir, 'not-a-stamp.mp3');
+    fs.writeFileSync(odd, 'x');
+
+    const summary = cleaner.runCleaner(db);
+
+    assert.strictEqual(fs.existsSync(odd), true, 'non-stamp preview name left in place');
+    assert.match(summary, /0 stale live preview\(s\) removed/);
+
+    fs.rmSync(liveDir, { recursive: true, force: true });
+});

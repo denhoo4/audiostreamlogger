@@ -6,7 +6,7 @@ what was built and why, see [HISTORY.md](HISTORY.md); for how the system fits
 together see [ARCHITECTURE.md](ARCHITECTURE.md); for working style and preferences
 see [HANDOVER.md](HANDOVER.md).
 
-Last updated: 2026-10-23 (in-progress branch `aac-duration-live-hour`: FEAT-001 fixes the AAC finalised-hour duration regression — worker measures AAC length by frame count, the player forces a full-hour scrubber for past `.aac`, plus a one-off backfill for existing wrong rows; on top of the recorder finalise crash-loop hotfix and the recorder-hour-resilience redesign).
+Last updated: 2026-10-23 (in-progress branch `aac-duration-live-hour`: FEAT-001 fixes the AAC finalised-hour duration regression — worker measures AAC length by frame count, the player forces a full-hour scrubber for past `.aac`, plus a one-off backfill for existing wrong rows; FEAT-002 fixes the unplayable current/in-progress hour — the recorder writes a non-canonical, elapsed-length live preview to `audio/<folder>/.live/<stamp>.<ext>` every ~2.5 min, the api browse surfaces that hour, the cleaner ages stale previews out, and the player's live branch loads the preview via `liveAudioUrl()`; the canonical one-3600s-primary finalise is untouched; on top of the recorder finalise crash-loop hotfix and the recorder-hour-resilience redesign).
 
 ## Current state
 
@@ -285,6 +285,27 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
       inside docker: worker `node --test` 82/82, frontend build + 152/152 vitest,
       an ffmpeg frame-count smoke within 1s of a synthesized 83s AAC, and
       worker/frontend image builds with the worker booting with no MODULE_NOT_FOUND.
+      FEAT-002 (DONE on the branch, NOT yet merged) fixes the "can't play the
+      current (live) hour" half via design Option A — a recorder-side periodic
+      PARTIAL finalise: every ~2.5 min (`LIVE_PREVIEW_MS`) the recorder lays the
+      current hour's captured `.inprogress` fragments on an ELAPSED-length timeline
+      (`buildTimeline` + `finalizeHour` with `hourSeconds=elapsedThisHour()`, NOT a
+      3600s pad) and writes a NON-canonical preview to
+      `audio/<folder>/.live/<stamp>.<ext>` (new `src/recorder/live-preview.js`,
+      added to `Dockerfile.recorder`'s per-file COPY list). The api browse scan
+      surfaces the current hour from that preview, the frontend live branch loads
+      it via a new `liveAudioUrl()` (keeping the client-derived
+      `liveHourElapsedSeconds` duration, `Date.now()` cache-bust and `LIVE_POLL_MS`
+      refresh), and the cleaner ages stale past-hour previews out of `.live`. The
+      canonical hour-boundary finalise (`finalizeIfNeeded`, the
+      `fs.existsSync(primaryPath)` guard, exactly one ~3600s primary per
+      (stream,hour)) is UNTOUCHED — the preview's distinct `<stamp>.<ext>` name can
+      never satisfy that guard. Verified inside docker: recorder `node --test`
+      153/8-skipped, worker 86/86, api 296/296, frontend build + 154/154 vitest,
+      all four real images build, the recorder image boots logging "Recorder is
+      OK!" with no MODULE_NOT_FOUND (proving the new COPY line), and a coexistence
+      smoke in the recorder image produced a ~1500s `.live` preview and exactly one
+      ~3600s canonical primary with distinct names side by side.
 - [ ] **"Move station up" must not cross the country boundary.** In the admin
       streams list, the up/down arrows for a STATION should clamp at the top/bottom
       position WITHIN its country group (not jump into the adjacent country). The

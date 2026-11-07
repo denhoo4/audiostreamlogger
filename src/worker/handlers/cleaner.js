@@ -28,6 +28,12 @@ const DEFAULT_RETENTION_HOURS = 2;
 // src/recorder/inprogress.js INPROGRESS_DIR). The cleaner never descends into it
 // for file retention, but it DOES age out orphaned work dirs (see below).
 const INPROGRESS_DIR = '.inprogress';
+// The recorder's hidden per-stream live-preview dir name (mirrors
+// src/recorder/live-preview.js LIVE_DIR). It holds a single non-canonical
+// elapsed-length preview per current hour, `.live/<stamp>.<ext>`. deleteOldFiles
+// never descends into it (dotfile), so the cleaner's ONLY touch of it is the
+// stale-preview age-out below.
+const LIVE_DIR = '.live';
 // A never-finalised `.inprogress/<stamp>` dir this many hours past its own hour
 // is orphaned (the recorder crashed mid-hour and never came back to finalise it);
 // the cleaner removes it so it does not linger. Comfortably clear of the current
@@ -192,6 +198,73 @@ function removeOrphanInprogressDirs(audioDir, log, counters, nowMs) {
 }
 
 /**
+ * Age out stale recorder live-preview files (FEAT-002): for each stream folder,
+ * remove any `audio/<folder>/.live/<stamp>.<ext>` whose hour is more than
+ * INPROGRESS_ORPHAN_HOURS past "now" — a preview the recorder stopped refreshing
+ * because the hour rolled over and its canonical primary has long been written.
+ * The CURRENT/recent hour's preview is LEFT UNTOUCHED (the recorder is still
+ * refreshing it and the player loads it). A `.live` filename that is not a
+ * `<stamp>.<ext>` preview is left alone (don't guess). Per-file failure is
+ * logged + counted, never fatal; an unreadable `.live` parent is skipped. The
+ * file-retention pass never descends into `.live` (dotfile), so this is the ONLY
+ * cleaner path that touches it.
+ */
+function removeStaleLiveFiles(audioDir, log, counters, nowMs) {
+    const cutoffMs = nowMs - INPROGRESS_ORPHAN_HOURS * 60 * 60 * 1000;
+    let folders;
+    try {
+        folders = fs.readdirSync(audioDir, { withFileTypes: true });
+    } catch (err) {
+        log.push(`Error reading audio dir ${audioDir} for .live cleanup: ${err.message}`);
+        return;
+    }
+    for (const folder of folders) {
+        if (!folder.isDirectory() || isIgnoredEntry(folder.name)) {
+            continue;
+        }
+        const liveBase = path.join(audioDir, folder.name, LIVE_DIR);
+        let entries;
+        try {
+            if (!fs.existsSync(liveBase)) {
+                continue;
+            }
+            entries = fs.readdirSync(liveBase, { withFileTypes: true });
+        } catch (err) {
+            log.push(`Error reading ${liveBase}: ${err.message}`);
+            counters.liveErrors += 1;
+            continue;
+        }
+        for (const entry of entries) {
+            if (!entry.isFile()) {
+                continue;
+            }
+            // A preview file is `<stamp>.<ext>` (stamp = YYYY-MM-DD-HH). Parse
+            // the stamp portion; anything that is not a stamped preview is left
+            // alone rather than guessed.
+            const m = /^(\d{4}-\d{2}-\d{2}-\d{2})\.(?:mp3|opus|aac|flac)$/.exec(entry.name);
+            if (!m) {
+                continue;
+            }
+            const startMs = parseStampStartMs(m[1]);
+            // Unparseable / still within the orphan window (current or recent
+            // hour, still being refreshed) -> leave it.
+            if (startMs === null || startMs > cutoffMs) {
+                continue;
+            }
+            const filePath = path.join(liveBase, entry.name);
+            try {
+                fs.rmSync(filePath, { force: true });
+                log.push(`Removing stale live preview: ${filePath}`);
+                counters.liveRemoved += 1;
+            } catch (err) {
+                log.push(`Error removing stale live preview ${filePath}: ${err.message}`);
+                counters.liveErrors += 1;
+            }
+        }
+    }
+}
+
+/**
  * Run the cleaner once. Returns a summary string on success; throws on an
  * out-of-bounds retention value or a top-level unreadable audio dir (-> failed).
  */
@@ -212,14 +285,18 @@ function runCleaner(db) {
         rowErrors: 0,
         inprogressRemoved: 0,
         inprogressErrors: 0,
+        liveRemoved: 0,
+        liveErrors: 0,
     };
     // A top-level unreadable audio dir throws -> the job fails.
     deleteOldFiles(db, AUDIO_DIR, thresholdTime, log, counters);
     // Age out never-finalised recorder work dirs (FEAT-004). Non-fatal.
     removeOrphanInprogressDirs(AUDIO_DIR, log, counters, now);
+    // Age out stale recorder live-preview files (FEAT-002). Non-fatal.
+    removeStaleLiveFiles(AUDIO_DIR, log, counters, now);
 
     log.push(
-        `Cleaner done: ${counters.deleted} file(s) deleted, ${counters.errors} per-file error(s); ${counters.rowsRemoved} recordings row(s) removed, ${counters.rowErrors} row error(s); ${counters.inprogressRemoved} orphaned work dir(s) removed, ${counters.inprogressErrors} work-dir error(s).`
+        `Cleaner done: ${counters.deleted} file(s) deleted, ${counters.errors} per-file error(s); ${counters.rowsRemoved} recordings row(s) removed, ${counters.rowErrors} row error(s); ${counters.inprogressRemoved} orphaned work dir(s) removed, ${counters.inprogressErrors} work-dir error(s); ${counters.liveRemoved} stale live preview(s) removed, ${counters.liveErrors} live error(s).`
     );
     return log.join('\n');
 }

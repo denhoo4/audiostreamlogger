@@ -107,6 +107,11 @@ The longer-form docs live in [`docs/`](docs/):
   captures into (offset-named fragments + a `state.json` sidecar); it is finalised
   into the single hour file above and then removed, and is excluded from every
   audio-tree scan. You should never see it for a completed hour.
+- `./audio/<folder>/.live/<stamp>.<ext>` — a hidden, non-canonical preview of the
+  CURRENT hour the recorder refreshes every ~2.5 min so the in-progress hour is
+  playable before its canonical hour file exists. Its name is deliberately distinct
+  from the canonical `<folder>-<stamp>.<ext>`, it never affects the one-hour-file
+  finalise, and the cleaner ages it out once the hour has rolled over.
 - `./data/app.db` — the one SQLite database. Bind-mounted, so it survives rebuilds.
   Only `data/.gitkeep` is tracked in git.
 

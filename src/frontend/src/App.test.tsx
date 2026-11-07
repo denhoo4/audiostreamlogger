@@ -696,13 +696,21 @@ describe("App live-hour auto-refresh", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
-    // The LIVE branch always cache-busts and decodes client-side, so the very
-    // first Load already carries a ?t= and the mp3 is the only thing loaded.
+    // The LIVE branch loads the non-canonical .live/<stamp> PREVIEW (FEAT-002),
+    // always cache-busted and decoded client-side, so the very first Load
+    // already carries a ?t= and the preview is the only thing loaded.
     expect(
       loadedUrls.some((u) =>
-        /\/audio\/live_radio\/live_radio-2026-07-15-10\.mp3\?t=\d+/.test(u),
+        /\/audio\/live_radio\/\.live\/2026-07-15-10\.mp3\?t=\d+/.test(u),
       ),
     ).toBe(true);
+    // The canonical primary <folder>-<stamp>.mp3 is NEVER loaded for the live
+    // hour (it does not exist until the hour boundary).
+    expect(
+      loadedUrls.some((u) =>
+        /\/audio\/live_radio\/live_radio-2026-07-15-10\.mp3/.test(u),
+      ),
+    ).toBe(false);
     // The live hour is decoded from the mp3: the .json peaks file is never
     // fetched.
     expect(
@@ -719,7 +727,7 @@ describe("App live-hour auto-refresh", () => {
     expect(loadedUrls.length).toBeGreaterThan(countBeforeTick);
     expect(
       loadedUrls.every((u) =>
-        /\/audio\/live_radio\/live_radio-2026-07-15-10\.mp3\?t=\d+/.test(u),
+        /\/audio\/live_radio\/\.live\/2026-07-15-10\.mp3\?t=\d+/.test(u),
       ),
     ).toBe(true);
   });
@@ -845,7 +853,7 @@ describe("App live-hour explicit-duration seek (mobile seek fix)", () => {
     // The live hour was loaded WITHOUT peaks but WITH the explicit, clamped,
     // client-derived duration (seconds elapsed since the top of the hour).
     const liveMatches = loadCalls.filter((c) =>
-      /live_radio-2026-07-15-10\.mp3\?t=\d+/.test(c.url),
+      /\/audio\/live_radio\/\.live\/2026-07-15-10\.mp3\?t=\d+/.test(c.url),
     );
     const liveCall = liveMatches[liveMatches.length - 1];
     expect(liveCall).toBeDefined();
@@ -891,7 +899,7 @@ describe("App live-hour explicit-duration seek (mobile seek fix)", () => {
       await vi.advanceTimersByTimeAsync(0);
     });
     const first = loadCalls.find((c) =>
-      /live_radio-2026-07-15-10\.mp3/.test(c.url),
+      /\/audio\/live_radio\/\.live\/2026-07-15-10\.mp3/.test(c.url),
     );
     expect(first!.duration).toBe(1200);
 

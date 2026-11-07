@@ -4,6 +4,7 @@ import {
   audioUrl,
   currentAmsterdamSlot,
   isLiveHour,
+  liveAudioUrl,
   liveHourElapsedSeconds,
 } from "./api";
 
@@ -144,6 +145,25 @@ describe("audioUrl / audioJsonUrl cacheBust", () => {
     );
     expect(bustedJson).toBe(
       `${window.location.origin}/audio/radio/radio-2026-10-23-14.json?t=67890`,
+    );
+  });
+});
+
+describe("liveAudioUrl (FEAT-002)", () => {
+  it("points at the hidden .live/<stamp>.<ext> preview path, DISTINCT from the canonical primary", () => {
+    const plain = liveAudioUrl("radio", "2026", "10", "23", "14", "mp3");
+    expect(plain).toBe(
+      `${window.location.origin}/audio/radio/.live/2026-10-23-14.mp3`,
+    );
+    // The canonical audioUrl is `<folder>-<stamp>`; the live preview is a bare
+    // `<stamp>` under `.live/` — the two must never collide.
+    expect(plain).not.toBe(audioUrl("radio", "2026", "10", "23", "14", "mp3"));
+  });
+
+  it("appends ?t= only when cacheBust is given", () => {
+    const busted = liveAudioUrl("radio", "2026", "10", "23", "14", "aac", 12345);
+    expect(busted).toBe(
+      `${window.location.origin}/audio/radio/.live/2026-10-23-14.aac?t=12345`,
     );
   });
 });
