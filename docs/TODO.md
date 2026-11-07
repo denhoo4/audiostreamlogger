@@ -6,7 +6,7 @@ what was built and why, see [HISTORY.md](HISTORY.md); for how the system fits
 together see [ARCHITECTURE.md](ARCHITECTURE.md); for working style and preferences
 see [HANDOVER.md](HANDOVER.md).
 
-Last updated: 2026-10-23 (in-progress branch `aac-duration-live-hour`: FEAT-001 fixes the AAC finalised-hour duration regression — worker measures AAC length by frame count, the player forces a full-hour scrubber for past `.aac`, plus a one-off backfill for existing wrong rows; FEAT-002 fixes the unplayable current/in-progress hour — the recorder writes a non-canonical, elapsed-length live preview to `audio/<folder>/.live/<stamp>.<ext>` every ~2.5 min, the api browse surfaces that hour, the cleaner ages stale previews out, and the player's live branch loads the preview via `liveAudioUrl()`; the canonical one-3600s-primary finalise is untouched; on top of the recorder finalise crash-loop hotfix and the recorder-hour-resilience redesign).
+Last updated: 2026-10-23 (branch `aac-duration-live-hour` DONE + review APPROVED, not yet merged/pushed: FEAT-001 fixes the AAC finalised-hour duration regression — worker measures AAC length by frame count, the player forces a full-hour scrubber for past `.aac`, plus a one-off backfill for existing wrong rows; FEAT-002 fixes the unplayable current/in-progress hour — the recorder writes a non-canonical, elapsed-length live preview to `audio/<folder>/.live/<stamp>.<ext>` every ~2.5 min, the api browse surfaces that hour, the cleaner ages stale previews out, and the player's live branch loads the preview via `liveAudioUrl()`; the canonical one-3600s-primary finalise is untouched; on top of the recorder finalise crash-loop hotfix and the recorder-hour-resilience redesign).
 
 ## Current state
 
@@ -262,8 +262,11 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
       gaps; `.partN` still read, never written; AAC copy-remux when no gap;
       idempotent finalise). See
       `.agents/tasks/audiostreamlogger-recorder-finalise-hotfix-2026-10-23/verification.md`.
-- [~] **IN PROGRESS — AAC finalised-hour duration reported ~16x too long + can't
-      play the current hour (user, 2026-10-23; branch `aac-duration-live-hour`).**
+- [x] **DONE — AAC finalised-hour duration reported ~16x too long + can't
+      play the current hour (user, 2026-10-23; branch `aac-duration-live-hour`,
+      review APPROVED, NOT yet merged/pushed).** Both regressions resolved on the
+      branch: FEAT-001 fixes the ~16x-too-long AAC duration and FEAT-002 makes the
+      current/in-progress hour playable via the `.live` preview. Details below.
       The user saw every AAC hour report >1000 minutes and could only play PAST
       hours. Root cause for the duration: a raw ADTS `.aac` has no container
       duration, so `ffprobe format=duration` (and the browser's own estimate)
