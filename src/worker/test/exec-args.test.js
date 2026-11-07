@@ -3,6 +3,7 @@ const assert = require('node:assert');
 const {
     audiowaveformArgs,
     ffprobeDurationArgs,
+    ffprobeAacFrameCountArgs,
     ffmpegDecodeToWavArgs,
     audiowaveformStdinArgs,
 } = require('../handlers/exec-args');
@@ -40,6 +41,24 @@ test('ffprobeDurationArgs returns the exact argv ending in the raw path', () => 
         '/a/in file.mp3',
     ]);
     assert.strictEqual(args[args.length - 1], '/a/in file.mp3');
+});
+
+test('ffprobeAacFrameCountArgs returns the exact frame-count argv ending in the raw path', () => {
+    const args = ffprobeAacFrameCountArgs('/a/in file.aac');
+    assert.deepStrictEqual(args, [
+        '-v',
+        'error',
+        '-select_streams',
+        'a:0',
+        '-count_frames',
+        '-show_entries',
+        'stream=nb_read_frames,sample_rate',
+        '-of',
+        'default=noprint_wrappers=1',
+        '/a/in file.aac',
+    ]);
+    // The path is a discrete, verbatim final element (no shell quoting).
+    assert.strictEqual(args[args.length - 1], '/a/in file.aac');
 });
 
 test('ffmpegDecodeToWavArgs returns the exact argv decoding to a WAV stream on stdout', () => {

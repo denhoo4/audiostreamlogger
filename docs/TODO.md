@@ -6,7 +6,7 @@ what was built and why, see [HISTORY.md](HISTORY.md); for how the system fits
 together see [ARCHITECTURE.md](ARCHITECTURE.md); for working style and preferences
 see [HANDOVER.md](HANDOVER.md).
 
-Last updated: 2026-10-23 (recorder finalise crash-loop hotfix merged to `main`: fail-safe finalise with missing-fragment-as-silence, process-level unhandled-rejection/uncaught-exception guards, stale `.finalize.*` boot sweep, and non-blocking boot resume — on top of the recorder-hour-resilience redesign).
+Last updated: 2026-10-23 (in-progress branch `aac-duration-live-hour`: FEAT-001 fixes the AAC finalised-hour duration regression — worker measures AAC length by frame count, the player forces a full-hour scrubber for past `.aac`, plus a one-off backfill for existing wrong rows; on top of the recorder finalise crash-loop hotfix and the recorder-hour-resilience redesign).
 
 ## Current state
 
@@ -262,6 +262,29 @@ peak-file model revert, the Refresh-button removal) lives in [HISTORY.md](HISTOR
       gaps; `.partN` still read, never written; AAC copy-remux when no gap;
       idempotent finalise). See
       `.agents/tasks/audiostreamlogger-recorder-finalise-hotfix-2026-10-23/verification.md`.
+- [~] **IN PROGRESS — AAC finalised-hour duration reported ~16x too long + can't
+      play the current hour (user, 2026-10-23; branch `aac-duration-live-hour`).**
+      The user saw every AAC hour report >1000 minutes and could only play PAST
+      hours. Root cause for the duration: a raw ADTS `.aac` has no container
+      duration, so `ffprobe format=duration` (and the browser's own estimate)
+      overshoots ~16x for 44.1 kHz AAC. FEAT-001 (DONE on the branch, NOT yet
+      merged, NO recorder change): the worker now measures AAC length by FRAME
+      COUNT (`nb_read_frames*1024/sample_rate`, AAC-LC) instead of
+      `format=duration` (mp3/opus/flac keep the cheap container probe); the player
+      forces the known full-hour length (`SECONDS_PER_HOUR=3600`) for a finalised
+      PAST `.aac` so the scrubber is correct instead of trusting the browser's ADTS
+      estimate; and a standalone, idempotent one-off
+      `src/worker/handlers/aac-duration-backfill.js` (run `node
+      handlers/aac-duration-backfill.js` inside a worker container with the real
+      `./data`+`./audio`) re-measures existing `.aac` rows whose `duration_seconds`
+      is NULL or implausible (>4000s) and leaves plausible/non-aac rows untouched.
+      Note: ffprobe emits `-show_entries` fields in its own internal order
+      (`sample_rate` before `nb_read_frames`), so the probe uses keyed output and
+      parses by name, not position. The "can't play the current (live) hour" part
+      of the report is a SEPARATE live-preview feature (not in FEAT-001). Verified
+      inside docker: worker `node --test` 82/82, frontend build + 152/152 vitest,
+      an ffmpeg frame-count smoke within 1s of a synthesized 83s AAC, and
+      worker/frontend image builds with the worker booting with no MODULE_NOT_FOUND.
 - [ ] **"Move station up" must not cross the country boundary.** In the admin
       streams list, the up/down arrows for a STATION should clamp at the top/bottom
       position WITHIN its country group (not jump into the adjacent country). The

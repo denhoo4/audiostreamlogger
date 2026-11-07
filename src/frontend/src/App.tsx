@@ -30,6 +30,7 @@ import {
   getSettings2,
   isLiveHour,
   liveHourElapsedSeconds,
+  SECONDS_PER_HOUR,
   type Codec,
   type Settings2,
   type Stream,
@@ -364,13 +365,20 @@ export default function App() {
 
       ws.reset();
 
+      // A finalised PAST .aac is raw ADTS: the browser cannot read a reliable
+      // media duration from it (it overshoots ~16x like ffprobe format=duration),
+      // so the scrubber/seek would be wrong. Supply the known full-hour length
+      // (3600 s) explicitly so WaveSurfer uses the true timeline. mp3/opus/flac
+      // carry a real container duration, so they keep their no-duration calls.
+      const pastDuration = ext === "aac" ? SECONDS_PER_HOUR : undefined;
+
       try {
         const res = await fetch(jsonUrl);
         if (!res.ok) throw new Error(`peaks ${res.status}`);
         const json = (await res.json()) as { data: number[][] };
-        ws.load(mediaUrl, json.data);
+        ws.load(mediaUrl, json.data, pastDuration);
       } catch {
-        ws.load(mediaUrl);
+        ws.load(mediaUrl, undefined, pastDuration);
       }
     },
     [ws],

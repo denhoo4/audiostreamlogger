@@ -931,6 +931,155 @@ describe("App live-hour explicit-duration seek (mobile seek fix)", () => {
   });
 });
 
+// --- FEAT-001: past .aac hour gets an explicit full-hour duration ----------
+
+const AAC_STREAM_ROWS: Stream[] = [
+  {
+    country: "NL",
+    name: "AAC Radio",
+    folder: "aac_radio",
+    url: "https://example.com/aac",
+    codec: "aac",
+  },
+  {
+    country: "BE",
+    name: "MP3 Radio",
+    folder: "mp3_radio",
+    url: "https://example.com/mp3",
+    codec: "mp3",
+  },
+];
+
+// Both streams expose a clearly PAST hour (2020-01-01 @ 09) so no live branch is
+// taken and the past-hour duration handling is what runs.
+const AAC_TREE: Settings2 = {
+  "AAC Radio": {
+    "2020": { "01": { "01": ["09"] } },
+  } as unknown as Settings2[string],
+  "MP3 Radio": {
+    "2020": { "01": { "01": ["09"] } },
+  } as unknown as Settings2[string],
+};
+
+/**
+ * Stub fetch so /api/settings returns the aac + mp3 streams, /api/settings2
+ * returns the NON-EMPTY AAC_TREE, the public config is empty, and the peaks JSON
+ * 200s with a tiny payload (so ws.load gets peaks + the explicit duration arg).
+ */
+function stubFetchForAac() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes("/api/app-config/public")) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({ title: "", default_stream_folder: "" }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      }
+      if (url.includes("/api/settings2")) {
+        return Promise.resolve(
+          new Response(JSON.stringify(AAC_TREE), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (url.includes("/api/settings")) {
+        return Promise.resolve(
+          new Response(JSON.stringify(AAC_STREAM_ROWS), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (url.includes(".json")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ data: [[0, 0]] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      return Promise.resolve(new Response("", { status: 404 }));
+    }),
+  );
+}
+
+describe("App past .aac explicit full-hour duration", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    loadedUrls.length = 0;
+    loadCalls.length = 0;
+  });
+
+  it("loads a past .aac hour with an explicit 3600 s duration so the scrubber is correct", async () => {
+    stubFetchForAac();
+    renderWithMantine(<App />);
+
+    const selector = document.getElementById(
+      "stringSelector",
+    ) as HTMLSelectElement;
+    // Wait for the stream list to populate, then explicitly select the AAC
+    // stream (preselection ordering is country-based and not relevant here).
+    await waitFor(() => {
+      expect(selector.options.length).toBeGreaterThan(0);
+    });
+    fireEvent.change(selector, { target: { value: "aac_radio" } });
+
+    await loadHour("2020-01-01", "09");
+    await waitFor(() => {
+      expect(
+        loadedUrls.some((u) =>
+          u.endsWith("/audio/aac_radio/aac_radio-2020-01-01-09.aac"),
+        ),
+      ).toBe(true);
+    });
+
+    const aacCall = loadCalls.find((c) =>
+      c.url.endsWith("/audio/aac_radio/aac_radio-2020-01-01-09.aac"),
+    );
+    expect(aacCall).toBeDefined();
+    // Peaks are still passed; the explicit full-hour duration (3600) overrides
+    // the browser's unreliable ADTS estimate.
+    expect(aacCall!.peaks).toEqual([[0, 0]]);
+    expect(aacCall!.duration).toBe(3600);
+  });
+
+  it("does NOT force a duration for a past non-aac hour", async () => {
+    stubFetchForAac();
+    renderWithMantine(<App />);
+
+    const selector = document.getElementById(
+      "stringSelector",
+    ) as HTMLSelectElement;
+    await waitFor(() => {
+      expect(selector.options.length).toBeGreaterThan(0);
+    });
+
+    // Select the mp3 stream, then load the same past hour.
+    fireEvent.change(selector, { target: { value: "mp3_radio" } });
+    await loadHour("2020-01-01", "09");
+    await waitFor(() => {
+      expect(
+        loadedUrls.some((u) =>
+          u.endsWith("/audio/mp3_radio/mp3_radio-2020-01-01-09.mp3"),
+        ),
+      ).toBe(true);
+    });
+
+    const mp3Call = loadCalls.find((c) =>
+      c.url.endsWith("/audio/mp3_radio/mp3_radio-2020-01-01-09.mp3"),
+    );
+    expect(mp3Call).toBeDefined();
+    expect(mp3Call!.duration).toBeUndefined();
+  });
+});
+
 describe("pickInitialFolder", () => {
   it("returns the default folder when it matches a loaded stream", () => {
     expect(pickInitialFolder(STREAM_ROWS, "radio_two")).toBe("radio_two");

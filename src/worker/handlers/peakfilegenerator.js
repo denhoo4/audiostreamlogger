@@ -23,6 +23,7 @@ const { execFileSync, spawnSync } = require('child_process');
 const {
     audiowaveformArgs,
     ffprobeDurationArgs,
+    ffprobeAacFrameCountArgs,
     ffmpegDecodeToWavArgs,
     audiowaveformStdinArgs,
 } = require('./exec-args');
@@ -55,13 +56,43 @@ function currentHourStamp(now) {
 }
 
 /**
- * Probe the duration (seconds) of an mp3 via ffprobe (the ffmpeg package in
- * Dockerfile.worker provides ffprobe). Factored out as an overridable export so
- * tests can stub it and avoid needing a real mp3 / ffprobe binary. Throws on a
- * probe/parse failure so the caller can log + count the per-file error.
+ * Probe the duration (seconds) of a recording via ffprobe (the ffmpeg package
+ * in Dockerfile.worker provides ffprobe). Factored out as an overridable export
+ * so tests can stub it and avoid needing a real audio file / ffprobe binary.
+ * Throws on a probe/parse failure so the caller can log + count the per-file
+ * error.
+ *
+ * FEAT-001: a raw ADTS .aac has no container duration, so the cheap
+ * `format=duration` probe overshoots ~16x for 44.1 kHz AAC. For '.aac' ONLY we
+ * instead count the decoded audio frames + sample rate and derive the real
+ * length as nb_read_frames * 1024 / sample_rate (AAC-LC = 1024 samples/frame).
+ * mp3/opus/flac keep the cheap container `format=duration` path unchanged. The
+ * extension is derived from the file path when not given, so legacy callers
+ * that pass only a path still get correct per-codec behaviour.
  */
-function probeDurationSeconds(mp3FilePath) {
-    const out = execFileSync('ffprobe', ffprobeDurationArgs(mp3FilePath));
+function probeDurationSeconds(audioFilePath, ext = path.extname(audioFilePath)) {
+    if (ext === '.aac') {
+        const out = String(execFileSync('ffprobe', ffprobeAacFrameCountArgs(audioFilePath)));
+        // KEYED output ("sample_rate=44100\nnb_read_frames=3576"): ffprobe emits
+        // the fields in its own internal order, so parse each by NAME rather
+        // than by position.
+        const pick = (key) => {
+            const m = out.match(new RegExp(`^${key}=(.+)$`, 'm'));
+            return m === null ? NaN : parseFloat(m[1]);
+        };
+        const frames = pick('nb_read_frames');
+        const sampleRate = pick('sample_rate');
+        // AAC-LC = 1024 PCM samples per frame.
+        const seconds = (frames * 1024) / sampleRate;
+        if (!Number.isFinite(seconds)) {
+            throw new Error(
+                `ffprobe returned a non-finite AAC duration (nb_read_frames=${frames}, sample_rate=${sampleRate})`
+            );
+        }
+        return seconds;
+    }
+
+    const out = execFileSync('ffprobe', ffprobeDurationArgs(audioFilePath));
     const seconds = parseFloat(String(out).trim());
     if (!Number.isFinite(seconds)) {
         throw new Error(`ffprobe returned a non-numeric duration: ${String(out).trim()}`);
@@ -191,7 +222,10 @@ function runPeakfileGenerator(db) {
                         return;
                     }
                     try {
-                        const durationSeconds = module.exports.probeDurationSeconds(mp3FilePath);
+                        const durationSeconds = module.exports.probeDurationSeconds(
+                            mp3FilePath,
+                            fileExt
+                        );
                         const sizeBytes = fs.statSync(mp3FilePath).size;
                         upsertRecordingMeta(db, {
                             folder,
